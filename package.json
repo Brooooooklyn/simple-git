@@ -19,6 +19,10 @@
       ]
     }
   },
+  "ava": {
+    "timeout": "3min",
+    "workerThreads": false
+  },
   "files": [
     "index.js",
     "index.d.ts"
