@@ -1,0 +1,21 @@
+[package]
+edition = "2021"
+name = "napi-rs_simple-git"
+version = "0.0.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dashmap = "5"
+git2 = {version = "0.14", default-features = false, features = ["vendored-libgit2"]}
+napi = {version = "2", default-features = false, features = ["napi3"]}
+napi-derive = "2"
+once_cell = "1"
+parking_lot = "0.12"
+
+[build-dependencies]
+napi-build = "1.2.1"
+
+[profile.release]
+lto = true

@@ -1,0 +1,21 @@
+{
+  "name": "@napi-rs/simple-git-linux-arm64-musl",
+  "version": "0.0.0",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "simple-git.linux-arm64-musl.node",
+  "files": [
+    "simple-git.linux-arm64-musl.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  },
+  "libc": [
+    "musl"
+  ]
+}
