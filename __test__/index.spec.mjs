@@ -12,15 +12,17 @@ test('Date should be equal with cli', (t) => {
   const workDir = join(__dirname, '..')
   let date
   try {
-    date = execSync('git log -1 --format=%cd --date=iso package.json', {
+    date = execSync('git log -1 --format=%cd --date=iso src/lib.rs', {
       cwd: workDir,
     }).toString('utf8')
   } catch (e) {
-    t.notThrows(() => getFileLatestModifiedDateByGit(workDir, 'package.json'))
+    t.notThrows(() =>
+      getFileLatestModifiedDateByGit(workDir, join('src', 'lib.rs'))
+    )
     return
   }
   t.is(
     new Date(date).valueOf(),
-    getFileLatestModifiedDateByGit(workDir, 'package.json')
+    getFileLatestModifiedDateByGit(workDir, join('src', 'lib.rs'))
   )
 })

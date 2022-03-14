@@ -30,5 +30,5 @@ Compared with the `exec` function, which gets the file's latest modified date by
 
 ```
 Child process took 1.9s
-@napi-rs/simple-git took 49ms
+@napi-rs/simple-git took 65ms
 ```

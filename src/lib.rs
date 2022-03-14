@@ -39,6 +39,20 @@ impl Task for GitDateTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = create_or_insert(&self.git_dir);
     get_file_modified_date(repo, &self.filepath)
+      .map_err(|err| {
+        napi::Error::new(
+          napi::Status::GenericFailure,
+          format!("libgit2 error: {}", err),
+        )
+      })
+      .and_then(|value| {
+        value.ok_or_else(|| {
+          napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("Failed to get commit for [{}]", &self.filepath),
+          )
+        })
+      })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -62,65 +76,65 @@ pub fn get_file_latest_modified_date_by_git(
 ) -> Result<i64, napi::Error> {
   let repo = create_or_insert(&git_dir);
   get_file_modified_date(repo, &filepath)
-}
-
-#[inline]
-fn get_file_modified_date(
-  repo: RefMut<String, git2::Repository>,
-  filepath: &str,
-) -> napi::Result<i64> {
-  repo
-    .revwalk()
     .map_err(|err| {
       napi::Error::new(
         napi::Status::GenericFailure,
-        format!("Failed to create revwalk: {}", err),
+        format!("libgit2 error: {}", err),
       )
     })
-    .and_then(|mut rev_walk| {
-      let head = repo.head().map_err(|err| {
+    .and_then(|value| {
+      value.ok_or_else(|| {
         napi::Error::new(
           napi::Status::GenericFailure,
-          format!("Failed to get git head: {}", err),
+          format!("Failed to get commit for [{}]", filepath),
         )
-      })?;
-      rev_walk
-        .push(head.target().ok_or_else(|| {
-          napi::Error::new(
-            napi::Status::InvalidArg,
-            format!("Git repo head point to non-object"),
-          )
-        })?)
-        .map_err(|err| {
-          napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to push git head to revwalk: {}", err),
-          )
-        })?;
-      rev_walk
-        .set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)
-        .map_err(|err| {
-          napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to set rev walk sort mode: {}", err),
-          )
-        })?;
-      rev_walk
-        .find_map(|oid| {
-          let oid = oid.ok()?;
-          let commit = repo.find_commit(oid).ok()?;
-          let tree = commit.tree().ok()?;
-          let mut this_commit = None;
-          if tree.get_path(&PathBuf::from(filepath)).is_ok() {
-            this_commit = Some(commit.time().seconds() * 1000);
-          }
-          this_commit
-        })
-        .ok_or_else(|| {
-          napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("Failed to find commit for [{}]", filepath),
-          )
-        })
+      })
     })
+}
+
+fn get_file_modified_date(
+  repo: RefMut<String, git2::Repository>,
+  filepath: &str,
+) -> Result<Option<i64>, git2::Error> {
+  let mut diff_options = git2::DiffOptions::new();
+  diff_options.disable_pathspec_match(false);
+  diff_options.pathspec(filepath);
+  let mut rev_walk = repo.revwalk()?;
+  rev_walk.push_head()?;
+  rev_walk.set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)?;
+  let path = PathBuf::from(filepath);
+  Ok(
+    rev_walk
+      .by_ref()
+      .filter_map(|oid| oid.ok())
+      .find_map(|oid| {
+        let commit = repo.find_commit(oid).ok()?;
+        match commit.parent_count() {
+          // commit with parent
+          1 => {
+            let tree = commit.tree().ok()?;
+            if let Ok(parent) = commit.parent(0) {
+              let parent_tree = parent.tree().ok()?;
+              if let Ok(diff) =
+                repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))
+              {
+                if diff.deltas().len() > 0 {
+                  return Some(commit.time().seconds() * 1000);
+                }
+              }
+            }
+          }
+          // root commit
+          0 => {
+            let tree = commit.tree().ok()?;
+            if tree.get_path(&path).is_ok() {
+              return Some(commit.time().seconds() * 1000);
+            }
+          }
+          // ignore merge commits
+          _ => {}
+        };
+        None
+      }),
+  )
 }

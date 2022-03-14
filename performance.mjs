@@ -4,10 +4,10 @@ import prettyMs from 'pretty-ms'
 
 import { getFileLatestModifiedDateByGitAsync } from './index.js'
 
-const startChildProcessTime = process.hrtime.bigint()
-
 const GIT_DIR = '.'
 const FILE = 'src/lib.rs'
+
+const startChildProcessTime = process.hrtime.bigint()
 
 await Promise.all(
   Array.from({ length: 1000 }).map(
@@ -27,7 +27,7 @@ await Promise.all(
             output += stdout
           }
         )
-        cp.on('exit', () => {
+        cp.on('close', () => {
           resolve(new Date(output))
         })
       })
