@@ -2,10 +2,12 @@ import { exec } from 'child_process'
 
 import prettyMs from 'pretty-ms'
 
-import { getFileLatestModifiedDateByGitAsync } from './index.js'
+import { Repository } from './index.js'
 
 const GIT_DIR = '.'
 const FILE = 'src/lib.rs'
+
+const repo = new Repository(GIT_DIR)
 
 const startChildProcessTime = process.hrtime.bigint()
 
@@ -45,9 +47,7 @@ const startLibGit2 = process.hrtime.bigint()
 
 await Promise.all(
   Array.from({ length: 1000 }).map(() =>
-    getFileLatestModifiedDateByGitAsync(GIT_DIR, FILE).then(
-      (timestamp) => new Date(timestamp)
-    )
+    repo.getFileLatestModifiedDateAsync(FILE)
   )
 )
 
