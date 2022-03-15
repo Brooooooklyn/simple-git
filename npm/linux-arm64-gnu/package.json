@@ -9,7 +9,8 @@
   ],
   "main": "simple-git.linux-arm64-gnu.node",
   "files": [
-    "simple-git.linux-arm64-gnu.node"
+    "simple-git.linux-arm64-gnu.node",
+    "install.js"
   ],
   "license": "MIT",
   "engines": {
@@ -17,5 +18,8 @@
   },
   "libc": [
     "glibc"
-  ]
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  }
 }

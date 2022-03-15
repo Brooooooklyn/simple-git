@@ -9,7 +9,8 @@
   ],
   "main": "simple-git.linux-arm64-musl.node",
   "files": [
-    "simple-git.linux-arm64-musl.node"
+    "simple-git.linux-arm64-musl.node",
+    "install.js"
   ],
   "license": "MIT",
   "engines": {
@@ -17,5 +18,8 @@
   },
   "libc": [
     "musl"
-  ]
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  }
 }

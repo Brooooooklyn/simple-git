@@ -236,7 +236,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { getFileLatestModifiedDateByGitAsync, getFileLatestModifiedDateByGit } = nativeBinding
+const { Reference, ReferenceType, Repository } = nativeBinding
 
-module.exports.getFileLatestModifiedDateByGitAsync = getFileLatestModifiedDateByGitAsync
-module.exports.getFileLatestModifiedDateByGit = getFileLatestModifiedDateByGit
+module.exports.Reference = Reference
+module.exports.ReferenceType = ReferenceType
+module.exports.Repository = Repository
