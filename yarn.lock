@@ -12,12 +12,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@napi-rs/cli@npm:^2.4.5":
-  version: 2.4.5
-  resolution: "@napi-rs/cli@npm:2.4.5"
+"@napi-rs/cli@npm:^2.5.0":
+  version: 2.5.0
+  resolution: "@napi-rs/cli@npm:2.5.0"
   bin:
     napi: scripts/index.js
-  checksum: fbabfac6323884a9186bf61df98d8150ed6653fc7529bf73e6a9455a608127cdbc4df85a21fca7ab373e798f57efe45ca3c641d0249d0025c4c94ec6b987501c
+  checksum: d8ebb57d57e71f384fb76e570f62fab5a87feaf642b7c8f1590135497dad275a3e817d8170cc575dc20ef0811d7cd0681c1e65f10e4d87e69b6b5bb7216c86da
   languageName: node
   linkType: hard
 
@@ -25,7 +25,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@napi-rs/simple-git@workspace:."
   dependencies:
-    "@napi-rs/cli": ^2.4.5
+    "@napi-rs/cli": ^2.5.0
     "@types/node": ^17.0.21
     ava: ^4.0.1
     pretty-ms: ^7.0.1
