@@ -3,23 +3,8 @@ use napi_derive::napi;
 
 #[napi]
 pub struct Reference {
-  pub(crate) repo: String,
-}
-
-macro_rules! get_inner {
-  ($repo:expr) => {
-    crate::repo::REPO_CACHE
-      .0
-      .get($repo)
-      .unwrap()
-      .head()
-      .map_err(|err| {
-        Error::new(
-          Status::GenericFailure,
-          format!("Failed to get git head {}", err),
-        )
-      })
-  };
+  pub(crate) inner:
+    napi::bindgen_prelude::SharedReference<crate::repo::Repository, git2::Reference<'static>>,
 }
 
 #[napi]
@@ -62,30 +47,30 @@ impl Reference {
   #[napi]
   /// Check if a reference is a local branch.
   pub fn is_branch(&self) -> Result<bool> {
-    Ok(get_inner!(&self.repo)?.is_branch())
+    Ok(self.inner.is_branch())
   }
 
   #[napi]
   /// Check if a reference is a note.
   pub fn is_note(&self) -> Result<bool> {
-    Ok(get_inner!(&self.repo)?.is_note())
+    Ok(self.inner.is_note())
   }
 
   #[napi]
   /// Check if a reference is a remote tracking branch
   pub fn is_remote(&self) -> Result<bool> {
-    Ok(get_inner!(&self.repo)?.is_remote())
+    Ok(self.inner.is_remote())
   }
 
   #[napi]
   /// Check if a reference is a tag
   pub fn is_tag(&self) -> Result<bool> {
-    Ok(get_inner!(&self.repo)?.is_tag())
+    Ok(self.inner.is_tag())
   }
 
   #[napi]
   pub fn kind(&self) -> Result<ReferenceType> {
-    match get_inner!(&self.repo)?.kind() {
+    match self.inner.kind() {
       Some(git2::ReferenceType::Symbolic) => Ok(ReferenceType::Symbolic),
       Some(git2::ReferenceType::Direct) => Ok(ReferenceType::Direct),
       _ => Ok(ReferenceType::Unknown),
@@ -97,7 +82,7 @@ impl Reference {
   ///
   /// Returns `None` if the name is not valid utf-8.
   pub fn name(&self) -> Option<String> {
-    get_inner!(&self.repo).ok()?.name().map(|s| s.to_string())
+    self.inner.name().map(|s| s.to_string())
   }
 
   #[napi]
@@ -108,10 +93,7 @@ impl Reference {
   ///
   /// Returns `None` if the shorthand is not valid utf-8.
   pub fn shorthand(&self) -> Option<String> {
-    get_inner!(&self.repo)
-      .ok()?
-      .shorthand()
-      .map(|s| s.to_string())
+    self.inner.shorthand().map(|s| s.to_string())
   }
 
   #[napi]
@@ -120,10 +102,7 @@ impl Reference {
   /// Only available if the reference is direct (i.e. an object id reference,
   /// not a symbolic one).
   pub fn target(&self) -> Option<String> {
-    get_inner!(&self.repo)
-      .ok()?
-      .target()
-      .map(|oid| oid.to_string())
+    self.inner.target().map(|oid| oid.to_string())
   }
 
   #[napi]
@@ -132,10 +111,7 @@ impl Reference {
   /// This peeled OID only applies to direct references that point to a hard
   /// Tag object: it is the result of peeling such Tag.
   pub fn target_peel(&self) -> Option<String> {
-    get_inner!(&self.repo)
-      .ok()?
-      .target_peel()
-      .map(|oid| oid.to_string())
+    self.inner.target_peel().map(|oid| oid.to_string())
   }
 
   #[napi]
@@ -144,9 +120,6 @@ impl Reference {
   /// May return `None` if the reference is either not symbolic or not a
   /// valid utf-8 string.
   pub fn symbolic_target(&self) -> Option<String> {
-    get_inner!(&self.repo)
-      .ok()?
-      .symbolic_target()
-      .map(|s| s.to_owned())
+    self.inner.symbolic_target().map(|s| s.to_owned())
   }
 }

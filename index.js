@@ -236,8 +236,13 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { Reference, ReferenceType, Repository } = nativeBinding
+const { Reference, ReferenceType, Direction, Remote, RemoteCallbacks, FetchOptions, RepositoryState, Repository } = nativeBinding
 
 module.exports.Reference = Reference
 module.exports.ReferenceType = ReferenceType
+module.exports.Direction = Direction
+module.exports.Remote = Remote
+module.exports.RemoteCallbacks = RemoteCallbacks
+module.exports.FetchOptions = FetchOptions
+module.exports.RepositoryState = RepositoryState
 module.exports.Repository = Repository

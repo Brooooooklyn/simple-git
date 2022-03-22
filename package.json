@@ -14,7 +14,6 @@
         "aarch64-pc-windows-msvc",
         "armv7-unknown-linux-gnueabihf",
         "x86_64-unknown-linux-musl",
-        "x86_64-unknown-freebsd",
         "armv7-linux-androideabi"
       ]
     }
@@ -29,7 +28,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@napi-rs/cli": "^2.4.5",
+    "@napi-rs/cli": "^2.5.0",
     "@types/node": "^17.0.21",
     "ava": "^4.0.1",
     "pretty-ms": "^7.0.1"

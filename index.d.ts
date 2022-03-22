@@ -11,6 +11,36 @@ export const enum ReferenceType {
   Symbolic = 1,
   Unknown = 2
 }
+/** An enumeration of the possible directions for a remote. */
+export const enum Direction {
+  /** Data will be fetched (read) from this remote. */
+  Fetch = 0,
+  /** Data will be pushed (written) to this remote. */
+  Push = 1
+}
+export interface Progress {
+  totalObjects: number
+  indexedObjects: number
+  receivedObjects: number
+  localObjects: number
+  totalDeltas: number
+  indexedDeltas: number
+  receivedBytes: number
+}
+export const enum RepositoryState {
+  Clean = 0,
+  Merge = 1,
+  Revert = 2,
+  RevertSequence = 3,
+  CherryPick = 4,
+  CherryPickSequence = 5,
+  Bisect = 6,
+  Rebase = 7,
+  RebaseInteractive = 8,
+  RebaseMerge = 9,
+  ApplyMailbox = 10,
+  ApplyMailboxOrRebase = 11
+}
 export class Reference {
   /**
    * Ensure the reference name is well-formed.
@@ -78,11 +108,112 @@ export class Reference {
    */
   symbolicTarget(): string | undefined | null
 }
+export class Remote {
+  /** Ensure the remote name is well-formed. */
+  static isValidName(name: string): boolean
+  /**
+   * Get the remote's name.
+   *
+   * Returns `None` if this remote has not yet been named or if the name is
+   * not valid utf-8
+   */
+  name(): string | undefined | null
+  /**
+   * Get the remote's url.
+   *
+   * Returns `None` if the url is not valid utf-8
+   */
+  url(): string | undefined | null
+  /**
+   * Get the remote's pushurl.
+   *
+   * Returns `None` if the pushurl is not valid utf-8
+   */
+  pushurl(): string | undefined | null
+  /**
+   * Get the remote's default branch.
+   *
+   * The remote (or more exactly its transport) must have connected to the
+   * remote repository. This default branch is available as soon as the
+   * connection to the remote is initiated and it remains available after
+   * disconnecting.
+   */
+  defaultBranch(): string
+  /** Open a connection to a remote. */
+  connect(dir: Direction): void
+  /** Check whether the remote is connected */
+  connected(): boolean
+  /** Disconnect from the remote */
+  disconnect(): void
+  /**
+   * Cancel the operation
+   *
+   * At certain points in its operation, the network code checks whether the
+   * operation has been cancelled and if so stops the operation.
+   */
+  stop(): void
+  fetch(refspecs: string[], cb?: (progress: Progress) => void): void
+}
+export class RemoteCallbacks {
+  constructor()
+  transferProgress(callback: (...args: any[]) => any): void
+  pushTransferProgress(callback: (a: number, b: number, c: number) => void): void
+}
+export class FetchOptions {
+  constructor()
+  remoteCallback(callback: RemoteCallbacks): void
+}
 export class Repository {
   static init(p: string): Repository
   constructor(gitDir: string)
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
+  isShallow(): boolean
+  isEmpty(): boolean
+  isWorktree(): boolean
+  /**
+   * Returns the path to the `.git` folder for normal repositories or the
+   * repository itself for bare repositories.
+   */
+  path(): string
+  /** Returns the current state of this repository */
+  state(): RepositoryState
+  /**
+   * Get the path of the working directory for this repository.
+   *
+   * If this repository is bare, then `None` is returned.
+   */
+  workdir(): string | undefined | null
+  /**
+   * Set the path to the working directory for this repository.
+   *
+   * If `update_link` is true, create/update the gitlink file in the workdir
+   * and set config "core.worktree" (if workdir is not the parent of the .git
+   * directory).
+   */
+  setWorkdir(path: string, updateGitlink: boolean): void
+  /**
+   * Get the currently active namespace for this repository.
+   *
+   * If there is no namespace, or the namespace is not a valid utf8 string,
+   * `None` is returned.
+   */
+  namespace(): string | undefined | null
+  /** Set the active namespace for this repository. */
+  setNamespace(namespace: string): void
+  /** Remove the active namespace for this repository. */
+  removeNamespace(): void
+  /**
+   * Retrieves the Git merge message.
+   * Remember to remove the message when finished.
+   */
+  message(): string
+  /** Remove the Git merge message. */
+  removeMessage(): void
+  /** List all remotes for a given repository */
+  remotes(): Array<string>
+  /** Get the information for a particular remote */
+  remote(name: string): Remote
   getFileLatestModifiedDate(filepath: string): number
   getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<unknown>
 }
