@@ -107,6 +107,25 @@ export class Reference {
    * valid utf-8 string.
    */
   symbolicTarget(): string | undefined | null
+  /**
+   * Resolve a symbolic reference to a direct reference.
+   *
+   * This method iteratively peels a symbolic reference until it resolves to
+   * a direct reference to an OID.
+   *
+   * If a direct reference is passed as an argument, a copy of that
+   * reference is returned.
+   */
+  resolve(): Reference
+  /**
+   * Rename an existing reference.
+   *
+   * This method works for both direct and symbolic references.
+   *
+   * If the force flag is not enabled, and there's already a reference with
+   * the given name, the renaming will fail.
+   */
+  rename(newName: string, force: boolean, msg: string): Reference
 }
 export class Remote {
   /** Ensure the remote name is well-formed. */
@@ -215,5 +234,5 @@ export class Repository {
   /** Get the information for a particular remote */
   remote(name: string): Remote
   getFileLatestModifiedDate(filepath: string): number
-  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<unknown>
+  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }

@@ -1,6 +1,8 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+use crate::error::IntoNapiError;
+
 #[napi]
 pub struct Reference {
   pub(crate) inner:
@@ -121,5 +123,36 @@ impl Reference {
   /// valid utf-8 string.
   pub fn symbolic_target(&self) -> Option<String> {
     self.inner.symbolic_target().map(|s| s.to_owned())
+  }
+
+  #[napi]
+  /// Resolve a symbolic reference to a direct reference.
+  ///
+  /// This method iteratively peels a symbolic reference until it resolves to
+  /// a direct reference to an OID.
+  ///
+  /// If a direct reference is passed as an argument, a copy of that
+  /// reference is returned.
+  pub fn resolve(&self) -> Result<Reference> {
+    let shared = self
+      .inner
+      .clone()
+      .share_with(|r| r.resolve().convert_without_message())?;
+    Ok(Self { inner: shared })
+  }
+
+  #[napi]
+  /// Rename an existing reference.
+  ///
+  /// This method works for both direct and symbolic references.
+  ///
+  /// If the force flag is not enabled, and there's already a reference with
+  /// the given name, the renaming will fail.
+  pub fn rename(&mut self, new_name: String, force: bool, msg: String) -> Result<Reference> {
+    let inner = self
+      .inner
+      .clone()
+      .share_with(|r| r.rename(&new_name, force, &msg).convert_without_message())?;
+    Ok(Self { inner })
   }
 }

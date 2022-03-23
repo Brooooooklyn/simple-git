@@ -70,6 +70,29 @@ impl From<git2::RepositoryState> for RepositoryState {
   }
 }
 
+pub struct GitDateTask {
+  repo: napi::bindgen_prelude::Reference<Repository>,
+  filepath: String,
+}
+
+#[napi]
+impl Task for GitDateTask {
+  type Output = i64;
+  type JsValue = i64;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    get_file_modified_date(&self.repo.inner, &self.filepath)
+      .convert_without_message()
+      .and_then(|value| {
+        value.expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
+      })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
 #[napi]
 pub struct Repository {
   pub(crate) inner: git2::Repository,
@@ -262,29 +285,6 @@ impl Repository {
       },
       signal,
     ))
-  }
-}
-
-pub struct GitDateTask {
-  repo: napi::bindgen_prelude::Reference<Repository>,
-  filepath: String,
-}
-
-#[napi]
-impl Task for GitDateTask {
-  type Output = i64;
-  type JsValue = i64;
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_modified_date(&self.repo.inner, &self.filepath)
-      .convert_without_message()
-      .and_then(|value| {
-        value.expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
-      })
-  }
-
-  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output)
   }
 }
 
