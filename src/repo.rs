@@ -128,6 +128,7 @@ pub struct Repository {
 impl Repository {
   #[napi]
   pub fn init(p: String) -> Result<Repository> {
+    INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
     Ok(Self {
       inner: git2::Repository::init(&p).map_err(|err| {
         Error::new(
@@ -170,6 +171,7 @@ impl Repository {
     flags: RepositoryOpenFlags,
     ceiling_dirs: Vec<String>,
   ) -> Result<Repository> {
+    INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
     Ok(Self {
       inner: git2::Repository::open_ext(path, flags.into(), ceiling_dirs)
         .convert("Failed to open git repo")?,
@@ -182,6 +184,7 @@ impl Repository {
   /// This starts at `path` and looks up the filesystem hierarchy
   /// until it finds a repository.
   pub fn discover(path: String) -> Result<Repository> {
+    INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
     Ok(Self {
       inner: git2::Repository::discover(&path)
         .convert(format!("Discover git repo from [{}] failed", path))?,
