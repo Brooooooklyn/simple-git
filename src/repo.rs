@@ -70,6 +70,32 @@ impl From<git2::RepositoryState> for RepositoryState {
   }
 }
 
+#[napi]
+pub enum RepositoryOpenFlags {
+  /// Only open the specified path; don't walk upward searching.
+  NoSearch,
+  /// Search across filesystem boundaries.
+  CrossFS,
+  /// Force opening as bare repository, and defer loading its config.
+  Bare,
+  /// Don't try appending `/.git` to the specified repository path.
+  NoDotGit,
+  /// Respect environment variables like `$GIT_DIR`.
+  FromEnv,
+}
+
+impl From<RepositoryOpenFlags> for git2::RepositoryOpenFlags {
+  fn from(val: RepositoryOpenFlags) -> Self {
+    match val {
+      RepositoryOpenFlags::NoSearch => git2::RepositoryOpenFlags::NO_SEARCH,
+      RepositoryOpenFlags::CrossFS => git2::RepositoryOpenFlags::CROSS_FS,
+      RepositoryOpenFlags::Bare => git2::RepositoryOpenFlags::BARE,
+      RepositoryOpenFlags::NoDotGit => git2::RepositoryOpenFlags::NO_DOTGIT,
+      RepositoryOpenFlags::FromEnv => git2::RepositoryOpenFlags::FROM_ENV,
+    }
+  }
+}
+
 pub struct GitDateTask {
   repo: napi::bindgen_prelude::Reference<Repository>,
   filepath: String,
@@ -109,6 +135,56 @@ impl Repository {
           format!("Failed to open git repo: [{}], reason: {}", p, err,),
         )
       })?,
+    })
+  }
+
+  #[napi]
+  /// Find and open an existing repository, with additional options.
+  ///
+  /// If flags contains REPOSITORY_OPEN_NO_SEARCH, the path must point
+  /// directly to a repository; otherwise, this may point to a subdirectory
+  /// of a repository, and `open_ext` will search up through parent
+  /// directories.
+  ///
+  /// If flags contains REPOSITORY_OPEN_CROSS_FS, the search through parent
+  /// directories will not cross a filesystem boundary (detected when the
+  /// stat st_dev field changes).
+  ///
+  /// If flags contains REPOSITORY_OPEN_BARE, force opening the repository as
+  /// bare even if it isn't, ignoring any working directory, and defer
+  /// loading the repository configuration for performance.
+  ///
+  /// If flags contains REPOSITORY_OPEN_NO_DOTGIT, don't try appending
+  /// `/.git` to `path`.
+  ///
+  /// If flags contains REPOSITORY_OPEN_FROM_ENV, `open_ext` will ignore
+  /// other flags and `ceiling_dirs`, and respect the same environment
+  /// variables git does. Note, however, that `path` overrides `$GIT_DIR`; to
+  /// respect `$GIT_DIR` as well, use `open_from_env`.
+  ///
+  /// ceiling_dirs specifies a list of paths that the search through parent
+  /// directories will stop before entering.  Use the functions in std::env
+  /// to construct or manipulate such a path list.
+  pub fn open_ext(
+    path: String,
+    flags: RepositoryOpenFlags,
+    ceiling_dirs: Vec<String>,
+  ) -> Result<Repository> {
+    Ok(Self {
+      inner: git2::Repository::open_ext(path, flags.into(), ceiling_dirs)
+        .convert("Failed to open git repo")?,
+    })
+  }
+
+  #[napi]
+  /// Attempt to open an already-existing repository at or above `path`
+  ///
+  /// This starts at `path` and looks up the filesystem hierarchy
+  /// until it finds a repository.
+  pub fn discover(path: String) -> Result<Repository> {
+    Ok(Self {
+      inner: git2::Repository::discover(&path)
+        .convert(format!("Discover git repo from [{}] failed", path))?,
     })
   }
 
