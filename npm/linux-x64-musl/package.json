@@ -1,6 +1,6 @@
 {
   "name": "@napi-rs/simple-git-linux-x64-musl",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "os": [
     "linux"
   ],
