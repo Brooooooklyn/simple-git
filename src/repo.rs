@@ -2,14 +2,16 @@ use std::borrow::Borrow;
 use std::path::{Path, PathBuf};
 
 use napi::{
-  bindgen_prelude::{AbortSignal, AsyncTask, Env, Error, Result, Status, Task, ToNapiValue},
+  bindgen_prelude::{
+    AbortSignal, AsyncTask, Env, Error, Reference, Result, Status, Task, ToNapiValue,
+  },
   JsString,
 };
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 
 use crate::error::{IntoNapiError, NotNullError};
-use crate::reference::Reference;
+use crate::reference;
 use crate::remote::Remote;
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
@@ -206,9 +208,9 @@ impl Repository {
 
   #[napi]
   /// Retrieve and resolve the reference pointed at by HEAD.
-  pub fn head(&self) -> Result<Reference> {
-    Ok(crate::reference::Reference {
-      inner: self.create_reference()?.share_with(|repo| {
+  pub fn head(&self, self_ref: Reference<Repository>, env: Env) -> Result<reference::Reference> {
+    Ok(reference::Reference {
+      inner: self_ref.share_with(env, |repo| {
         repo
           .inner
           .head()
@@ -333,9 +335,9 @@ impl Repository {
 
   #[napi]
   /// Get the information for a particular remote
-  pub fn remote(&self, name: String) -> Result<Remote> {
+  pub fn remote(&self, self_ref: Reference<Repository>, env: Env, name: String) -> Result<Remote> {
     Ok(Remote {
-      inner: self.create_reference()?.share_with(move |repo| {
+      inner: self_ref.share_with(env, move |repo| {
         repo
           .inner
           .find_remote(&name)
@@ -354,12 +356,13 @@ impl Repository {
   #[napi]
   pub fn get_file_latest_modified_date_async(
     &self,
+    self_ref: Reference<Repository>,
     filepath: String,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitDateTask>> {
     Ok(AsyncTask::with_optional_signal(
       GitDateTask {
-        repo: self.create_reference()?,
+        repo: self_ref,
         filepath,
       },
       signal,
