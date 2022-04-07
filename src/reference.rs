@@ -133,11 +133,11 @@ impl Reference {
   ///
   /// If a direct reference is passed as an argument, a copy of that
   /// reference is returned.
-  pub fn resolve(&self) -> Result<Reference> {
+  pub fn resolve(&self, env: Env) -> Result<Reference> {
     let shared = self
       .inner
-      .clone()
-      .share_with(|r| r.resolve().convert_without_message())?;
+      .clone(env)?
+      .share_with(env, |r| r.resolve().convert_without_message())?;
     Ok(Self { inner: shared })
   }
 
@@ -148,11 +148,16 @@ impl Reference {
   ///
   /// If the force flag is not enabled, and there's already a reference with
   /// the given name, the renaming will fail.
-  pub fn rename(&mut self, new_name: String, force: bool, msg: String) -> Result<Reference> {
-    let inner = self
-      .inner
-      .clone()
-      .share_with(|r| r.rename(&new_name, force, &msg).convert_without_message())?;
+  pub fn rename(
+    &mut self,
+    env: Env,
+    new_name: String,
+    force: bool,
+    msg: String,
+  ) -> Result<Reference> {
+    let inner = self.inner.clone(env)?.share_with(env, |r| {
+      r.rename(&new_name, force, &msg).convert_without_message()
+    })?;
     Ok(Self { inner })
   }
 }
