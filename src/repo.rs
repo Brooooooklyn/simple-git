@@ -10,9 +10,11 @@ use napi::{
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 
+use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
 use crate::reference;
 use crate::remote::Remote;
+use crate::tree::{Tree, TreeParent};
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
   // Handle the `failed to stat '/root/.gitconfig'; class=Config (7)` Error
@@ -342,6 +344,79 @@ impl Repository {
           .inner
           .find_remote(&name)
           .convert(format!("Failed to get remote [{}]", &name))
+      })?,
+    })
+  }
+
+  #[napi]
+  /// Lookup a reference to one of the objects in a repository.
+  pub fn find_tree(&self, oid: String, self_ref: Reference<Repository>, env: Env) -> Result<Tree> {
+    Ok(Tree {
+      inner: TreeParent::Repository(self_ref.share_with(env, |repo| {
+        repo
+          .inner
+          .find_tree(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{}]", oid))?)
+          .convert(format!("Find tree from OID [{}] failed", oid))
+      })?),
+    })
+  }
+
+  #[napi]
+  /// Create a diff between a tree and the working directory.
+  ///
+  /// The tree you provide will be used for the "old_file" side of the delta,
+  /// and the working directory will be used for the "new_file" side.
+  ///
+  /// This is not the same as `git diff <treeish>` or `git diff-index
+  /// <treeish>`.  Those commands use information from the index, whereas this
+  /// function strictly returns the differences between the tree and the files
+  /// in the working directory, regardless of the state of the index.  Use
+  /// `tree_to_workdir_with_index` to emulate those commands.
+  ///
+  /// To see difference between this and `tree_to_workdir_with_index`,
+  /// consider the example of a staged file deletion where the file has then
+  /// been put back into the working dir and further modified.  The
+  /// tree-to-workdir diff for that file is 'modified', but `git diff` would
+  /// show status 'deleted' since there is a staged delete.
+  ///
+  /// If `None` is passed for `tree`, then an empty tree is used.
+  pub fn diff_tree_to_workdir(
+    &self,
+    env: Env,
+    self_reference: Reference<Repository>,
+    old_tree: Option<&Tree>,
+  ) -> Result<Diff> {
+    let mut diff_options = git2::DiffOptions::default();
+    Ok(Diff {
+      inner: self_reference.share_with(env, |repo| {
+        repo
+          .inner
+          .diff_tree_to_workdir(old_tree.map(|t| t.inner()), Some(&mut diff_options))
+          .convert_without_message()
+      })?,
+    })
+  }
+
+  #[napi]
+  /// Create a diff between a tree and the working directory using index data
+  /// to account for staged deletes, tracked files, etc.
+  ///
+  /// This emulates `git diff <tree>` by diffing the tree to the index and
+  /// the index to the working directory and blending the results into a
+  /// single diff that includes staged deleted, etc.
+  pub fn diff_tree_to_workdir_with_index(
+    &self,
+    env: Env,
+    self_reference: Reference<Repository>,
+    old_tree: Option<&Tree>,
+  ) -> Result<Diff> {
+    let mut diff_options = git2::DiffOptions::default();
+    Ok(Diff {
+      inner: self_reference.share_with(env, |repo| {
+        repo
+          .inner
+          .diff_tree_to_workdir_with_index(old_tree.map(|t| t.inner()), Some(&mut diff_options))
+          .convert_without_message()
       })?,
     })
   }

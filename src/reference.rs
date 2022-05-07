@@ -2,6 +2,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
+use crate::tree::{Tree, TreeParent};
 
 #[napi]
 pub struct Reference {
@@ -114,6 +115,23 @@ impl Reference {
   /// Tag object: it is the result of peeling such Tag.
   pub fn target_peel(&self) -> Option<String> {
     self.inner.target_peel().map(|oid| oid.to_string())
+  }
+
+  #[napi]
+  /// Peel a reference to a tree
+  ///
+  /// This method recursively peels the reference until it reaches
+  /// a tree.
+  pub fn peel_to_tree(
+    &self,
+    env: Env,
+    self_ref: napi::bindgen_prelude::Reference<Reference>,
+  ) -> Result<Tree> {
+    Ok(Tree {
+      inner: TreeParent::Reference(self_ref.share_with(env, |reference| {
+        reference.inner.peel_to_tree().convert_without_message()
+      })?),
+    })
   }
 
   #[napi]
