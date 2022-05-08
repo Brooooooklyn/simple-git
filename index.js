@@ -236,8 +236,13 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { Reference, ReferenceType, Direction, Remote, RemoteCallbacks, FetchOptions, RepositoryState, RepositoryOpenFlags, Repository } = nativeBinding
+const { Deltas, DiffDelta, Delta, DiffFile, Diff, Reference, ReferenceType, Direction, Remote, RemoteCallbacks, FetchOptions, RepositoryState, RepositoryOpenFlags, Repository, Tree } = nativeBinding
 
+module.exports.Deltas = Deltas
+module.exports.DiffDelta = DiffDelta
+module.exports.Delta = Delta
+module.exports.DiffFile = DiffFile
+module.exports.Diff = Diff
 module.exports.Reference = Reference
 module.exports.ReferenceType = ReferenceType
 module.exports.Direction = Direction
@@ -247,3 +252,4 @@ module.exports.FetchOptions = FetchOptions
 module.exports.RepositoryState = RepositoryState
 module.exports.RepositoryOpenFlags = RepositoryOpenFlags
 module.exports.Repository = Repository
+module.exports.Tree = Tree

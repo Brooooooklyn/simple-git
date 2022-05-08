@@ -33,13 +33,14 @@ jobs:
             target: x86_64-pc-windows-msvc
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine-zig
+            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             build: |-
               set -e &&
-              apk add perl &&
+              apt-get update &&
+              apt-get install perl -y &&
               rustup target add x86_64-unknown-linux-gnu &&
-              yarn build --target x86_64-unknown-linux-gnu --zig --zig-abi-suffix 2.12 &&
-              llvm-strip -x *.node
+              yarn build --target x86_64-unknown-linux-gnu &&
+              strip *.node
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
@@ -126,19 +127,17 @@ jobs:
           toolchain: stable
           target: ${{ matrix.settings.target }}
       - name: Cache cargo registry
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
-          path: ~/.cargo/registry
-          key: ${{ matrix.settings.target }}-cargo-registry
-      - name: Cache cargo index
-        uses: actions/cache@v2
-        with:
-          path: ~/.cargo/git
-          key: ${{ matrix.settings.target }}-cargo-index
+          path: |
+             ~/.cargo/registry
+             ~/.cargo/git
+             target
+          key: ${{ matrix.settings.target }}-cargo-cache
       - name: Cache NPM dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
-          path: node_modules
+          path: .yarn/cache
           key: npm-cache-build-${{ matrix.settings.target }}-node@16
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
@@ -192,10 +191,10 @@ jobs:
           check-latest: true
           cache: yarn
       - name: Cache NPM dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
-          path: node_modules
-          key: npm-cache-test-${{ matrix.settings.target }}-${{ matrix.node }}-${{ hashFiles('yarn.lock') }}
+          path: .yarn/cache
+          key: npm-cache-test-${{ matrix.settings.target }}-${{ matrix.node }}
       - name: Install dependencies
         run: yarn install --mode=skip-build --immutable
       - name: Download artifacts
@@ -231,10 +230,10 @@ jobs:
           check-latest: true
           cache: yarn
       - name: Cache NPM dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
-          path: node_modules
-          key: npm-cache-test-linux-x64-gnu-${{ matrix.node }}-${{ hashFiles('yarn.lock') }}
+          path: .yarn/cache
+          key: npm-cache-test-linux-x64-gnu-${{ matrix.node }}
       - name: Install dependencies
         run: yarn install --mode=skip-build --immutable
       - name: Download artifacts
@@ -262,12 +261,10 @@ jobs:
           check-latest: true
           cache: yarn
       - name: Cache NPM dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
-          path: node_modules
-          key: npm-cache-ubuntu-latest-${{ hashFiles('yarn.lock') }}
-          restore-keys: |
-            npm-cache-
+          path: .yarn/cache
+          key: npm-cache-ubuntu-latest-node@16-publish
       - name: Install dependencies
         run: yarn install --mode=skip-build --immutable
       - name: Download all artifacts
