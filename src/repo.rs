@@ -14,6 +14,7 @@ use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
 use crate::reference;
 use crate::remote::Remote;
+use crate::signature::Signature;
 use crate::tree::{Tree, TreeParent};
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
@@ -419,6 +420,37 @@ impl Repository {
           .convert_without_message()
       })?,
     })
+  }
+
+  #[napi]
+  /// Create new commit in the repository
+  ///
+  /// If the `update_ref` is not `None`, name of the reference that will be
+  /// updated to point to this commit. If the reference is not direct, it will
+  /// be resolved to a direct reference. Use "HEAD" to update the HEAD of the
+  /// current branch and make it point to this commit. If the reference
+  /// doesn't exist yet, it will be created. If it does exist, the first
+  /// parent must be the tip of this branch.
+  pub fn commit(
+    &self,
+    update_ref: Option<String>,
+    author: &Signature,
+    committer: &Signature,
+    message: String,
+    tree: &Tree,
+  ) -> Result<String> {
+    self
+      .inner
+      .commit(
+        update_ref.as_deref(),
+        author.as_ref(),
+        committer.as_ref(),
+        message.as_str(),
+        tree.as_ref(),
+        &[],
+      )
+      .convert_without_message()
+      .map(|oid| oid.to_string())
   }
 
   #[napi]
