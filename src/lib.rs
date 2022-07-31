@@ -6,4 +6,5 @@ mod error;
 pub mod reference;
 pub mod remote;
 pub mod repo;
+pub mod signature;
 pub mod tree;

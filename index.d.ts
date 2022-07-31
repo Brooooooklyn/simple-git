@@ -401,8 +401,61 @@ export class Repository {
    * single diff that includes staged deleted, etc.
    */
   diffTreeToWorkdirWithIndex(oldTree?: Tree | undefined | null): Diff
+  /**
+   * Create new commit in the repository
+   *
+   * If the `update_ref` is not `None`, name of the reference that will be
+   * updated to point to this commit. If the reference is not direct, it will
+   * be resolved to a direct reference. Use "HEAD" to update the HEAD of the
+   * current branch and make it point to this commit. If the reference
+   * doesn't exist yet, it will be created. If it does exist, the first
+   * parent must be the tip of this branch.
+   */
+  commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree): string
   getFileLatestModifiedDate(filepath: string): number
   getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+}
+/**
+ * A Signature is used to indicate authorship of various actions throughout the
+ * library.
+ *
+ * Signatures contain a name, email, and timestamp. All fields can be specified
+ * with `new` while the `now` constructor omits the timestamp. The
+ * [`Repository::signature`] method can be used to create a default signature
+ * with name and email values read from the configuration.
+ *
+ * [`Repository::signature`]: struct.Repository.html#method.signature
+ */
+export class Signature {
+  /**
+   * Create a new action signature with a timestamp of 'now'.
+   *
+   * See `new` for more information
+   */
+  static now(name: string, email: string): Signature
+  /**
+   * Create a new action signature.
+   *
+   * The `time` specified is in seconds since the epoch, and the `offset` is
+   * the time zone offset in minutes.
+   *
+   * Returns error if either `name` or `email` contain angle brackets.
+   */
+  constructor(name: string, email: string, time: number)
+  /**
+   * Gets the name on the signature.
+   *
+   * Returns `None` if the name is not valid utf-8
+   */
+  name(): string | null
+  /**
+   * Gets the email on the signature.
+   *
+   * Returns `None` if the email is not valid utf-8
+   */
+  email(): string | null
+  /** Return the time, in seconds, from epoch */
+  when(): number
 }
 export class Tree {
   /** Get the id (SHA1) of a repository object */

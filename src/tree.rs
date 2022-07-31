@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
@@ -24,5 +26,14 @@ impl Tree {
   /// Get the id (SHA1) of a repository object
   pub fn id(&self) -> String {
     self.inner().id().to_string()
+  }
+}
+
+impl<'a> AsRef<git2::Tree<'a>> for Tree {
+  fn as_ref(&self) -> &git2::Tree<'a> {
+    match self.inner {
+      TreeParent::Repository(ref parent) => parent.deref(),
+      TreeParent::Reference(ref parent) => parent.deref(),
+    }
   }
 }
