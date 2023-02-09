@@ -80,7 +80,7 @@ impl Remote {
         b.as_str().map(|name| name.to_owned()).ok_or_else(|| {
           Error::new(
             Status::GenericFailure,
-            format!("Default branch name contains non-utf-8 characters"),
+            "Default branch name contains non-utf-8 characters".to_string(),
           )
         })
       })
@@ -156,6 +156,7 @@ pub struct RemoteCallbacks {
 #[napi]
 impl RemoteCallbacks {
   #[napi(constructor)]
+  #[allow(clippy::new_without_default)]
   pub fn new() -> RemoteCallbacks {
     RemoteCallbacks {
       inner: git2::RemoteCallbacks::new(),
@@ -194,6 +195,7 @@ pub struct FetchOptions {
 #[napi]
 impl FetchOptions {
   #[napi(constructor)]
+  #[allow(clippy::new_without_default)]
   pub fn new() -> FetchOptions {
     FetchOptions {
       inner: git2::FetchOptions::new(),

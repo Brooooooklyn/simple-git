@@ -24,7 +24,7 @@ impl<T> IntoNapiError for Result<T, git2::Error> {
     self.map_err(|err| {
       napi::Error::new(
         napi::Status::GenericFailure,
-        format!("libgit2 error: {}", err),
+        format!("libgit2 error: {err}"),
       )
     })
   }

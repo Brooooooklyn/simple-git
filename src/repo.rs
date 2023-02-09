@@ -138,7 +138,7 @@ impl Repository {
       inner: git2::Repository::init(&p).map_err(|err| {
         Error::new(
           Status::GenericFailure,
-          format!("Failed to open git repo: [{}], reason: {}", p, err,),
+          format!("Failed to open git repo: [{p}], reason: {err}",),
         )
       })?,
     })
@@ -192,7 +192,7 @@ impl Repository {
     INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
     Ok(Self {
       inner: git2::Repository::discover(&path)
-        .convert(format!("Discover git repo from [{}] failed", path))?,
+        .convert(format!("Discover git repo from [{path}] failed"))?,
     })
   }
 
@@ -203,7 +203,7 @@ impl Repository {
       inner: git2::Repository::open(&git_dir).map_err(|err| {
         Error::new(
           Status::GenericFailure,
-          format!("Failed to open git repo: [{}], reason: {}", git_dir, err,),
+          format!("Failed to open git repo: [{git_dir}], reason: {err}",),
         )
       })?,
     })
@@ -329,7 +329,7 @@ impl Repository {
       .map(|remotes| {
         remotes
           .into_iter()
-          .filter_map(|name| name)
+          .flatten()
           .map(|name| name.to_owned())
           .collect()
       })
@@ -356,8 +356,8 @@ impl Repository {
       inner: TreeParent::Repository(self_ref.share_with(env, |repo| {
         repo
           .inner
-          .find_tree(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{}]", oid))?)
-          .convert(format!("Find tree from OID [{}] failed", oid))
+          .find_tree(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?)
+          .convert(format!("Find tree from OID [{oid}] failed"))
       })?),
     })
   }
@@ -457,7 +457,7 @@ impl Repository {
   pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<i64> {
     get_file_modified_date(&self.inner, &filepath)
       .convert_without_message()
-      .and_then(|value| value.expect_not_null(format!("Failed to get commit for [{}]", filepath)))
+      .and_then(|value| value.expect_not_null(format!("Failed to get commit for [{filepath}]")))
   }
 
   #[napi]
