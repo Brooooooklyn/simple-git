@@ -1,12 +1,7 @@
 use std::borrow::Borrow;
 use std::path::{Path, PathBuf};
 
-use napi::{
-  bindgen_prelude::{
-    AbortSignal, AsyncTask, Env, Error, Reference, Result, Status, Task, ToNapiValue,
-  },
-  JsString,
-};
+use napi::{bindgen_prelude::*, JsString};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 
