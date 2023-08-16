@@ -1,4 +1,4 @@
-use napi::bindgen_prelude::{Generator, SharedReference, ToNapiValue};
+use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 #[napi(iterator)]

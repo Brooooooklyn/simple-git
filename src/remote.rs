@@ -1,9 +1,6 @@
 use std::mem;
 
-use napi::{
-  bindgen_prelude::{Result, SharedReference, ToNapiValue},
-  Env, Error, JsFunction, Status,
-};
+use napi::{bindgen_prelude::*, Env, Error, JsFunction, Status};
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
