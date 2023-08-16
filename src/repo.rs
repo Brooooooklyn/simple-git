@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::path::{Path, PathBuf};
 
 use napi::{bindgen_prelude::*, JsString};
@@ -522,6 +521,8 @@ fn get_file_modified_date(
 fn path_to_javascript_string(env: &Env, p: &Path) -> Result<JsString> {
   #[cfg(unix)]
   {
+    use std::borrow::Borrow;
+
     let path = p.to_string_lossy();
     env.create_string(path.borrow())
   }
