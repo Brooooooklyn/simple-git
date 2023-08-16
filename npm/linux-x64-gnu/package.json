@@ -16,10 +16,10 @@
   "engines": {
     "node": ">= 10"
   },
+  "repository": {
+    "url": "https://github.com/Brooooooklyn/simple-git"
+  },
   "libc": [
     "glibc"
-  ],
-  "scripts": {
-    "postinstall": "node install.js"
-  }
+  ]
 }

@@ -3,6 +3,9 @@
   "version": "0.1.8",
   "main": "index.js",
   "types": "./index.d.ts",
+  "repository": {
+    "url": "https://github.com/Brooooooklyn/simple-git"
+  },
   "napi": {
     "name": "simple-git",
     "triples": {
