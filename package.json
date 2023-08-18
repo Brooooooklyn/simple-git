@@ -47,5 +47,5 @@
     "test": "ava",
     "version": "napi version"
   },
-  "packageManager": "yarn@3.6.1"
+  "packageManager": "yarn@3.6.2"
 }
