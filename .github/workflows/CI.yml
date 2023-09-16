@@ -77,7 +77,7 @@ jobs:
             target: armv7-unknown-linux-gnueabihf
             setup: |
               sudo apt-get update
-              sudo apt-get install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf -y
+              sudo apt-get install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libatomic1-armhf-cross -y
             build: |
               yarn build --target armv7-unknown-linux-gnueabihf --zig --zig-link-only
               arm-linux-gnueabihf-strip *.node
