@@ -96,11 +96,11 @@ __metadata:
   linkType: hard
 
 "@types/node@npm:^20.8.10":
-  version: 20.8.10
-  resolution: "@types/node@npm:20.8.10"
+  version: 20.10.1
+  resolution: "@types/node@npm:20.10.1"
   dependencies:
     undici-types: "npm:~5.26.4"
-  checksum: caaa3ae9294f1bfdacb029a916c64af63cbcea613a52f53ea86f93c91779859af177b2b68113ef835194519f5e76cadda08559929b68297f1a8a568c207f9f66
+  checksum: c1b4b5a33f57bd39a8a0d074f27e3e370fccc6cda6a1c46caa48cc4c1687677cfdbffd9dc93fc803c6d355696dd9c73cd6f6507c749f61f83beb7326aec077d2
   languageName: node
   linkType: hard
 
@@ -324,22 +324,22 @@ __metadata:
   linkType: hard
 
 "cacache@npm:^18.0.0":
-  version: 18.0.0
-  resolution: "cacache@npm:18.0.0"
+  version: 18.0.1
+  resolution: "cacache@npm:18.0.1"
   dependencies:
     "@npmcli/fs": "npm:^3.1.0"
     fs-minipass: "npm:^3.0.0"
     glob: "npm:^10.2.2"
     lru-cache: "npm:^10.0.1"
     minipass: "npm:^7.0.3"
-    minipass-collect: "npm:^1.0.2"
+    minipass-collect: "npm:^2.0.1"
     minipass-flush: "npm:^1.0.5"
     minipass-pipeline: "npm:^1.2.4"
     p-map: "npm:^4.0.0"
     ssri: "npm:^10.0.0"
     tar: "npm:^6.1.11"
     unique-filename: "npm:^3.0.0"
-  checksum: e359823778d712ad365740cef3f488d4f74c62cc79be5935896d9597a7d81033e50c54c15898fa9cc018620879307ab30d1dddc476ae705bfd5b29c145ae6938
+  checksum: a31666805a80a8b16ad3f85faf66750275a9175a3480896f4f6d31b5d53ef190484fabd71bdb6d2ea5603c717fbef09f4af03d6a65b525c8ef0afaa44c361866
   languageName: node
   linkType: hard
 
@@ -858,9 +858,9 @@ __metadata:
   linkType: hard
 
 "ignore@npm:^5.2.4":
-  version: 5.2.4
-  resolution: "ignore@npm:5.2.4"
-  checksum: 7c7cd90edd9fea6e037f9b9da4b01bf0a86b198ce78345f9bbd983929d68ff14830be31111edc5d70c264921f4962404d75b7262b4d9cc3bc12381eccbd03096
+  version: 5.3.0
+  resolution: "ignore@npm:5.3.0"
+  checksum: dc06bea5c23aae65d0725a957a0638b57e235ae4568dda51ca142053ed2c352de7e3bc93a69b2b32ac31966a1952e9a93c5ef2e2ab7c6b06aef9808f6b55b571
   languageName: node
   linkType: hard
 
@@ -1050,9 +1050,9 @@ __metadata:
   linkType: hard
 
 "lru-cache@npm:^10.0.1, lru-cache@npm:^9.1.1 || ^10.0.0":
-  version: 10.0.1
-  resolution: "lru-cache@npm:10.0.1"
-  checksum: 982dabfb227b9a2daf56d712ae0e72e01115a28c0a2068cd71277bca04568f3417bbf741c6c7941abc5c620fd8059e34f15607f90ebccbfa0a17533322d27a8e
+  version: 10.1.0
+  resolution: "lru-cache@npm:10.1.0"
+  checksum: 778bc8b2626daccd75f24c4b4d10632496e21ba064b126f526c626fbdbc5b28c472013fccd45d7646b9e1ef052444824854aed617b59cd570d01a8b7d651fc1e
   languageName: node
   linkType: hard
 
@@ -1154,12 +1154,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"minipass-collect@npm:^1.0.2":
-  version: 1.0.2
-  resolution: "minipass-collect@npm:1.0.2"
+"minipass-collect@npm:^2.0.1":
+  version: 2.0.1
+  resolution: "minipass-collect@npm:2.0.1"
   dependencies:
-    minipass: "npm:^3.0.0"
-  checksum: 8f82bd1f3095b24f53a991b04b67f4c710c894e518b813f0864a31de5570441a509be1ca17e0bb92b047591a8fdbeb886f502764fefb00d2f144f4011791e898
+    minipass: "npm:^7.0.3"
+  checksum: 5167e73f62bb74cc5019594709c77e6a742051a647fe9499abf03c71dca75515b7959d67a764bdc4f8b361cf897fbf25e2d9869ee039203ed45240f48b9aa06e
   languageName: node
   linkType: hard
 
