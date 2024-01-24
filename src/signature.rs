@@ -1,7 +1,25 @@
+use std::ops::Deref;
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-use crate::error::IntoNapiError;
+use crate::{commit::Commit, error::IntoNapiError};
+
+pub(crate) enum SignatureInner {
+  Signature(git2::Signature<'static>),
+  FromCommit(SharedReference<Commit, git2::Signature<'static>>),
+}
+
+impl Deref for SignatureInner {
+  type Target = git2::Signature<'static>;
+
+  fn deref(&self) -> &git2::Signature<'static> {
+    match self {
+      SignatureInner::Signature(parent) => parent,
+      SignatureInner::FromCommit(parent) => &*parent,
+    }
+  }
+}
 
 #[napi]
 /// A Signature is used to indicate authorship of various actions throughout the
@@ -14,7 +32,7 @@ use crate::error::IntoNapiError;
 ///
 /// [`Repository::signature`]: struct.Repository.html#method.signature
 pub struct Signature {
-  inner: git2::Signature<'static>,
+  pub(crate) inner: SignatureInner,
 }
 
 #[napi]
@@ -25,7 +43,9 @@ impl Signature {
   /// See `new` for more information
   pub fn now(name: String, email: String) -> Result<Self> {
     Ok(Signature {
-      inner: git2::Signature::now(name.as_str(), email.as_str()).convert_without_message()?,
+      inner: SignatureInner::Signature(
+        git2::Signature::now(name.as_str(), email.as_str()).convert_without_message()?,
+      ),
     })
   }
 
@@ -38,8 +58,9 @@ impl Signature {
   /// Returns error if either `name` or `email` contain angle brackets.
   pub fn new(name: String, email: String, time: i64) -> Result<Self> {
     Ok(Signature {
-      inner: git2::Signature::new(&name, &email, &git2::Time::new(time, 0))
-        .convert_without_message()?,
+      inner: SignatureInner::Signature(
+        git2::Signature::new(&name, &email, &git2::Time::new(time, 0)).convert_without_message()?,
+      ),
     })
   }
 

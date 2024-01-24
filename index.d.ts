@@ -36,6 +36,18 @@ export interface DiffOptions {
    */
   showUnmodified?: boolean
 }
+export const enum ObjectType {
+  /** Any kind of git object */
+  Any = 0,
+  /** An object which corresponds to a git commit */
+  Commit = 1,
+  /** An object which corresponds to a git tree */
+  Tree = 2,
+  /** An object which corresponds to a git blob */
+  Blob = 3,
+  /** An object which corresponds to a git tag */
+  Tag = 4
+}
 /** An enumeration of all possible kinds of references. */
 export const enum ReferenceType {
   /** A reference which points at an object id. */
@@ -86,6 +98,148 @@ export const enum RepositoryOpenFlags {
   /** Respect environment variables like `$GIT_DIR`. */
   FromEnv = 4
 }
+/** Orderings that may be specified for Revwalk iteration. */
+export const enum Sort {
+  /**
+   * Sort the repository contents in no particular ordering.
+   *
+   * This sorting is arbitrary, implementation-specific, and subject to
+   * change at any time. This is the default sorting for new walkers.
+   */
+  None = 0,
+  /**
+   * Sort the repository contents in topological order (children before
+   * parents).
+   *
+   * This sorting mode can be combined with time sorting.
+   * 1 << 0
+   */
+  Topological = 1,
+  /**
+   * Sort the repository contents by commit time.
+   *
+   * This sorting mode can be combined with topological sorting.
+   * 1 << 1
+   */
+  Time = 2,
+  /**
+   * Iterate through the repository contents in reverse order.
+   *
+   * This sorting mode can be combined with any others.
+   * 1 << 2
+   */
+  Reverse = 4
+}
+export class Commit {
+  /** Get the id (SHA1) of a repository object */
+  id(): string
+  /**
+   * Get the id of the tree pointed to by this commit.
+   *
+   * No attempts are made to fetch an object from the ODB.
+   */
+  treeId(): string
+  /** Get the tree pointed to by this commit. */
+  tree(): Tree
+  /**
+   *
+   * The returned message will be slightly prettified by removing any
+   * potential leading newlines.
+   *
+   * `None` will be returned if the message is not valid utf-8
+   */
+  message(): string | null
+  /**
+   * Get the full message of a commit as a byte slice.
+   *
+   * The returned message will be slightly prettified by removing any
+   * potential leading newlines.
+   */
+  messageBytes(): Buffer
+  /**
+   * Get the encoding for the message of a commit, as a string representing a
+   * standard encoding name.
+   *
+   * `None` will be returned if the encoding is not known
+   */
+  messageEncoding(): string | null
+  /**
+   * Get the full raw message of a commit.
+   *
+   * `None` will be returned if the message is not valid utf-8
+   */
+  messageRaw(): string | null
+  /** Get the full raw message of a commit. */
+  messageRawBytes(): Buffer
+  /**
+   * Get the full raw text of the commit header.
+   *
+   * `None` will be returned if the message is not valid utf-8
+   */
+  rawHeader(): string | null
+  /** Get an arbitrary header field. */
+  headerFieldBytes(field: string): Buffer
+  /** Get the full raw text of the commit header. */
+  rawHeaderBytes(): Buffer
+  /**
+   * Get the short "summary" of the git commit message.
+   *
+   * The returned message is the summary of the commit, comprising the first
+   * paragraph of the message with whitespace trimmed and squashed.
+   *
+   * `None` may be returned if an error occurs or if the summary is not valid
+   * utf-8.
+   */
+  summary(): string | null
+  /**
+   * Get the short "summary" of the git commit message.
+   *
+   * The returned message is the summary of the commit, comprising the first
+   * paragraph of the message with whitespace trimmed and squashed.
+   *
+   * `None` may be returned if an error occurs
+   */
+  summaryBytes(): Buffer | null
+  /**
+   * Get the long "body" of the git commit message.
+   *
+   * The returned message is the body of the commit, comprising everything
+   * but the first paragraph of the message. Leading and trailing whitespaces
+   * are trimmed.
+   *
+   * `None` may be returned if an error occurs or if the summary is not valid
+   * utf-8.
+   */
+  body(): string | null
+  /**
+   * Get the long "body" of the git commit message.
+   *
+   * The returned message is the body of the commit, comprising everything
+   * but the first paragraph of the message. Leading and trailing whitespaces
+   * are trimmed.
+   *
+   * `None` may be returned if an error occurs.
+   */
+  bodyBytes(): Buffer | null
+  /**
+   * Get the commit time (i.e. committer time) of a commit.
+   *
+   * The first element of the tuple is the time, in seconds, since the epoch.
+   * The second element is the offset, in minutes, of the time zone of the
+   * committer's preferred time zone.
+   */
+  time(): Date
+  /** Get the author of this commit. */
+  author(): Signature
+  /** Get the committer of this commit. */
+  committer(): Signature
+  /**
+   * Get the number of parents of this commit.
+   *
+   * Use the `parents` iterator to return an iterator over all parents.
+   */
+  parentCount(): bigint
+}
 /** An iterator over the diffs in a delta */
 export class Deltas {
   [Symbol.iterator](): Iterator<DiffDelta, void, void>
@@ -133,6 +287,13 @@ export class Diff {
   deltas(): Deltas
   /** Check if deltas are sorted case sensitively or insensitively. */
   isSortedIcase(): boolean
+}
+export class GitObject {
+  /** Get the id (SHA1) of a repository object */
+  id(): string
+  /** Get the type of the object. */
+  kind(): ObjectType | null
+  peel(kind: ObjectType): GitObject
 }
 export class Reference {
   /**
@@ -320,11 +481,19 @@ export class Repository {
    * until it finds a repository.
    */
   static discover(path: string): Repository
+  /**
+   * Attempt to open an already-existing repository at `path`.
+   *
+   * The path can point to either a normal or bare repository.
+   */
   constructor(gitDir: string)
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
+  /** Tests whether this repository is a shallow clone. */
   isShallow(): boolean
+  /** Tests whether this repository is empty. */
   isEmpty(): boolean
+  /** Tests whether this repository is a worktree. */
   isWorktree(): boolean
   /**
    * Returns the path to the `.git` folder for normal repositories or the
@@ -371,6 +540,7 @@ export class Repository {
   remote(name: string): Remote
   /** Lookup a reference to one of the objects in a repository. */
   findTree(oid: string): Tree
+  findCommit(oid: string): Commit
   /**
    * Create a diff between a tree and the working directory.
    *
@@ -401,6 +571,7 @@ export class Repository {
    * single diff that includes staged deleted, etc.
    */
   diffTreeToWorkdirWithIndex(oldTree?: Tree | undefined | null): Diff
+  treeEntryToObject(treeEntry: TreeEntry): GitObject
   /**
    * Create new commit in the repository
    *
@@ -412,8 +583,98 @@ export class Repository {
    * parent must be the tip of this branch.
    */
   commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree): string
+  /** Create a revwalk that can be used to traverse the commit graph. */
+  revWalk(): RevWalk
   getFileLatestModifiedDate(filepath: string): number
   getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+}
+export class RevWalk {
+  [Symbol.iterator](): Iterator<string, void, void>
+  /**
+   * Reset a revwalk to allow re-configuring it.
+   *
+   * The revwalk is automatically reset when iteration of its commits
+   * completes.
+   */
+  reset(): this
+  /** Set the sorting mode for a revwalk. */
+  setSorting(sorting: Sort): this
+  /**
+   * Simplify the history by first-parent
+   *
+   * No parents other than the first for each commit will be enqueued.
+   */
+  simplifyFirstParent(): this
+  /**
+   * Mark a commit to start traversal from.
+   *
+   * The given OID must belong to a commitish on the walked repository.
+   *
+   * The given commit will be used as one of the roots when starting the
+   * revision walk. At least one commit must be pushed onto the walker before
+   * a walk can be started.
+   */
+  push(oid: string): this
+  /**
+   * Push the repository's HEAD
+   *
+   * For more information, see `push`.
+   */
+  pushHead(): this
+  /**
+   * Push matching references
+   *
+   * The OIDs pointed to by the references that match the given glob pattern
+   * will be pushed to the revision walker.
+   *
+   * A leading 'refs/' is implied if not present as well as a trailing `/ \
+   * *` if the glob lacks '?', ' \ *' or '['.
+   *
+   * Any references matching this glob which do not point to a commitish
+   * will be ignored.
+   */
+  pushGlob(glob: string): this
+  /**
+   * Push and hide the respective endpoints of the given range.
+   *
+   * The range should be of the form `<commit>..<commit>` where each
+   * `<commit>` is in the form accepted by `revparse_single`. The left-hand
+   * commit will be hidden and the right-hand commit pushed.
+   */
+  pushRange(range: string): this
+  /**
+   * Push the OID pointed to by a reference
+   *
+   * The reference must point to a commitish.
+   */
+  pushRef(reference: string): this
+  /** Mark a commit as not of interest to this revwalk. */
+  hide(oid: string): this
+  /**
+   * Hide the repository's HEAD
+   *
+   * For more information, see `hide`.
+   */
+  hideHead(): this
+  /**
+   * Hide matching references.
+   *
+   * The OIDs pointed to by the references that match the given glob pattern
+   * and their ancestors will be hidden from the output on the revision walk.
+   *
+   * A leading 'refs/' is implied if not present as well as a trailing `/ \
+   * *` if the glob lacks '?', ' \ *' or '['.
+   *
+   * Any references matching this glob which do not point to a commitish
+   * will be ignored.
+   */
+  hideGlob(glob: string): this
+  /**
+   * Hide the OID pointed to by a reference.
+   *
+   * The reference must point to a commitish.
+   */
+  hideRef(reference: string): this
 }
 /**
  * A Signature is used to indicate authorship of various actions throughout the
@@ -460,4 +721,21 @@ export class Signature {
 export class Tree {
   /** Get the id (SHA1) of a repository object */
   id(): string
+  /** Get the number of entries listed in a tree. */
+  len(): bigint
+  /** Return `true` if there is not entry */
+  isEmpty(): boolean
+  /** Returns an iterator over the entries in this tree. */
+  iter(): TreeIter
+}
+export class TreeIter {
+  [Symbol.iterator](): Iterator<TreeEntry, void, void>
+}
+export class TreeEntry {
+  /** Get the id of the object pointed by the entry */
+  id(): string
+  /** Get the name of a tree entry */
+  name(): string
+  /** Get the filename of a tree entry */
+  nameBytes(): Buffer
 }
