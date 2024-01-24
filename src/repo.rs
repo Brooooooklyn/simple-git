@@ -4,12 +4,15 @@ use napi::{bindgen_prelude::*, JsString};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 
+use crate::commit::Commit;
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
+use crate::object::{GitObject, ObjectParent};
 use crate::reference;
 use crate::remote::Remote;
+use crate::rev_walk::RevWalk;
 use crate::signature::Signature;
-use crate::tree::{Tree, TreeParent};
+use crate::tree::{Tree, TreeEntry, TreeParent};
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
   // Handle the `failed to stat '/root/.gitconfig'; class=Config (7)` Error
@@ -191,6 +194,9 @@ impl Repository {
   }
 
   #[napi(constructor)]
+  /// Attempt to open an already-existing repository at `path`.
+  ///
+  /// The path can point to either a normal or bare repository.
   pub fn new(git_dir: String) -> Result<Self> {
     INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
     Ok(Self {
@@ -217,16 +223,19 @@ impl Repository {
   }
 
   #[napi]
+  /// Tests whether this repository is a shallow clone.
   pub fn is_shallow(&self) -> Result<bool> {
     Ok(self.inner.is_shallow())
   }
 
   #[napi]
+  /// Tests whether this repository is empty.
   pub fn is_empty(&self) -> Result<bool> {
     self.inner.is_empty().convert_without_message()
   }
 
   #[napi]
+  /// Tests whether this repository is a worktree.
   pub fn is_worktree(&self) -> Result<bool> {
     Ok(self.inner.is_worktree())
   }
@@ -357,6 +366,22 @@ impl Repository {
   }
 
   #[napi]
+  pub fn find_commit(
+    &self,
+    oid: String,
+    this_ref: Reference<Repository>,
+    env: Env,
+  ) -> Result<Commit> {
+    let commit = this_ref.share_with(env, |repo| {
+      repo
+        .inner
+        .find_commit_by_prefix(&oid)
+        .convert(format!("Find commit from OID [{oid}] failed"))
+    })?;
+    Ok(Commit { inner: commit })
+  }
+
+  #[napi]
   /// Create a diff between a tree and the working directory.
   ///
   /// The tree you provide will be used for the "old_file" side of the delta,
@@ -417,6 +442,23 @@ impl Repository {
   }
 
   #[napi]
+  pub fn tree_entry_to_object(
+    &self,
+    tree_entry: &TreeEntry,
+    this_ref: Reference<Repository>,
+    env: Env,
+  ) -> Result<GitObject> {
+    Ok(GitObject {
+      inner: ObjectParent::Repository(this_ref.share_with(env, |repo| {
+        tree_entry
+          .inner
+          .to_object(&repo.inner)
+          .convert_without_message()
+      })?),
+    })
+  }
+
+  #[napi]
   /// Create new commit in the repository
   ///
   /// If the `update_ref` is not `None`, name of the reference that will be
@@ -445,6 +487,14 @@ impl Repository {
       )
       .convert_without_message()
       .map(|oid| oid.to_string())
+  }
+
+  #[napi]
+  /// Create a revwalk that can be used to traverse the commit graph.
+  pub fn rev_walk(&self, this_ref: Reference<Repository>, env: Env) -> Result<RevWalk> {
+    Ok(RevWalk {
+      inner: this_ref.share_with(env, |repo| repo.inner.revwalk().convert_without_message())?,
+    })
   }
 
   #[napi]

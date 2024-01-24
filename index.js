@@ -237,6 +237,35 @@ switch (platform) {
           loadError = e
         }
         break
+      case 'riscv64':
+        if (isMusl()) {
+          localFileExisted = existsSync(
+            join(__dirname, 'simple-git.linux-riscv64-musl.node')
+          )
+          try {
+            if (localFileExisted) {
+              nativeBinding = require('./simple-git.linux-riscv64-musl.node')
+            } else {
+              nativeBinding = require('@napi-rs/simple-git-linux-riscv64-musl')
+            }
+          } catch (e) {
+            loadError = e
+          }
+        } else {
+          localFileExisted = existsSync(
+            join(__dirname, 'simple-git.linux-riscv64-gnu.node')
+          )
+          try {
+            if (localFileExisted) {
+              nativeBinding = require('./simple-git.linux-riscv64-gnu.node')
+            } else {
+              nativeBinding = require('@napi-rs/simple-git-linux-riscv64-gnu')
+            }
+          } catch (e) {
+            loadError = e
+          }
+        }
+        break
       default:
         throw new Error(`Unsupported architecture on Linux: ${arch}`)
     }
@@ -252,13 +281,16 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { Deltas, DiffDelta, Delta, DiffFile, Diff, Reference, ReferenceType, Direction, Remote, RemoteCallbacks, FetchOptions, RepositoryState, RepositoryOpenFlags, Repository, Signature, Tree } = nativeBinding
+const { Commit, Deltas, DiffDelta, Delta, DiffFile, Diff, ObjectType, GitObject, Reference, ReferenceType, Direction, Remote, RemoteCallbacks, FetchOptions, RepositoryState, RepositoryOpenFlags, Repository, Sort, RevWalk, Signature, Tree, TreeIter, TreeEntry } = nativeBinding
 
+module.exports.Commit = Commit
 module.exports.Deltas = Deltas
 module.exports.DiffDelta = DiffDelta
 module.exports.Delta = Delta
 module.exports.DiffFile = DiffFile
 module.exports.Diff = Diff
+module.exports.ObjectType = ObjectType
+module.exports.GitObject = GitObject
 module.exports.Reference = Reference
 module.exports.ReferenceType = ReferenceType
 module.exports.Direction = Direction
@@ -268,5 +300,9 @@ module.exports.FetchOptions = FetchOptions
 module.exports.RepositoryState = RepositoryState
 module.exports.RepositoryOpenFlags = RepositoryOpenFlags
 module.exports.Repository = Repository
+module.exports.Sort = Sort
+module.exports.RevWalk = RevWalk
 module.exports.Signature = Signature
 module.exports.Tree = Tree
+module.exports.TreeIter = TreeIter
+module.exports.TreeEntry = TreeEntry
