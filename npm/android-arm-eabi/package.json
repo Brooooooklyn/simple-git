@@ -1,6 +1,6 @@
 {
   "name": "@napi-rs/simple-git-android-arm-eabi",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "os": [
     "android"
   ],
