@@ -22,7 +22,7 @@
     }
   },
   "ava": {
-    "timeout": "3min",
+    "timeout": "3m",
     "workerThreads": false
   },
   "files": [
@@ -31,7 +31,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@napi-rs/cli": "^2.16.5",
+    "@napi-rs/cli": "^2.18.0",
     "@types/node": "^20.8.10",
     "ava": "^6.0.0",
     "pretty-ms": "^9.0.0"

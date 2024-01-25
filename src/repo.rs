@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use napi::{bindgen_prelude::*, JsString};
 use napi_derive::napi;
@@ -13,6 +13,7 @@ use crate::remote::Remote;
 use crate::rev_walk::RevWalk;
 use crate::signature::Signature;
 use crate::tree::{Tree, TreeEntry, TreeParent};
+use crate::util::path_to_javascript_string;
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
   // Handle the `failed to stat '/root/.gitconfig'; class=Config (7)` Error
@@ -128,7 +129,7 @@ pub struct Repository {
 
 #[napi]
 impl Repository {
-  #[napi]
+  #[napi(factory)]
   pub fn init(p: String) -> Result<Repository> {
     INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
     Ok(Self {
@@ -141,7 +142,7 @@ impl Repository {
     })
   }
 
-  #[napi]
+  #[napi(factory)]
   /// Find and open an existing repository, with additional options.
   ///
   /// If flags contains REPOSITORY_OPEN_NO_SEARCH, the path must point
@@ -180,7 +181,7 @@ impl Repository {
     })
   }
 
-  #[napi]
+  #[napi(factory)]
   /// Attempt to open an already-existing repository at or above `path`
   ///
   /// This starts at `path` and looks up the filesystem hierarchy
@@ -190,6 +191,39 @@ impl Repository {
     Ok(Self {
       inner: git2::Repository::discover(&path)
         .convert(format!("Discover git repo from [{path}] failed"))?,
+    })
+  }
+
+  #[napi(factory)]
+  /// Creates a new `--bare` repository in the specified folder.
+  ///
+  /// The folder must exist prior to invoking this function.
+  pub fn init_bare(path: String) -> Result<Self> {
+    Ok(Self {
+      inner: git2::Repository::init_bare(path).convert("Failed to init bare repo")?,
+    })
+  }
+
+  #[napi(factory)]
+  /// Clone a remote repository.
+  ///
+  /// See the `RepoBuilder` struct for more information. This function will
+  /// delegate to a fresh `RepoBuilder`
+  pub fn clone(url: String, path: String) -> Result<Self> {
+    Ok(Self {
+      inner: git2::Repository::clone(&url, path).convert("Failed to clone repo")?,
+    })
+  }
+
+  #[napi(factory)]
+  /// Clone a remote repository, initialize and update its submodules
+  /// recursively.
+  ///
+  /// This is similar to `git clone --recursive`.
+  pub fn clone_recurse(url: String, path: String) -> Result<Self> {
+    Ok(Self {
+      inner: git2::Repository::clone_recurse(&url, path)
+        .convert("Failed to clone repo recursively")?,
     })
   }
 
@@ -566,20 +600,4 @@ fn get_file_modified_date(
         None
       }),
   )
-}
-
-fn path_to_javascript_string(env: &Env, p: &Path) -> Result<JsString> {
-  #[cfg(unix)]
-  {
-    use std::borrow::Borrow;
-
-    let path = p.to_string_lossy();
-    env.create_string(path.borrow())
-  }
-  #[cfg(windows)]
-  {
-    use std::os::windows::ffi::OsStrExt;
-    let path_buf = p.as_os_str().encode_wide().collect::<Vec<u16>>();
-    env.create_string_utf16(path_buf.as_slice())
-  }
 }

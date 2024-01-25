@@ -1,7 +1,7 @@
-import { join } from 'path'
-import { fileURLToPath } from 'url'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import { Repository, RepositoryOpenFlags } from './index.js'
+import { Repository } from './index.js'
 
 const ROOT_DIR = join(fileURLToPath(import.meta.url), '..')
 

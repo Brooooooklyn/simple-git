@@ -1,6 +1,11 @@
-use std::mem;
+use std::{mem, path::Path};
 
-use napi::{bindgen_prelude::*, Env, Error, JsFunction, Status};
+use git2::{ErrorClass, ErrorCode};
+use napi::{
+  bindgen_prelude::*,
+  threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode},
+  Error, NapiRaw, NapiValue, Status,
+};
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
@@ -21,6 +26,147 @@ impl From<Direction> for git2::Direction {
       Direction::Push => git2::Direction::Push,
     }
   }
+}
+
+#[napi]
+/// Configuration for how pruning is done on a fetch
+pub enum FetchPrune {
+  /// Use the setting from the configuration
+  Unspecified,
+  /// Force pruning on
+  On,
+  /// Force pruning off
+  Off,
+}
+
+impl From<FetchPrune> for git2::FetchPrune {
+  fn from(value: FetchPrune) -> Self {
+    match value {
+      FetchPrune::Unspecified => git2::FetchPrune::Unspecified,
+      FetchPrune::On => git2::FetchPrune::On,
+      FetchPrune::Off => git2::FetchPrune::Off,
+    }
+  }
+}
+
+#[napi]
+/// Automatic tag following options.
+pub enum AutotagOption {
+  /// Use the setting from the remote's configuration
+  Unspecified,
+  /// Ask the server for tags pointing to objects we're already downloading
+  Auto,
+  /// Don't ask for any tags beyond the refspecs
+  None,
+  /// Ask for all the tags
+  All,
+}
+
+impl From<AutotagOption> for git2::AutotagOption {
+  fn from(value: AutotagOption) -> Self {
+    match value {
+      AutotagOption::Unspecified => git2::AutotagOption::Unspecified,
+      AutotagOption::Auto => git2::AutotagOption::Auto,
+      AutotagOption::None => git2::AutotagOption::None,
+      AutotagOption::All => git2::AutotagOption::All,
+    }
+  }
+}
+
+#[napi]
+/// Remote redirection settings; whether redirects to another host are
+/// permitted.
+///
+/// By default, git will follow a redirect on the initial request
+/// (`/info/refs`), but not subsequent requests.
+pub enum RemoteRedirect {
+  /// Do not follow any off-site redirects at any stage of the fetch or push.
+  None,
+  /// Allow off-site redirects only upon the initial request. This is the
+  /// default.
+  Initial,
+  /// Allow redirects at any stage in the fetch or push.
+  All,
+}
+
+impl From<RemoteRedirect> for git2::RemoteRedirect {
+  fn from(value: RemoteRedirect) -> Self {
+    match value {
+      RemoteRedirect::None => git2::RemoteRedirect::None,
+      RemoteRedirect::Initial => git2::RemoteRedirect::Initial,
+      RemoteRedirect::All => git2::RemoteRedirect::All,
+    }
+  }
+}
+
+#[napi]
+/// Types of credentials that can be requested by a credential callback.
+pub enum CredentialType {
+  /// 1 << 0
+  UserPassPlaintext = 1,
+  /// 1 << 1
+  SshKey = 2,
+  /// 1 << 6
+  SshMemory = 64,
+  /// 1 << 2
+  SshCustom = 4,
+  /// 1 << 3
+  Default = 8,
+  /// 1 << 4
+  SshInteractive = 16,
+  /// 1 << 5
+  Username = 32,
+}
+
+impl From<libgit2_sys::git_credtype_t> for CredentialType {
+  fn from(value: libgit2_sys::git_credtype_t) -> Self {
+    match value {
+      libgit2_sys::GIT_CREDTYPE_USERPASS_PLAINTEXT => CredentialType::UserPassPlaintext,
+      libgit2_sys::GIT_CREDTYPE_SSH_KEY => CredentialType::SshKey,
+      libgit2_sys::GIT_CREDTYPE_SSH_MEMORY => CredentialType::SshMemory,
+      libgit2_sys::GIT_CREDTYPE_SSH_CUSTOM => CredentialType::SshCustom,
+      libgit2_sys::GIT_CREDTYPE_DEFAULT => CredentialType::Default,
+      libgit2_sys::GIT_CREDTYPE_SSH_INTERACTIVE => CredentialType::SshInteractive,
+      libgit2_sys::GIT_CREDTYPE_USERNAME => CredentialType::Username,
+      _ => CredentialType::Default,
+    }
+  }
+}
+
+impl From<git2::CredentialType> for CredentialType {
+  fn from(value: git2::CredentialType) -> Self {
+    match value {
+      git2::CredentialType::USER_PASS_PLAINTEXT => CredentialType::UserPassPlaintext,
+      git2::CredentialType::SSH_KEY => CredentialType::SshKey,
+      git2::CredentialType::SSH_MEMORY => CredentialType::SshMemory,
+      git2::CredentialType::SSH_CUSTOM => CredentialType::SshCustom,
+      git2::CredentialType::DEFAULT => CredentialType::Default,
+      git2::CredentialType::SSH_INTERACTIVE => CredentialType::SshInteractive,
+      git2::CredentialType::USERNAME => CredentialType::Username,
+      _ => CredentialType::Default,
+    }
+  }
+}
+
+impl From<CredentialType> for git2::CredentialType {
+  fn from(value: CredentialType) -> Self {
+    match value {
+      CredentialType::UserPassPlaintext => git2::CredentialType::USER_PASS_PLAINTEXT,
+      CredentialType::SshKey => git2::CredentialType::SSH_KEY,
+      CredentialType::SshMemory => git2::CredentialType::SSH_MEMORY,
+      CredentialType::SshCustom => git2::CredentialType::SSH_CUSTOM,
+      CredentialType::Default => git2::CredentialType::DEFAULT,
+      CredentialType::SshInteractive => git2::CredentialType::SSH_INTERACTIVE,
+      CredentialType::Username => git2::CredentialType::USERNAME,
+    }
+  }
+}
+
+#[napi(object)]
+pub struct CredInfo {
+  pub cred_type: CredentialType,
+  pub url: String,
+  pub username: String,
 }
 
 #[napi]
@@ -111,31 +257,37 @@ impl Remote {
   }
 
   #[napi(ts_args_type = "refspecs: string[], cb?: (progress: Progress) => void")]
+  /// Download new data and update tips
+  ///
+  /// Convenience function to connect to a remote, download the data,
+  /// disconnect and update the remote-tracking branches.
+  ///
   pub fn fetch(
     &mut self,
-    env: Env,
     refspecs: Vec<String>,
-    fetch_callback: Option<JsFunction>,
+    fetch_callback: Option<ThreadsafeFunction<Progress, ErrorStrategy::Fatal>>,
   ) -> Result<()> {
     let mut options = git2::FetchOptions::default();
     let mut cbs = git2::RemoteCallbacks::default();
-    cbs.credentials(|url, username_from_url, _| {
+    cbs.credentials(|url, username_from_url, cred_type| {
       if url.starts_with("http") || url.starts_with("https") {
         return git2::Cred::default();
       }
-      if let Some(username_from_url) = username_from_url {
-        git2::Cred::ssh_key(
-          username_from_url,
-          None,
-          std::path::Path::new(&format!("{}/.ssh/id_rsa", std::env::var("HOME").unwrap())),
-          None,
-        )
+      let user = username_from_url.unwrap_or("git");
+      if cred_type.contains(git2::CredentialType::USERNAME) {
+        return git2::Cred::username(user);
+      }
+
+      if let Ok(key) = std::env::var("GPM_SSH_KEY") {
+        git2::Cred::ssh_key(user, None, std::path::Path::new(&key), None)
       } else {
         git2::Cred::default()
       }
     });
     if let Some(callback) = fetch_callback {
-      cbs.transfer_progress(move |progress| create_progress(&env, &progress, &callback).is_ok());
+      cbs.transfer_progress(move |progress| {
+        callback.call(progress.into(), ThreadsafeFunctionCallMode::NonBlocking) == Status::Ok
+      });
     }
     options.remote_callbacks(cbs);
     self
@@ -148,6 +300,7 @@ impl Remote {
 #[napi]
 pub struct RemoteCallbacks {
   inner: git2::RemoteCallbacks<'static>,
+  used: bool,
 }
 
 #[napi]
@@ -157,36 +310,129 @@ impl RemoteCallbacks {
   pub fn new() -> RemoteCallbacks {
     RemoteCallbacks {
       inner: git2::RemoteCallbacks::new(),
+      used: false,
     }
   }
 
-  #[napi]
-  pub fn transfer_progress(&mut self, env: Env, callback: JsFunction) {
+  #[napi(ts_args_type = "callback: (cred: CredInfo) => Cred")]
+  /// The callback through which to fetch credentials if required.
+  ///
+  /// # Example
+  ///
+  /// Prepare a callback to authenticate using the `$HOME/.ssh/id_rsa` SSH key, and
+  /// extracting the username from the URL (i.e. git@github.com:rust-lang/git2-rs.git):
+  ///
+  /// ```js
+  /// import { join } from 'node:path'
+  /// import { homedir } from 'node:os'
+  ///
+  /// import { Cred, FetchOptions, RemoteCallbacks, RepoBuilder, credTypeContains } from '@napi-rs/simple-git'
+  ///
+  /// const builder = new RepoBuilder()
+
+  /// const remoteCallbacks = new RemoteCallbacks()
+  /// .credentials((cred) => {
+  ///   return Cred.sshKey(cred.username, null, join(homedir(), '.ssh', 'id_rsa'), null)
+  /// })
+  ///
+  /// const fetchOptions = new FetchOptions().depth(0).remoteCallback(remoteCallbacks)
+  ///
+  /// const repo = builder.branch('master')
+  ///  .fetchOptions(fetchOptions)
+  ///  .clone("git@github.com:rust-lang/git2-rs.git", "git2-rs")
+  /// ```
+  pub fn credentials(&mut self, env: Env, callback: JsFunction) -> Result<&Self> {
+    let func_ref = env.create_reference(callback)?;
     self
       .inner
-      .transfer_progress(move |p| create_progress(&env, &p, &callback).is_ok());
+      .credentials(move |url: &str, username_from_url, cred| {
+        env
+          .get_reference_value::<JsFunction>(&func_ref)
+          .and_then(|callback| {
+            unsafe {
+              ToNapiValue::to_napi_value(
+                env.raw(),
+                CredInfo {
+                  cred_type: cred.into(),
+                  url: url.to_string(),
+                  username: username_from_url.unwrap_or("git").to_string(),
+                },
+              )
+            }
+            .and_then(|obj| {
+              callback.call::<Unknown>(
+                None,
+                &[unsafe { Unknown::from_raw_unchecked(env.raw(), obj) }],
+              )
+            })
+          })
+          .map_err(|err| {
+            git2::Error::new(
+              ErrorCode::Auth,
+              ErrorClass::Callback,
+              format!("Call credentials callback failed {err}"),
+            )
+          })
+          .and_then(|cred| {
+            let mut cred: ClassInstance<Cred> = unsafe {
+              FromNapiValue::from_napi_value(env.raw(), cred.raw()).map_err(|err| {
+                git2::Error::new(
+                  ErrorCode::Auth,
+                  ErrorClass::Callback,
+                  format!("Credential callback return value is not instance of Cred: {err}"),
+                )
+              })?
+            };
+            if cred.used {
+              return Err(git2::Error::new(
+                ErrorCode::Auth,
+                ErrorClass::Callback,
+                "Cred can only be used once",
+              ));
+            }
+            let mut c = git2::Cred::default()?;
+            mem::swap(&mut c, &mut cred.inner);
+            cred.used = true;
+            Ok(c)
+          })
+      });
+    Ok(self)
   }
 
-  #[napi(ts_args_type = "callback: (a: number, b: number, c: number) => void")]
-  pub fn push_transfer_progress(&mut self, env: Env, callback: JsFunction) {
-    self.inner.push_transfer_progress(move |a, b, c| {
-      callback
-        .call(
-          None,
-          &[
-            env.create_uint32(a as u32).unwrap(),
-            env.create_uint32(b as u32).unwrap(),
-            env.create_uint32(c as u32).unwrap(),
-          ],
-        )
-        .unwrap();
+  #[napi(ts_args_type = "callback: (progress: Progress) => void")]
+  /// The callback through which progress is monitored.
+  pub fn transfer_progress(
+    &mut self,
+    callback: ThreadsafeFunction<Progress, ErrorStrategy::Fatal>,
+  ) -> &Self {
+    self.inner.transfer_progress(move |p| {
+      callback.call(p.into(), ThreadsafeFunctionCallMode::NonBlocking) == Status::Ok
     });
+    self
+  }
+
+  #[napi(ts_args_type = "callback: (current: number, total: number, bytes: number) => void")]
+  /// The callback through which progress of push transfer is monitored
+  pub fn push_transfer_progress(
+    &mut self,
+    callback: ThreadsafeFunction<(u32, u32, u32), ErrorStrategy::Fatal>,
+  ) -> &Self {
+    self
+      .inner
+      .push_transfer_progress(move |current, total, bytes| {
+        callback.call(
+          (current as u32, total as u32, bytes as u32),
+          ThreadsafeFunctionCallMode::NonBlocking,
+        );
+      });
+    self
   }
 }
 
 #[napi]
 pub struct FetchOptions {
-  inner: git2::FetchOptions<'static>,
+  pub(crate) inner: git2::FetchOptions<'static>,
+  pub(crate) used: bool,
 }
 
 #[napi]
@@ -196,14 +442,96 @@ impl FetchOptions {
   pub fn new() -> FetchOptions {
     FetchOptions {
       inner: git2::FetchOptions::new(),
+      used: false,
     }
   }
 
   #[napi]
-  pub fn remote_callback(&mut self, callback: &mut RemoteCallbacks) {
+  /// Set the callbacks to use for the fetch operation.
+  pub fn remote_callback(&mut self, callback: &mut RemoteCallbacks) -> Result<&Self> {
+    if callback.used {
+      return Err(Error::new(
+        Status::GenericFailure,
+        "RemoteCallbacks can only be used once".to_string(),
+      ));
+    }
     let mut cbs = git2::RemoteCallbacks::default();
     mem::swap(&mut cbs, &mut callback.inner);
     self.inner.remote_callbacks(cbs);
+    callback.used = true;
+    Ok(self)
+  }
+
+  #[napi]
+  /// Set the proxy options to use for the fetch operation.
+  pub fn proxy_options(&mut self, options: &mut ProxyOptions) -> Result<&Self> {
+    if options.used {
+      return Err(Error::new(
+        Status::GenericFailure,
+        "ProxyOptions can only be used once".to_string(),
+      ));
+    }
+    let mut opts = git2::ProxyOptions::default();
+    mem::swap(&mut opts, &mut options.inner);
+    self.inner.proxy_options(opts);
+    options.used = true;
+    Ok(self)
+  }
+
+  #[napi]
+  /// Set whether to perform a prune after the fetch.
+  pub fn prune(&mut self, prune: FetchPrune) -> &Self {
+    self.inner.prune(prune.into());
+    self
+  }
+
+  #[napi]
+  /// Set whether to write the results to FETCH_HEAD.
+  ///
+  /// Defaults to `true`.
+  pub fn update_fetchhead(&mut self, update: bool) -> &Self {
+    self.inner.update_fetchhead(update);
+    self
+  }
+
+  #[napi]
+  /// Set fetch depth, a value less or equal to 0 is interpreted as pull
+  /// everything (effectively the same as not declaring a limit depth).
+
+  // FIXME(blyxyas): We currently don't have a test for shallow functions
+  // because libgit2 doesn't support local shallow clones.
+  // https://github.com/rust-lang/git2-rs/pull/979#issuecomment-1716299900
+  pub fn depth(&mut self, depth: i32) -> &Self {
+    self.inner.depth(depth);
+    self
+  }
+
+  #[napi]
+  /// Set how to behave regarding tags on the remote, such as auto-downloading
+  /// tags for objects we're downloading or downloading all of them.
+  ///
+  /// The default is to auto-follow tags.
+  pub fn download_tags(&mut self, opt: AutotagOption) -> &Self {
+    self.inner.download_tags(opt.into());
+    self
+  }
+
+  #[napi]
+  /// Set remote redirection settings; whether redirects to another host are
+  /// permitted.
+  ///
+  /// By default, git will follow a redirect on the initial request
+  /// (`/info/refs`), but not subsequent requests.
+  pub fn follow_redirects(&mut self, opt: RemoteRedirect) -> &Self {
+    self.inner.follow_redirects(opt.into());
+    self
+  }
+
+  #[napi]
+  /// Set extra headers for this fetch operation.
+  pub fn custom_headers(&mut self, headers: Vec<&str>) -> &Self {
+    self.inner.custom_headers(headers.as_slice());
+    self
   }
 }
 
@@ -218,15 +546,161 @@ pub struct Progress {
   pub received_bytes: u32,
 }
 
-fn create_progress(env: &Env, progress: &git2::Progress<'_>, callback: &JsFunction) -> Result<()> {
-  let mut obj = env.create_object()?;
-  obj.set("totalObjects", progress.total_objects() as u32)?;
-  obj.set("indexedObjects", progress.indexed_objects() as u32)?;
-  obj.set("receivedObjects", progress.received_objects() as u32)?;
-  obj.set("localObjects", progress.local_objects() as u32)?;
-  obj.set("totalDeltas", progress.total_deltas() as u32)?;
-  obj.set("indexedDeltas", progress.indexed_deltas() as u32)?;
-  obj.set("receivedBytes", progress.received_bytes() as u32)?;
-  callback.call(None, &[obj])?;
-  Ok(())
+impl<'a> From<git2::Progress<'a>> for Progress {
+  fn from(progress: git2::Progress) -> Self {
+    Progress {
+      total_objects: progress.total_objects() as u32,
+      indexed_objects: progress.indexed_objects() as u32,
+      received_objects: progress.received_objects() as u32,
+      local_objects: progress.local_objects() as u32,
+      total_deltas: progress.total_deltas() as u32,
+      indexed_deltas: progress.indexed_deltas() as u32,
+      received_bytes: progress.received_bytes() as u32,
+    }
+  }
+}
+
+#[napi]
+pub struct ProxyOptions {
+  inner: git2::ProxyOptions<'static>,
+  used: bool,
+}
+
+#[napi]
+impl ProxyOptions {
+  #[napi(constructor)]
+  #[allow(clippy::new_without_default)]
+  pub fn new() -> ProxyOptions {
+    ProxyOptions {
+      inner: git2::ProxyOptions::new(),
+      used: false,
+    }
+  }
+
+  #[napi]
+  /// Try to auto-detect the proxy from the git configuration.
+  ///
+  /// Note that this will override `url` specified before.
+  pub fn auto(&mut self) {
+    self.inner.auto();
+  }
+
+  #[napi]
+  /// Specify the exact URL of the proxy to use.
+  ///
+  /// Note that this will override `auto` specified before.
+  pub fn url(&mut self, url: String) {
+    self.inner.url(url.as_str());
+  }
+}
+
+#[napi]
+pub struct Cred {
+  pub(crate) inner: git2::Cred,
+  used: bool,
+}
+
+#[napi]
+impl Cred {
+  #[napi(constructor)]
+  #[allow(clippy::new_without_default)]
+  /// Create a "default" credential usable for Negotiate mechanisms like NTLM
+  /// or Kerberos authentication.
+  pub fn new() -> Result<Self> {
+    Ok(Self {
+      inner: git2::Cred::default().convert("Create Cred failed")?,
+      used: false,
+    })
+  }
+
+  #[napi(factory)]
+  /// Create a new ssh key credential object used for querying an ssh-agent.
+  ///
+  /// The username specified is the username to authenticate.
+  pub fn ssh_key_from_agent(username: String) -> Result<Self> {
+    Ok(Self {
+      inner: git2::Cred::ssh_key_from_agent(username.as_str()).convert("Create Cred failed")?,
+      used: false,
+    })
+  }
+
+  #[napi(factory)]
+  /// Create a new passphrase-protected ssh key credential object.
+  pub fn ssh_key(
+    username: String,
+    publickey: Option<String>,
+    privatekey: String,
+    passphrase: Option<String>,
+  ) -> Result<Self> {
+    Ok(Self {
+      inner: git2::Cred::ssh_key(
+        username.as_str(),
+        publickey.as_ref().map(|s| Path::new(s)),
+        std::path::Path::new(&privatekey),
+        passphrase.as_deref(),
+      )
+      .convert("Create Cred failed")?,
+      used: false,
+    })
+  }
+
+  #[napi(factory)]
+  /// Create a new ssh key credential object reading the keys from memory.
+  pub fn ssh_key_from_memory(
+    username: String,
+    publickey: Option<String>,
+    privatekey: String,
+    passphrase: Option<String>,
+  ) -> Result<Self> {
+    Ok(Self {
+      inner: git2::Cred::ssh_key_from_memory(
+        username.as_str(),
+        publickey.as_deref(),
+        privatekey.as_str(),
+        passphrase.as_deref(),
+      )
+      .convert("Create Cred failed")?,
+      used: false,
+    })
+  }
+
+  #[napi(factory)]
+  /// Create a new plain-text username and password credential object.
+  pub fn userpass_plaintext(username: String, password: String) -> Result<Self> {
+    Ok(Self {
+      inner: git2::Cred::userpass_plaintext(username.as_str(), password.as_str())
+        .convert("Create Cred failed")?,
+      used: false,
+    })
+  }
+
+  #[napi(factory)]
+  /// Create a credential to specify a username.
+  ///
+  /// This is used with ssh authentication to query for the username if none is
+  /// specified in the URL.
+  pub fn username(username: String) -> Result<Self> {
+    Ok(Self {
+      inner: git2::Cred::username(username.as_str()).convert("Create Cred failed")?,
+      used: false,
+    })
+  }
+
+  #[napi]
+  /// Check whether a credential object contains username information.
+  pub fn has_username(&self) -> bool {
+    self.inner.has_username()
+  }
+
+  #[napi]
+  /// Return the type of credentials that this object represents.
+  pub fn credtype(&self) -> CredentialType {
+    self.inner.credtype().into()
+  }
+}
+
+#[napi]
+/// Check whether a cred_type contains another credential type.
+pub fn cred_type_contains(cred_type: CredentialType, another: CredentialType) -> bool {
+  Into::<git2::CredentialType>::into(cred_type).contains(another.into())
 }

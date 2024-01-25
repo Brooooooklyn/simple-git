@@ -266,6 +266,20 @@ switch (platform) {
           }
         }
         break
+      case 's390x':
+        localFileExisted = existsSync(
+          join(__dirname, 'simple-git.linux-s390x-gnu.node')
+        )
+        try {
+          if (localFileExisted) {
+            nativeBinding = require('./simple-git.linux-s390x-gnu.node')
+          } else {
+            nativeBinding = require('@napi-rs/simple-git-linux-s390x-gnu')
+          }
+        } catch (e) {
+          loadError = e
+        }
+        break
       default:
         throw new Error(`Unsupported architecture on Linux: ${arch}`)
     }
@@ -281,9 +295,11 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { Commit, Deltas, DiffDelta, Delta, DiffFile, Diff, ObjectType, GitObject, Reference, ReferenceType, Direction, Remote, RemoteCallbacks, FetchOptions, RepositoryState, RepositoryOpenFlags, Repository, Sort, RevWalk, Signature, Tree, TreeIter, TreeEntry } = nativeBinding
+const { Commit, DiffFlags, FileMode, Deltas, DiffDelta, Delta, DiffFile, Diff, ObjectType, GitObject, Reference, ReferenceType, Direction, FetchPrune, AutotagOption, RemoteRedirect, CredentialType, Remote, RemoteCallbacks, FetchOptions, Progress, ProxyOptions, Cred, credTypeContains, RepositoryState, RepositoryOpenFlags, Repository, RepoBuilder, CloneLocal, Sort, RevWalk, Signature, Tree, TreeIter, TreeEntry } = nativeBinding
 
 module.exports.Commit = Commit
+module.exports.DiffFlags = DiffFlags
+module.exports.FileMode = FileMode
 module.exports.Deltas = Deltas
 module.exports.DiffDelta = DiffDelta
 module.exports.Delta = Delta
@@ -294,12 +310,22 @@ module.exports.GitObject = GitObject
 module.exports.Reference = Reference
 module.exports.ReferenceType = ReferenceType
 module.exports.Direction = Direction
+module.exports.FetchPrune = FetchPrune
+module.exports.AutotagOption = AutotagOption
+module.exports.RemoteRedirect = RemoteRedirect
+module.exports.CredentialType = CredentialType
 module.exports.Remote = Remote
 module.exports.RemoteCallbacks = RemoteCallbacks
 module.exports.FetchOptions = FetchOptions
+module.exports.Progress = Progress
+module.exports.ProxyOptions = ProxyOptions
+module.exports.Cred = Cred
+module.exports.credTypeContains = credTypeContains
 module.exports.RepositoryState = RepositoryState
 module.exports.RepositoryOpenFlags = RepositoryOpenFlags
 module.exports.Repository = Repository
+module.exports.RepoBuilder = RepoBuilder
+module.exports.CloneLocal = CloneLocal
 module.exports.Sort = Sort
 module.exports.RevWalk = RevWalk
 module.exports.Signature = Signature
