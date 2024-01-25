@@ -16,7 +16,7 @@ impl Deref for SignatureInner {
   fn deref(&self) -> &git2::Signature<'static> {
     match self {
       SignatureInner::Signature(parent) => parent,
-      SignatureInner::FromCommit(parent) => &*parent,
+      SignatureInner::FromCommit(parent) => parent,
     }
   }
 }
