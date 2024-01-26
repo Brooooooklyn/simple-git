@@ -1,6 +1,6 @@
 {
   "name": "@napi-rs/simple-git",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "main": "index.js",
   "types": "./index.d.ts",
   "repository": {
