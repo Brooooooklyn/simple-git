@@ -295,7 +295,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { Commit, DiffFlags, FileMode, Deltas, DiffDelta, Delta, DiffFile, Diff, ObjectType, GitObject, Reference, ReferenceType, Direction, FetchPrune, AutotagOption, RemoteRedirect, CredentialType, Remote, RemoteCallbacks, FetchOptions, Progress, ProxyOptions, Cred, credTypeContains, RepositoryState, RepositoryOpenFlags, Repository, RepoBuilder, CloneLocal, Sort, RevWalk, Signature, Tree, TreeIter, TreeEntry } = nativeBinding
+const { Commit, DiffFlags, FileMode, Deltas, DiffDelta, Delta, DiffFile, Diff, ObjectType, GitObject, Reference, ReferenceType, Direction, FetchPrune, AutotagOption, RemoteRedirect, CredentialType, Remote, RemoteCallbacks, FetchOptions, ProxyOptions, Cred, credTypeContains, RepositoryState, RepositoryOpenFlags, Repository, RepoBuilder, CloneLocal, Sort, RevWalk, Signature, Tree, TreeIter, TreeEntry } = nativeBinding
 
 module.exports.Commit = Commit
 module.exports.DiffFlags = DiffFlags
@@ -317,7 +317,6 @@ module.exports.CredentialType = CredentialType
 module.exports.Remote = Remote
 module.exports.RemoteCallbacks = RemoteCallbacks
 module.exports.FetchOptions = FetchOptions
-module.exports.Progress = Progress
 module.exports.ProxyOptions = ProxyOptions
 module.exports.Cred = Cred
 module.exports.credTypeContains = credTypeContains
