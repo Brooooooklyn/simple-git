@@ -162,6 +162,15 @@ export interface CredInfo {
   url: string
   username: string
 }
+export interface Progress {
+  totalObjects: number
+  indexedObjects: number
+  receivedObjects: number
+  localObjects: number
+  totalDeltas: number
+  indexedDeltas: number
+  receivedBytes: number
+}
 /** Check whether a cred_type contains another credential type. */
 export function credTypeContains(credType: CredentialType, another: CredentialType): boolean
 export const enum RepositoryState {
@@ -644,15 +653,6 @@ export class FetchOptions {
   followRedirects(opt: RemoteRedirect): this
   /** Set extra headers for this fetch operation. */
   customHeaders(headers: Array<string>): this
-}
-export class Progress {
-  totalObjects: number
-  indexedObjects: number
-  receivedObjects: number
-  localObjects: number
-  totalDeltas: number
-  indexedDeltas: number
-  receivedBytes: number
 }
 export class ProxyOptions {
   constructor()

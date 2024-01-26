@@ -4,7 +4,7 @@ use git2::{ErrorClass, ErrorCode};
 use napi::{
   bindgen_prelude::*,
   threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode},
-  Error, NapiRaw, NapiValue, Status,
+  Error, NapiRaw, Status,
 };
 use napi_derive::napi;
 
@@ -269,20 +269,24 @@ impl Remote {
   ) -> Result<()> {
     let mut options = git2::FetchOptions::default();
     let mut cbs = git2::RemoteCallbacks::default();
-    cbs.credentials(|url, username_from_url, cred_type| {
+    cbs.credentials(|url, username_from_url, _: git2::CredentialType| {
       if url.starts_with("http") || url.starts_with("https") {
         return git2::Cred::default();
       }
       let user = username_from_url.unwrap_or("git");
-      if cred_type.contains(git2::CredentialType::USERNAME) {
-        return git2::Cred::username(user);
-      }
 
       if let Ok(key) = std::env::var("GPM_SSH_KEY") {
-        git2::Cred::ssh_key(user, None, std::path::Path::new(&key), None)
+        return git2::Cred::ssh_key(user, None, std::path::Path::new(&key), None);
       } else {
-        git2::Cred::default()
+        if let Some(ssh_private_key) =
+          home::home_dir().map(|h| Path::new(&h).join(".ssh").join("id_rsa"))
+        {
+          if ssh_private_key.exists() {
+            return git2::Cred::ssh_key(user, None, &ssh_private_key, None);
+          }
+        }
       }
+      git2::Cred::default()
     });
     if let Some(callback) = fetch_callback {
       cbs.transfer_progress(move |progress| {
@@ -341,29 +345,22 @@ impl RemoteCallbacks {
   ///  .fetchOptions(fetchOptions)
   ///  .clone("git@github.com:rust-lang/git2-rs.git", "git2-rs")
   /// ```
-  pub fn credentials(&mut self, env: Env, callback: JsFunction) -> Result<&Self> {
-    let func_ref = env.create_reference(callback)?;
+  pub fn credentials(
+    &mut self,
+    env: Env,
+    callback: Function<CredInfo, ClassInstance<Cred>>,
+  ) -> Result<&Self> {
+    let func_ref = callback.create_ref()?;
     self
       .inner
       .credentials(move |url: &str, username_from_url, cred| {
-        env
-          .get_reference_value::<JsFunction>(&func_ref)
+        func_ref
+          .borrow_back(&env)
           .and_then(|callback| {
-            unsafe {
-              ToNapiValue::to_napi_value(
-                env.raw(),
-                CredInfo {
-                  cred_type: cred.into(),
-                  url: url.to_string(),
-                  username: username_from_url.unwrap_or("git").to_string(),
-                },
-              )
-            }
-            .and_then(|obj| {
-              callback.call::<Unknown>(
-                None,
-                &[unsafe { Unknown::from_raw_unchecked(env.raw(), obj) }],
-              )
+            callback.call(CredInfo {
+              cred_type: cred.into(),
+              url: url.to_string(),
+              username: username_from_url.unwrap_or("git").to_string(),
             })
           })
           .map_err(|err| {
