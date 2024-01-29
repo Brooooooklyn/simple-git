@@ -668,13 +668,13 @@ export class ProxyOptions {
    *
    * Note that this will override `url` specified before.
    */
-  auto(): void
+  auto(): this
   /**
    * Specify the exact URL of the proxy to use.
    *
    * Note that this will override `auto` specified before.
    */
-  url(url: string): void
+  url(url: string): this
 }
 export class Cred {
   /**
