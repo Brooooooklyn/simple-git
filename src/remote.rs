@@ -588,16 +588,18 @@ impl ProxyOptions {
   /// Try to auto-detect the proxy from the git configuration.
   ///
   /// Note that this will override `url` specified before.
-  pub fn auto(&mut self) {
+  pub fn auto(&mut self) -> &Self {
     self.inner.auto();
+    self
   }
 
   #[napi]
   /// Specify the exact URL of the proxy to use.
   ///
   /// Note that this will override `auto` specified before.
-  pub fn url(&mut self, url: String) {
+  pub fn url(&mut self, url: String) -> &Self {
     self.inner.url(url.as_str());
+    self
   }
 }
 
