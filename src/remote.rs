@@ -265,35 +265,15 @@ impl Remote {
   pub fn fetch(
     &mut self,
     refspecs: Vec<String>,
-    fetch_callback: Option<ThreadsafeFunction<Progress, ErrorStrategy::Fatal>>,
+    fetch_options: Option<&mut FetchOptions>,
   ) -> Result<()> {
-    let mut options = git2::FetchOptions::default();
-    let mut cbs = git2::RemoteCallbacks::default();
-    cbs.credentials(|url, username_from_url, _: git2::CredentialType| {
-      if url.starts_with("http") || url.starts_with("https") {
-        return git2::Cred::default();
-      }
-      let user = username_from_url.unwrap_or("git");
-
-      if let Ok(key) = std::env::var("GPM_SSH_KEY") {
-        return git2::Cred::ssh_key(user, None, std::path::Path::new(&key), None);
-      } else {
-        if let Some(ssh_private_key) =
-          home::home_dir().map(|h| Path::new(&h).join(".ssh").join("id_rsa"))
-        {
-          if ssh_private_key.exists() {
-            return git2::Cred::ssh_key(user, None, &ssh_private_key, None);
-          }
-        }
-      }
-      git2::Cred::default()
-    });
-    if let Some(callback) = fetch_callback {
-      cbs.transfer_progress(move |progress| {
-        callback.call(progress.into(), ThreadsafeFunctionCallMode::NonBlocking) == Status::Ok
-      });
-    }
-    options.remote_callbacks(cbs);
+    let mut default_fetch_options = git2::FetchOptions::default();
+    let mut options = fetch_options
+      .map(|o| {
+        std::mem::swap(&mut o.inner, &mut default_fetch_options);
+        default_fetch_options
+      })
+      .unwrap_or_else(|| Default::default());
     self
       .inner
       .fetch(refspecs.as_slice(), Some(&mut options), None)
