@@ -171,6 +171,11 @@ export interface Progress {
   indexedDeltas: number
   receivedBytes: number
 }
+export interface PushTransferProgress {
+  current: number
+  total: number
+  bytes: number
+}
 /** Check whether a cred_type contains another credential type. */
 export function credTypeContains(credType: CredentialType, another: CredentialType): boolean
 export const enum RepositoryState {
@@ -580,7 +585,9 @@ export class Remote {
    * disconnect and update the remote-tracking branches.
    *
    */
-  fetch(refspecs: string[], cb?: (progress: Progress) => void): void
+  fetch(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null): void
+  /** Update the tips to the new state */
+  updateTips(updateFetchhead: boolean, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
 }
 export class RemoteCallbacks {
   constructor()
@@ -611,9 +618,9 @@ export class RemoteCallbacks {
    *  .clone("git@github.com:rust-lang/git2-rs.git", "git2-rs")
    * ```
    */
-  credentials(callback: (cred: CredInfo) => Cred): this
+  credentials(callback: (arg: CredInfo) => Cred): this
   /** The callback through which progress is monitored. */
-  transferProgress(callback: (progress: Progress) => void): this
+  transferProgress(callback: (arg: Progress) => void): this
   /** The callback through which progress of push transfer is monitored */
   pushTransferProgress(callback: (current: number, total: number, bytes: number) => void): this
 }

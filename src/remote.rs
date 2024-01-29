@@ -1,11 +1,7 @@
 use std::{mem, path::Path};
 
 use git2::{ErrorClass, ErrorCode};
-use napi::{
-  bindgen_prelude::*,
-  threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode},
-  Error, NapiRaw, Status,
-};
+use napi::{bindgen_prelude::*, Error, NapiRaw, Status};
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
@@ -256,7 +252,7 @@ impl Remote {
     self.inner.stop().convert_without_message()
   }
 
-  #[napi(ts_args_type = "refspecs: string[], cb?: (progress: Progress) => void")]
+  #[napi]
   /// Download new data and update tips
   ///
   /// Convenience function to connect to a remote, download the data,
@@ -279,6 +275,27 @@ impl Remote {
       .fetch(refspecs.as_slice(), Some(&mut options), None)
       .convert_without_message()
   }
+
+  #[napi]
+  /// Update the tips to the new state
+  pub fn update_tips(
+    &mut self,
+    update_fetchhead: bool,
+    download_tags: AutotagOption,
+    mut callbacks: Option<&mut RemoteCallbacks>,
+    msg: Option<String>,
+  ) -> Result<()> {
+    let callbacks = callbacks.as_mut().map(|o| &mut o.inner);
+    self
+      .inner
+      .update_tips(
+        callbacks,
+        update_fetchhead,
+        download_tags.into(),
+        msg.as_deref(),
+      )
+      .convert_without_message()
+  }
 }
 
 #[napi]
@@ -298,7 +315,7 @@ impl RemoteCallbacks {
     }
   }
 
-  #[napi(ts_args_type = "callback: (cred: CredInfo) => Cred")]
+  #[napi]
   /// The callback through which to fetch credentials if required.
   ///
   /// # Example
@@ -376,14 +393,14 @@ impl RemoteCallbacks {
     Ok(self)
   }
 
-  #[napi(ts_args_type = "callback: (progress: Progress) => void")]
+  #[napi]
   /// The callback through which progress is monitored.
-  pub fn transfer_progress(
-    &mut self,
-    callback: ThreadsafeFunction<Progress, ErrorStrategy::Fatal>,
-  ) -> &Self {
+  pub fn transfer_progress(&mut self, env: Env, callback: FunctionRef<Progress, ()>) -> &Self {
     self.inner.transfer_progress(move |p| {
-      callback.call(p.into(), ThreadsafeFunctionCallMode::NonBlocking) == Status::Ok
+      callback
+        .borrow_back(&env)
+        .and_then(|cb| cb.call(p.into()))
+        .is_ok()
     });
     self
   }
@@ -392,15 +409,21 @@ impl RemoteCallbacks {
   /// The callback through which progress of push transfer is monitored
   pub fn push_transfer_progress(
     &mut self,
-    callback: ThreadsafeFunction<(u32, u32, u32), ErrorStrategy::Fatal>,
+    env: Env,
+    callback: FunctionRef<PushTransferProgress, ()>,
   ) -> &Self {
     self
       .inner
       .push_transfer_progress(move |current, total, bytes| {
-        callback.call(
-          (current as u32, total as u32, bytes as u32),
-          ThreadsafeFunctionCallMode::NonBlocking,
-        );
+        if let Err(err) = callback.borrow_back(&env).and_then(|cb| {
+          cb.call(PushTransferProgress {
+            current: current as u32,
+            total: total as u32,
+            bytes: bytes as u32,
+          })
+        }) {
+          eprintln!("Push transfer progress callback failed: {}", err);
+        }
       });
     self
   }
@@ -535,6 +558,13 @@ impl<'a> From<git2::Progress<'a>> for Progress {
       received_bytes: progress.received_bytes() as u32,
     }
   }
+}
+
+#[napi(object)]
+pub struct PushTransferProgress {
+  pub current: u32,
+  pub total: u32,
+  pub bytes: u32,
 }
 
 #[napi]
