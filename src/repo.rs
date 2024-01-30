@@ -380,14 +380,16 @@ impl Repository {
     self_ref: Reference<Repository>,
     env: Env,
     name: String,
-  ) -> Result<Remote> {
-    Ok(Remote {
-      inner: self_ref.share_with(env, move |repo| {
-        repo
-          .inner
-          .find_remote(&name)
-          .convert(format!("Failed to get remote [{}]", &name))
-      })?,
+  ) -> Option<Remote> {
+    Some(Remote {
+      inner: self_ref
+        .share_with(env, move |repo| {
+          repo
+            .inner
+            .find_remote(&name)
+            .convert(format!("Failed to get remote [{}]", &name))
+        })
+        .ok()?,
     })
   }
 
@@ -547,14 +549,18 @@ impl Repository {
 
   #[napi]
   /// Lookup a reference to one of the objects in a repository.
-  pub fn find_tree(&self, oid: String, self_ref: Reference<Repository>, env: Env) -> Result<Tree> {
-    Ok(Tree {
-      inner: TreeParent::Repository(self_ref.share_with(env, |repo| {
-        repo
-          .inner
-          .find_tree(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?)
-          .convert(format!("Find tree from OID [{oid}] failed"))
-      })?),
+  pub fn find_tree(&self, oid: String, self_ref: Reference<Repository>, env: Env) -> Option<Tree> {
+    Some(Tree {
+      inner: TreeParent::Repository(
+        self_ref
+          .share_with(env, |repo| {
+            repo
+              .inner
+              .find_tree(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?)
+              .convert(format!("Find tree from OID [{oid}] failed"))
+          })
+          .ok()?,
+      ),
     })
   }
 
@@ -564,14 +570,16 @@ impl Repository {
     oid: String,
     this_ref: Reference<Repository>,
     env: Env,
-  ) -> Result<Commit> {
-    let commit = this_ref.share_with(env, |repo| {
-      repo
-        .inner
-        .find_commit_by_prefix(&oid)
-        .convert(format!("Find commit from OID [{oid}] failed"))
-    })?;
-    Ok(Commit { inner: commit })
+  ) -> Option<Commit> {
+    let commit = this_ref
+      .share_with(env, |repo| {
+        repo
+          .inner
+          .find_commit_by_prefix(&oid)
+          .convert(format!("Find commit from OID [{oid}] failed"))
+      })
+      .ok()?;
+    Some(Commit { inner: commit })
   }
 
   #[napi]
