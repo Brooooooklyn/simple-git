@@ -269,7 +269,7 @@ impl Remote {
         std::mem::swap(&mut o.inner, &mut default_fetch_options);
         default_fetch_options
       })
-      .unwrap_or_else(|| Default::default());
+      .unwrap_or_default();
     self
       .inner
       .fetch(refspecs.as_slice(), Some(&mut options), None)
@@ -644,7 +644,7 @@ impl Cred {
     Ok(Self {
       inner: git2::Cred::ssh_key(
         username.as_str(),
-        publickey.as_ref().map(|s| Path::new(s)),
+        publickey.as_ref().map(Path::new),
         std::path::Path::new(&privatekey),
         passphrase.as_deref(),
       )

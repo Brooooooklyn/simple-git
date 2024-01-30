@@ -820,7 +820,78 @@ export class Repository {
   /** List all remotes for a given repository */
   remotes(): Array<string>
   /** Get the information for a particular remote */
-  remote(name: string): Remote
+  findRemote(name: string): Remote
+  /**
+   * Add a remote with the default fetch refspec to the repository's
+   * configuration.
+   */
+  remote(name: string, url: string): Remote
+  /**
+   * Add a remote with the provided fetch refspec to the repository's
+   * configuration.
+   */
+  remoteWithFetch(name: string, url: string, refspect: string): Remote
+  /**
+   * Create an anonymous remote
+   *
+   * Create a remote with the given URL and refspec in memory. You can use
+   * this when you have a URL instead of a remote's name. Note that anonymous
+   * remotes cannot be converted to persisted remotes.
+   */
+  remoteAnonymous(url: string): Remote
+  /**
+   * Give a remote a new name
+   *
+   * All remote-tracking branches and configuration settings for the remote
+   * are updated.
+   *
+   * A temporary in-memory remote cannot be given a name with this method.
+   *
+   * No loaded instances of the remote with the old name will change their
+   * name or their list of refspecs.
+   *
+   * The returned array of strings is a list of the non-default refspecs
+   * which cannot be renamed and are returned for further processing by the
+   * caller.
+   */
+  remoteRename(name: string, newName: string): Array<string>
+  /**
+   * Delete an existing persisted remote.
+   *
+   * All remote-tracking branches and configuration settings for the remote
+   * will be removed.
+   */
+  remoteDelete(name: string): this
+  /**
+   * Add a fetch refspec to the remote's configuration
+   *
+   * Add the given refspec to the fetch list in the configuration. No loaded
+   */
+  remoteAddFetch(name: string, refspec: string): this
+  /**
+   * Add a push refspec to the remote's configuration.
+   *
+   * Add the given refspec to the push list in the configuration. No
+   * loaded remote instances will be affected.
+   */
+  remoteAddPush(name: string, refspec: string): this
+  /**
+   * Add a push refspec to the remote's configuration.
+   *
+   * Add the given refspec to the push list in the configuration. No
+   * loaded remote instances will be affected.
+   */
+  remoteSetUrl(name: string, url: string): this
+  /**
+   * Set the remote's URL for pushing in the configuration.
+   *
+   * Remote objects already in memory will not be affected. This assumes
+   * the common case of a single-url remote and will otherwise return an
+   * error.
+   *
+   * `None` indicates that it should be cleared.
+   */
+  remoteSetPushurl(name: string, url?: string | undefined | null): this
   /** Lookup a reference to one of the objects in a repository. */
   findTree(oid: string): Tree
   findCommit(oid: string): Commit

@@ -375,7 +375,12 @@ impl Repository {
 
   #[napi]
   /// Get the information for a particular remote
-  pub fn remote(&self, self_ref: Reference<Repository>, env: Env, name: String) -> Result<Remote> {
+  pub fn find_remote(
+    &self,
+    self_ref: Reference<Repository>,
+    env: Env,
+    name: String,
+  ) -> Result<Remote> {
     Ok(Remote {
       inner: self_ref.share_with(env, move |repo| {
         repo
@@ -384,6 +389,160 @@ impl Repository {
           .convert(format!("Failed to get remote [{}]", &name))
       })?,
     })
+  }
+
+  #[napi]
+  /// Add a remote with the default fetch refspec to the repository's
+  /// configuration.
+  pub fn remote(
+    &mut self,
+    env: Env,
+    this: Reference<Repository>,
+    name: String,
+    url: String,
+  ) -> Result<Remote> {
+    Ok(Remote {
+      inner: this.share_with(env, move |repo| {
+        repo
+          .inner
+          .remote(&name, &url)
+          .convert(format!("Failed to add remote [{}]", &name))
+      })?,
+    })
+  }
+
+  #[napi]
+  /// Add a remote with the provided fetch refspec to the repository's
+  /// configuration.
+  pub fn remote_with_fetch(
+    &mut self,
+    env: Env,
+    this: Reference<Repository>,
+    name: String,
+    url: String,
+    refspect: String,
+  ) -> Result<Remote> {
+    Ok(Remote {
+      inner: this.share_with(env, move |repo| {
+        repo
+          .inner
+          .remote_with_fetch(&name, &url, &refspect)
+          .convert("Failed to add remote")
+      })?,
+    })
+  }
+
+  #[napi]
+  /// Create an anonymous remote
+  ///
+  /// Create a remote with the given URL and refspec in memory. You can use
+  /// this when you have a URL instead of a remote's name. Note that anonymous
+  /// remotes cannot be converted to persisted remotes.
+  pub fn remote_anonymous(
+    &self,
+    env: Env,
+    this: Reference<Repository>,
+    url: String,
+  ) -> Result<Remote> {
+    Ok(Remote {
+      inner: this.share_with(env, move |repo| {
+        repo
+          .inner
+          .remote_anonymous(&url)
+          .convert("Failed to create anonymous remote")
+      })?,
+    })
+  }
+
+  #[napi]
+  /// Give a remote a new name
+  ///
+  /// All remote-tracking branches and configuration settings for the remote
+  /// are updated.
+  ///
+  /// A temporary in-memory remote cannot be given a name with this method.
+  ///
+  /// No loaded instances of the remote with the old name will change their
+  /// name or their list of refspecs.
+  ///
+  /// The returned array of strings is a list of the non-default refspecs
+  /// which cannot be renamed and are returned for further processing by the
+  /// caller.
+  pub fn remote_rename(&self, name: String, new_name: String) -> Result<Vec<String>> {
+    Ok(
+      self
+        .inner
+        .remote_rename(&name, &new_name)
+        .convert(format!("Failed to rename remote [{}]", &name))?
+        .into_iter()
+        .flatten()
+        .map(|s| s.to_owned())
+        .collect::<Vec<_>>(),
+    )
+  }
+
+  #[napi]
+  /// Delete an existing persisted remote.
+  ///
+  /// All remote-tracking branches and configuration settings for the remote
+  /// will be removed.
+  pub fn remote_delete(&self, name: String) -> Result<&Self> {
+    self.inner.remote_delete(&name).convert_without_message()?;
+    Ok(self)
+  }
+
+  #[napi]
+  /// Add a fetch refspec to the remote's configuration
+  ///
+  /// Add the given refspec to the fetch list in the configuration. No loaded
+  pub fn remote_add_fetch(&self, name: String, refspec: String) -> Result<&Self> {
+    self
+      .inner
+      .remote_add_fetch(&name, &refspec)
+      .convert_without_message()?;
+    Ok(self)
+  }
+
+  #[napi]
+  /// Add a push refspec to the remote's configuration.
+  ///
+  /// Add the given refspec to the push list in the configuration. No
+  /// loaded remote instances will be affected.
+  pub fn remote_add_push(&self, name: String, refspec: String) -> Result<&Self> {
+    self
+      .inner
+      .remote_add_push(&name, &refspec)
+      .convert_without_message()?;
+    Ok(self)
+  }
+
+  #[napi]
+  /// Add a push refspec to the remote's configuration.
+  ///
+  /// Add the given refspec to the push list in the configuration. No
+  /// loaded remote instances will be affected.
+  pub fn remote_set_url(&self, name: String, url: String) -> Result<&Self> {
+    self
+      .inner
+      .remote_set_url(&name, &url)
+      .convert_without_message()?;
+    Ok(self)
+  }
+
+  #[napi]
+  /// Set the remote's URL for pushing in the configuration.
+  ///
+  /// Remote objects already in memory will not be affected. This assumes
+  /// the common case of a single-url remote and will otherwise return an
+  /// error.
+  ///
+  /// `None` indicates that it should be cleared.
+  pub fn remote_set_pushurl(&self, name: String, url: Option<String>) -> Result<&Self> {
+    self
+      .inner
+      .remote_set_pushurl(&name, url.as_deref())
+      .convert_without_message()?;
+    Ok(self)
   }
 
   #[napi]

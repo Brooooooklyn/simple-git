@@ -138,7 +138,7 @@ impl RepoBuilder {
     Ok(Repository {
       inner: self
         .builder
-        .clone(&url, &Path::new(&path))
+        .clone(&url, Path::new(&path))
         .convert("Clone failed")?,
     })
   }
