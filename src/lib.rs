@@ -11,5 +11,6 @@ pub mod repo;
 pub mod repo_builder;
 pub mod rev_walk;
 pub mod signature;
+pub mod tag;
 pub mod tree;
 pub(crate) mod util;

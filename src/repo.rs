@@ -4,7 +4,7 @@ use napi::{bindgen_prelude::*, JsString};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 
-use crate::commit::Commit;
+use crate::commit::{Commit, CommitInner};
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
 use crate::object::{GitObject, ObjectParent};
@@ -12,6 +12,7 @@ use crate::reference;
 use crate::remote::Remote;
 use crate::rev_walk::RevWalk;
 use crate::signature::Signature;
+use crate::tag::Tag;
 use crate::tree::{Tree, TreeEntry, TreeParent};
 use crate::util::path_to_javascript_string;
 
@@ -579,7 +580,126 @@ impl Repository {
           .convert(format!("Find commit from OID [{oid}] failed"))
       })
       .ok()?;
-    Some(Commit { inner: commit })
+    Some(Commit {
+      inner: CommitInner::Repository(commit),
+    })
+  }
+
+  #[napi]
+  /// Create a new tag in the repository from an object
+  ///
+  /// A new reference will also be created pointing to this tag object. If
+  /// `force` is true and a reference already exists with the given name,
+  /// it'll be replaced.
+  ///
+  /// The message will not be cleaned up.
+  ///
+  /// The tag name will be checked for validity. You must avoid the characters
+  /// '~', '^', ':', ' \ ', '?', '[', and '*', and the sequences ".." and " @
+  /// {" which have special meaning to revparse.
+  pub fn tag(
+    &self,
+    name: String,
+    target: &GitObject,
+    tagger: &Signature,
+    message: String,
+    force: bool,
+  ) -> Result<String> {
+    self
+      .inner
+      .tag(&name, &*target.inner, &*tagger.inner, &message, force)
+      .map(|o| o.to_string())
+      .convert("Failed to create tag")
+  }
+
+  #[napi]
+  /// Create a new tag in the repository from an object without creating a reference.
+  ///
+  /// The message will not be cleaned up.
+  ///
+  /// The tag name will be checked for validity. You must avoid the characters
+  /// '~', '^', ':', ' \ ', '?', '[', and '*', and the sequences ".." and " @
+  /// {" which have special meaning to revparse.
+  pub fn tag_annotation_create(
+    &self,
+    name: String,
+    target: &GitObject,
+    tagger: &Signature,
+    message: String,
+  ) -> Result<String> {
+    self
+      .inner
+      .tag_annotation_create(&name, &*target.inner, &*tagger.inner, &message)
+      .map(|o| o.to_string())
+      .convert("Failed to create tag annotation")
+  }
+
+  #[napi]
+  /// Create a new lightweight tag pointing at a target object
+  ///
+  /// A new direct reference will be created pointing to this target object.
+  /// If force is true and a reference already exists with the given name,
+  /// it'll be replaced.
+  pub fn tag_lightweight(&self, name: String, target: &GitObject, force: bool) -> Result<String> {
+    self
+      .inner
+      .tag_lightweight(&name, &*target.inner, force)
+      .map(|o| o.to_string())
+      .convert("Failed to create lightweight tag")
+  }
+
+  #[napi]
+  /// Lookup a tag object from the repository.
+  pub fn find_tag(&self, env: Env, this: Reference<Repository>, oid: String) -> Result<Tag> {
+    Ok(Tag {
+      inner: this.share_with(env, |repo| {
+        repo
+          .inner
+          .find_tag(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?)
+          .convert(format!("Find tag from OID [{oid}] failed"))
+      })?,
+    })
+  }
+
+  #[napi]
+  /// Delete an existing tag reference.
+  ///
+  /// The tag name will be checked for validity, see `tag` for some rules
+  /// about valid names.
+  pub fn tag_delete(&self, name: String) -> Result<()> {
+    self.inner.tag_delete(&name).convert_without_message()?;
+    Ok(())
+  }
+
+  #[napi]
+  /// Get a list with all the tags in the repository.
+  ///
+  /// An optional fnmatch pattern can also be specified.
+  pub fn tag_names(&self, pattern: Option<String>) -> Result<Vec<String>> {
+    self
+      .inner
+      .tag_names(pattern.as_deref())
+      .convert("Failed to get tag names")
+      .map(|tags| {
+        tags
+          .into_iter()
+          .filter_map(|s| s.map(|s| s.to_owned()))
+          .collect()
+      })
+  }
+
+  #[napi]
+  /// iterate over all tags calling `cb` on each.
+  /// the callback is provided the tag id and name
+  pub fn tag_foreach(&self, cb: Function<(String, Buffer), ()>) -> Result<()> {
+    self
+      .inner
+      .tag_foreach(|oid, name| {
+        let oid = oid.to_string();
+        let name = name.to_vec();
+        cb.call((oid, name.into())).is_ok()
+      })
+      .convert_without_message()
   }
 
   #[napi]

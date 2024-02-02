@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
@@ -5,13 +7,30 @@ use chrono::{DateTime, Utc};
 
 use crate::{
   error::IntoNapiError,
+  object::ObjectParent,
   signature::{Signature, SignatureInner},
   tree::{Tree, TreeParent},
 };
 
+pub(crate) enum CommitInner {
+  Repository(SharedReference<crate::repo::Repository, git2::Commit<'static>>),
+  Commit(git2::Commit<'static>),
+}
+
+impl Deref for CommitInner {
+  type Target = git2::Commit<'static>;
+
+  fn deref(&self) -> &Self::Target {
+    match self {
+      CommitInner::Repository(r) => r.deref(),
+      CommitInner::Commit(c) => c,
+    }
+  }
+}
+
 #[napi]
 pub struct Commit {
-  pub(crate) inner: SharedReference<crate::repo::Repository, git2::Commit<'static>>,
+  pub(crate) inner: CommitInner,
 }
 
 #[napi]
@@ -189,10 +208,83 @@ impl Commit {
   }
 
   #[napi]
+  /// Amend this existing commit with all non-`None` values
+  ///
+  /// This creates a new commit that is exactly the same as the old commit,
+  /// except that any non-`None` values will be updated. The new commit has
+  /// the same parents as the old commit.
+  ///
+  /// For information about `update_ref`, see [`Repository::commit`].
+  ///
+  /// [`Repository::commit`]: struct.Repository.html#method.commit
+  pub fn amend(
+    &self,
+    update_ref: Option<&str>,
+    author: Option<&Signature>,
+    committer: Option<&Signature>,
+    message_encoding: Option<&str>,
+    message: Option<&str>,
+    tree: Option<&Tree>,
+  ) -> Result<String> {
+    self
+      .inner
+      .amend(
+        update_ref,
+        author.map(|s| &*s.inner),
+        committer.map(|s| &*s.inner),
+        message_encoding,
+        message,
+        tree.map(|s| &*s.inner()),
+      )
+      .map(|oid| oid.to_string())
+      .convert("Amend commit failed")
+  }
+
+  #[napi]
   /// Get the number of parents of this commit.
   ///
   /// Use the `parents` iterator to return an iterator over all parents.
   pub fn parent_count(&self) -> usize {
     self.inner.parent_count()
+  }
+
+  #[napi]
+  /// Get the specified parent of the commit.
+  ///
+  /// Use the `parents` iterator to return an iterator over all parents.
+  pub fn parent(&self, i: u32) -> Result<Commit> {
+    Ok(Self {
+      inner: CommitInner::Commit(
+        self
+          .inner
+          .parent(i as usize)
+          .convert("Find parent commit failed")?,
+      ),
+    })
+  }
+
+  #[napi]
+  /// Get the specified parent id of the commit.
+  ///
+  /// This is different from `parent`, which will attempt to load the
+  /// parent commit from the ODB.
+  ///
+  /// Use the `parent_ids` iterator to return an iterator over all parents.
+  pub fn parent_id(&self, i: u32) -> Result<String> {
+    Ok(
+      self
+        .inner
+        .parent_id(i as usize)
+        .convert("Find parent commit failed")?
+        .to_string(),
+    )
+  }
+
+  #[napi]
+  /// Casts this Commit to be usable as an `Object`
+  pub fn as_object(&self) -> crate::object::GitObject {
+    crate::object::GitObject {
+      inner: ObjectParent::Object(self.inner.as_object().clone()),
+    }
   }
 }

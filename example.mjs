@@ -15,6 +15,6 @@ const head = repo.head()
 console.info('HEAD:', head.name())
 console.info('HEAD shorthand:', head.shorthand())
 
-repo.remote('origin').fetch([head.name()], (p) => {
-  console.log(p)
+repo.tagForeach((oid, nameBuffer) => {
+  console.info(`Tag: ${nameBuffer.toString()} (${oid.toString()})`)
 })
