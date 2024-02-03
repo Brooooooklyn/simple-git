@@ -45,7 +45,7 @@ impl From<ObjectType> for git2::ObjectType {
 
 pub(crate) enum ObjectParent {
   Repository(SharedReference<Repository, git2::Object<'static>>),
-  Object(SharedReference<GitObject, git2::Object<'static>>),
+  Object(git2::Object<'static>),
 }
 
 impl Deref for ObjectParent {
@@ -54,7 +54,7 @@ impl Deref for ObjectParent {
   fn deref(&self) -> &git2::Object<'static> {
     match self {
       ObjectParent::Repository(parent) => parent.deref(),
-      ObjectParent::Object(parent) => parent.deref(),
+      ObjectParent::Object(parent) => &parent,
     }
   }
 }
@@ -79,16 +79,14 @@ impl GitObject {
   }
 
   #[napi]
-  pub fn peel(
-    &self,
-    kind: ObjectType,
-    this_ref: Reference<GitObject>,
-    env: Env,
-  ) -> Result<GitObject> {
+  /// Recursively peel an object until an object of the specified type is met.
+  ///
+  /// If you pass `Any` as the target type, then the object will be
+  /// peeled until the type changes (e.g. a tag will be chased until the
+  /// referenced object is no longer a tag).
+  pub fn peel(&self, kind: ObjectType) -> Result<GitObject> {
     Ok(GitObject {
-      inner: ObjectParent::Object(this_ref.share_with(env, |o| {
-        o.inner.peel(kind.into()).convert("Peel object failed")
-      })?),
+      inner: ObjectParent::Object(self.inner.peel(kind.into()).convert("Peel object failed")?),
     })
   }
 }

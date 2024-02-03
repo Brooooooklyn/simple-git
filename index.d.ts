@@ -355,11 +355,40 @@ export class Commit {
   /** Get the committer of this commit. */
   committer(): Signature
   /**
+   * Amend this existing commit with all non-`None` values
+   *
+   * This creates a new commit that is exactly the same as the old commit,
+   * except that any non-`None` values will be updated. The new commit has
+   * the same parents as the old commit.
+   *
+   * For information about `update_ref`, see [`Repository::commit`].
+   *
+   * [`Repository::commit`]: struct.Repository.html#method.commit
+   */
+  amend(updateRef?: string | undefined | null, author?: Signature | undefined | null, committer?: Signature | undefined | null, messageEncoding?: string | undefined | null, message?: string | undefined | null, tree?: Tree | undefined | null): string
+  /**
    * Get the number of parents of this commit.
    *
    * Use the `parents` iterator to return an iterator over all parents.
    */
   parentCount(): bigint
+  /**
+   * Get the specified parent of the commit.
+   *
+   * Use the `parents` iterator to return an iterator over all parents.
+   */
+  parent(i: number): Commit
+  /**
+   * Get the specified parent id of the commit.
+   *
+   * This is different from `parent`, which will attempt to load the
+   * parent commit from the ODB.
+   *
+   * Use the `parent_ids` iterator to return an iterator over all parents.
+   */
+  parentId(i: number): string
+  /** Casts this Commit to be usable as an `Object` */
+  asObject(): GitObject
 }
 /** An iterator over the diffs in a delta */
 export class Deltas {
@@ -439,6 +468,13 @@ export class GitObject {
   id(): string
   /** Get the type of the object. */
   kind(): ObjectType | null
+  /**
+   * Recursively peel an object until an object of the specified type is met.
+   *
+   * If you pass `Any` as the target type, then the object will be
+   * peeled until the type changes (e.g. a tag will be chased until the
+   * referenced object is no longer a tag).
+   */
   peel(kind: ObjectType): GitObject
 }
 export class Reference {
@@ -820,7 +856,7 @@ export class Repository {
   /** List all remotes for a given repository */
   remotes(): Array<string>
   /** Get the information for a particular remote */
-  findRemote(name: string): Remote
+  findRemote(name: string): Remote | null
   /**
    * Add a remote with the default fetch refspec to the repository's
    * configuration.
@@ -893,8 +929,60 @@ export class Repository {
    */
   remoteSetPushurl(name: string, url?: string | undefined | null): this
   /** Lookup a reference to one of the objects in a repository. */
-  findTree(oid: string): Tree
-  findCommit(oid: string): Commit
+  findTree(oid: string): Tree | null
+  findCommit(oid: string): Commit | null
+  /**
+   * Create a new tag in the repository from an object
+   *
+   * A new reference will also be created pointing to this tag object. If
+   * `force` is true and a reference already exists with the given name,
+   * it'll be replaced.
+   *
+   * The message will not be cleaned up.
+   *
+   * The tag name will be checked for validity. You must avoid the characters
+   * '~', '^', ':', ' \ ', '?', '[', and '*', and the sequences ".." and " @
+   * {" which have special meaning to revparse.
+   */
+  tag(name: string, target: GitObject, tagger: Signature, message: string, force: boolean): string
+  /**
+   * Create a new tag in the repository from an object without creating a reference.
+   *
+   * The message will not be cleaned up.
+   *
+   * The tag name will be checked for validity. You must avoid the characters
+   * '~', '^', ':', ' \ ', '?', '[', and '*', and the sequences ".." and " @
+   * {" which have special meaning to revparse.
+   */
+  tagAnnotationCreate(name: string, target: GitObject, tagger: Signature, message: string): string
+  /**
+   * Create a new lightweight tag pointing at a target object
+   *
+   * A new direct reference will be created pointing to this target object.
+   * If force is true and a reference already exists with the given name,
+   * it'll be replaced.
+   */
+  tagLightweight(name: string, target: GitObject, force: boolean): string
+  /** Lookup a tag object from the repository. */
+  findTag(oid: string): Tag
+  /**
+   * Delete an existing tag reference.
+   *
+   * The tag name will be checked for validity, see `tag` for some rules
+   * about valid names.
+   */
+  tagDelete(name: string): void
+  /**
+   * Get a list with all the tags in the repository.
+   *
+   * An optional fnmatch pattern can also be specified.
+   */
+  tagNames(pattern?: string | undefined | null): Array<string>
+  /**
+   * iterate over all tags calling `cb` on each.
+   * the callback is provided the tag id and name
+   */
+  tagForeach(cb: (arg0: string, arg1: Buffer) => void): void
   /**
    * Create a diff between a tree and the working directory.
    *
@@ -1101,6 +1189,38 @@ export class Signature {
   email(): string | null
   /** Return the time, in seconds, from epoch */
   when(): number
+}
+export class Tag {
+  /**
+   * Determine whether a tag name is valid, meaning that (when prefixed with refs/tags/) that
+   * it is a valid reference name, and that any additional tag name restrictions are imposed
+   * (eg, it cannot start with a -).
+   */
+  static isValidName(name: string): boolean
+  /** Get the id (SHA1) of a repository object */
+  id(): string
+  /**
+   * Get the message of a tag
+   *
+   * Returns None if there is no message or if it is not valid utf8
+   */
+  message(): string | null
+  /**
+   * Get the message of a tag
+   *
+   * Returns None if there is no message
+   */
+  messageBytes(): Buffer | null
+  /**
+   * Get the name of a tag
+   *
+   * Returns None if it is not valid utf8
+   */
+  name(): string | null
+  /** Get the name of a tag */
+  nameBytes(): Buffer
+  /** Recursively peel a tag until a non tag git_object is found */
+  peel(): GitObject
 }
 export class Tree {
   /** Get the id (SHA1) of a repository object */
