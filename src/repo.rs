@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::RwLock;
 
 use napi::{bindgen_prelude::*, JsString};
 use napi_derive::napi;
@@ -101,9 +102,11 @@ impl From<RepositoryOpenFlags> for git2::RepositoryOpenFlags {
 }
 
 pub struct GitDateTask {
-  repo: napi::bindgen_prelude::Reference<Repository>,
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
   filepath: String,
 }
+
+unsafe impl Send for GitDateTask {}
 
 #[napi]
 impl Task for GitDateTask {
@@ -111,11 +114,18 @@ impl Task for GitDateTask {
   type JsValue = i64;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_modified_date(&self.repo.inner, &self.filepath)
-      .convert_without_message()
-      .and_then(|value| {
-        value.expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
-      })
+    get_file_modified_date(
+      &(**self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?)
+      .inner,
+      &self.filepath,
+    )
+    .convert_without_message()
+    .and_then(|value| {
+      value.expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
+    })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -834,7 +844,7 @@ impl Repository {
   ) -> Result<AsyncTask<GitDateTask>> {
     Ok(AsyncTask::with_optional_signal(
       GitDateTask {
-        repo: self_ref,
+        repo: RwLock::new(self_ref),
         filepath,
       },
       signal,
