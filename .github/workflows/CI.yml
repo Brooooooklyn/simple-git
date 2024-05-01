@@ -27,11 +27,9 @@ jobs:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: |
-              yarn build
-              strip -x *.node
+            build: yarn build --target x86_64-apple-darwin
           - host: windows-latest
-            build: yarn build
+            build: yarn build --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -42,26 +40,17 @@ jobs:
               apt-get install perl -y &&
               rustup target add x86_64-unknown-linux-gnu &&
               cp /usr/lib/x86_64-linux-gnu/libz.a /usr/x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu/sysroot/lib &&
-              yarn build --target x86_64-unknown-linux-gnu &&
-              strip *.node
+              yarn build --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
             build: |-
               set -e &&
               apk add perl &&
-              yarn build &&
-              strip *.node
+              yarn build
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: |
-              sudo rm -Rf /Library/Developer/CommandLineTools/SDKs/*;
-              export CC=$(xcrun -f clang);
-              export CXX=$(xcrun -f clang++);
-              SYSROOT=$(xcrun --sdk macosx --show-sdk-path);
-              export CFLAGS="-isysroot $SYSROOT -isystem $SYSROOT";
-              yarn build --target aarch64-apple-darwin
-              strip -x *.node
+            build: yarn build --target aarch64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
@@ -71,26 +60,19 @@ jobs:
               apt-get install -y perl &&
               unset CC_aarch64_unknown_linux_gnu &&
               unset CXX_aarch64_unknown_linux_gnu &&
-              yarn build --target aarch64-unknown-linux-gnu &&
-              llvm-strip -x *.node
+              yarn build --target aarch64-unknown-linux-gnu
           - host: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
             setup: |
               sudo apt-get update
               sudo apt-get install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libatomic1-armhf-cross -y
-            build: |
-              yarn build --target armv7-unknown-linux-gnueabihf --zig --zig-link-only
-              arm-linux-gnueabihf-strip *.node
+            build: yarn build --target armv7-unknown-linux-gnueabihf --zig --zig-link-only
           - host: ubuntu-latest
             target: aarch64-linux-android
-            build: |
-              yarn build --target aarch64-linux-android
-              ${ANDROID_NDK_LATEST_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip *.node
+            build: yarn build --target aarch64-linux-android
           - host: ubuntu-latest
             target: armv7-linux-androideabi
-            build: |
-              yarn build --target armv7-linux-androideabi
-              ${ANDROID_NDK_LATEST_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip *.node
+            build: yarn build --target armv7-linux-androideabi
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
@@ -98,12 +80,11 @@ jobs:
               set -e &&
               apk add perl &&
               rustup target add aarch64-unknown-linux-musl &&
-              yarn build --target aarch64-unknown-linux-musl &&
-              /aarch64-linux-musl-cross/bin/aarch64-linux-musl-strip *.node
+              yarn build --target aarch64-unknown-linux-musl
           - host: windows-latest
             target: aarch64-pc-windows-msvc
             build: yarn build --target aarch64-pc-windows-msvc
-    name: stable - ${{ matrix.settings.target }} - node@18
+    name: stable - ${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -111,7 +92,7 @@ jobs:
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
         with:
-          node-version: 18
+          node-version: 20
           cache: yarn
       - name: Install
         uses: dtolnay/rust-toolchain@stable
@@ -135,7 +116,7 @@ jobs:
       - uses: goto-bus-stop/setup-zig@v2
         if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' }}
         with:
-          version: 0.11.0
+          version: 0.12.0
       - name: Install dependencies
         run: yarn install --mode=skip-build --immutable
       - name: Build in docker
@@ -166,8 +147,13 @@ jobs:
         settings:
           - host: macos-latest
             target: 'x86_64-apple-darwin'
+            architecture: 'x64'
+          - host: macos-latest
+            target: 'aarch64-apple-darwin'
+            architecture: 'arm64'
           - host: windows-latest
             target: x86_64-pc-windows-msvc
+            architecture: 'x64'
         node:
           - '18'
           - '20'
@@ -181,6 +167,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: yarn
+          architecture: ${{ matrix.settings.architecture }}
       - name: Install dependencies
         run: yarn install --mode=skip-build --immutable
       - name: Download artifacts
@@ -237,7 +224,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: yarn
       - name: Install dependencies
         run: yarn install --mode=skip-build --immutable
