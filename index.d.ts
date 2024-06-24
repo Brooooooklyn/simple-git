@@ -162,6 +162,10 @@ export interface CredInfo {
   url: string
   username: string
 }
+export const enum RemoteUpdateFlags {
+  UpdateFetchHead = 1,
+  ReportUnchanged = 2
+}
 export interface Progress {
   totalObjects: number
   indexedObjects: number
@@ -623,7 +627,7 @@ export class Remote {
    */
   fetch(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null): void
   /** Update the tips to the new state */
-  updateTips(updateFetchhead: boolean, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
+  updateTips(updateFetchhead: RemoteUpdateFlags, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
 }
 export class RemoteCallbacks {
   constructor()

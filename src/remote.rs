@@ -166,6 +166,22 @@ pub struct CredInfo {
 }
 
 #[napi]
+#[repr(u32)]
+pub enum RemoteUpdateFlags {
+  UpdateFetchHead = 1,
+  ReportUnchanged = 2,
+}
+
+impl From<RemoteUpdateFlags> for git2::RemoteUpdateFlags {
+  fn from(value: RemoteUpdateFlags) -> Self {
+    match value {
+      RemoteUpdateFlags::UpdateFetchHead => git2::RemoteUpdateFlags::UPDATE_FETCHHEAD,
+      RemoteUpdateFlags::ReportUnchanged => git2::RemoteUpdateFlags::REPORT_UNCHANGED,
+    }
+  }
+}
+
+#[napi]
 pub struct Remote {
   pub(crate) inner: SharedReference<crate::repo::Repository, git2::Remote<'static>>,
 }
@@ -280,7 +296,7 @@ impl Remote {
   /// Update the tips to the new state
   pub fn update_tips(
     &mut self,
-    update_fetchhead: bool,
+    update_fetchhead: RemoteUpdateFlags,
     download_tags: AutotagOption,
     mut callbacks: Option<&mut RemoteCallbacks>,
     msg: Option<String>,
@@ -290,7 +306,7 @@ impl Remote {
       .inner
       .update_tips(
         callbacks,
-        update_fetchhead,
+        update_fetchhead.into(),
         download_tags.into(),
         msg.as_deref(),
       )
