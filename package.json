@@ -15,8 +15,11 @@
         "aarch64-unknown-linux-gnu",
         "aarch64-unknown-linux-musl",
         "aarch64-pc-windows-msvc",
+        "powerpc64le-unknown-linux-gnu",
+        "s390x-unknown-linux-gnu",
         "armv7-unknown-linux-gnueabihf",
         "x86_64-unknown-linux-musl",
+        "x86_64-unknown-freebsd",
         "armv7-linux-androideabi"
       ]
     }
@@ -31,7 +34,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.2",
+    "@napi-rs/cli": "^2.18.4",
     "@types/node": "^20.12.7",
     "ava": "^6.1.2",
     "pretty-ms": "^9.0.0"
