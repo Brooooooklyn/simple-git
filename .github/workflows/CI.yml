@@ -2,20 +2,20 @@ name: CI
 env:
   DEBUG: napi:*
   APP_NAME: simple-git
-  MACOSX_DEPLOYMENT_TARGET: '10.13'
+  MACOSX_DEPLOYMENT_TARGET: "10.13"
 permissions:
   contents: write
   id-token: write
-'on':
+"on":
   push:
     branches:
       - main
     tags-ignore:
-      - '**'
+      - "**"
     paths-ignore:
-      - '**/*.md'
+      - "**/*.md"
       - LICENSE
-      - '**/*.gitignore'
+      - "**/*.gitignore"
       - .editorconfig
       - docs/**
   pull_request: null
@@ -120,10 +120,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-             ~/.cargo/registry
-             ~/.cargo/git
-             .cargo-cache
-             target
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cargo-cache
+            target
           key: ${{ matrix.settings.target }}-cargo-cache
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
@@ -140,7 +140,7 @@ jobs:
         if: ${{ matrix.settings.docker }}
         with:
           image: ${{ matrix.settings.docker }}
-          options: '-v ${{ github.workspace }}/.cargo-cache/git:/usr/local/cargo/git -v ${{ github.workspace }}/.cargo-cache/registry:/usr/local/cargo/registry -v ${{ github.workspace }}:/build -w /build'
+          options: "-v ${{ github.workspace }}/.cargo-cache/git:/usr/local/cargo/git -v ${{ github.workspace }}/.cargo-cache/registry:/usr/local/cargo/registry -v ${{ github.workspace }}:/build -w /build"
           run: ${{ matrix.settings.build }}
       - name: Build
         run: ${{ matrix.settings.build }}
@@ -166,10 +166,10 @@ jobs:
           RUSTUP_IO_THREADS: 1
         with:
           operating_system: freebsd
-          version: '14.0'
+          version: "14.1"
           memory: 8G
           cpu_count: 3
-          environment_variables: 'DEBUG RUSTUP_IO_THREADS'
+          environment_variables: "DEBUG RUSTUP_IO_THREADS"
           shell: bash
           run: |
             sudo pkg install -y -f curl node libnghttp2 npm perl5
@@ -206,17 +206,17 @@ jobs:
       matrix:
         settings:
           - host: macos-latest
-            target: 'x86_64-apple-darwin'
-            architecture: 'x64'
+            target: "x86_64-apple-darwin"
+            architecture: "x64"
           - host: macos-latest
-            target: 'aarch64-apple-darwin'
-            architecture: 'arm64'
+            target: "aarch64-apple-darwin"
+            architecture: "arm64"
           - host: windows-latest
             target: x86_64-pc-windows-msvc
-            architecture: 'x64'
+            architecture: "x64"
         node:
-          - '18'
-          - '20'
+          - "18"
+          - "20"
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -248,8 +248,8 @@ jobs:
       fail-fast: false
       matrix:
         node:
-          - '18'
-          - '20'
+          - "18"
+          - "20"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
