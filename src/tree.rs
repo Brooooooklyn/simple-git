@@ -1,7 +1,16 @@
 use std::ops::Deref;
+use std::path::Path;
 
-use napi::bindgen_prelude::{Buffer, Env, Error, Generator, Reference, Result, SharedReference};
+use napi::bindgen_prelude::{
+  Env, Error, Generator, Reference, Result, SharedReference, Uint8Array,
+};
 use napi_derive::napi;
+
+use crate::{
+  error::IntoNapiError,
+  object::{GitObject, ObjectParent},
+  repo::Repository,
+};
 
 pub(crate) enum TreeParent {
   Repository(SharedReference<crate::repo::Repository, git2::Tree<'static>>),
@@ -49,6 +58,76 @@ impl Tree {
       inner: this_ref.share_with(env, |tree| Ok(tree.inner().iter()))?,
     })
   }
+
+  #[napi]
+  /// Lookup a tree entry by SHA value
+  pub fn get_id(&self, this_ref: Reference<Tree>, env: Env, id: String) -> Option<TreeEntry> {
+    let reference = this_ref
+      .share_with(env, |tree| {
+        if let Some(entry) = tree
+          .inner()
+          .get_id(git2::Oid::from_str(&id).convert_without_message()?)
+        {
+          Ok(entry)
+        } else {
+          Err(Error::new(napi::Status::InvalidArg, "Tree entry not found"))
+        }
+      })
+      .ok()?;
+    Some(TreeEntry {
+      inner: TreeEntryInner::Ref(reference),
+    })
+  }
+
+  #[napi]
+  /// Lookup a tree entry by its position in the tree
+  pub fn get(&self, this_ref: Reference<Tree>, env: Env, index: u32) -> Option<TreeEntry> {
+    let reference = this_ref
+      .share_with(env, |tree| {
+        if let Some(entry) = tree.inner().get(index as usize) {
+          Ok(entry)
+        } else {
+          Err(Error::new(napi::Status::InvalidArg, "Tree entry not found"))
+        }
+      })
+      .ok()?;
+    Some(TreeEntry {
+      inner: TreeEntryInner::Ref(reference),
+    })
+  }
+
+  #[napi]
+  /// Lookup a tree entry by its filename
+  pub fn get_name(&self, this_ref: Reference<Tree>, env: Env, name: String) -> Option<TreeEntry> {
+    let reference = this_ref
+      .share_with(env, |tree| {
+        if let Some(entry) = tree.inner().get_name(&name) {
+          Ok(entry)
+        } else {
+          Err(Error::new(napi::Status::InvalidArg, "Tree entry not found"))
+        }
+      })
+      .ok()?;
+    Some(TreeEntry {
+      inner: TreeEntryInner::Ref(reference),
+    })
+  }
+
+  #[napi]
+  /// Lookup a tree entry by its filename
+  pub fn get_path(&self, this_ref: Reference<Tree>, env: Env, name: String) -> Option<TreeEntry> {
+    let reference = this_ref
+      .share_with(env, |tree| {
+        tree
+          .inner()
+          .get_path(Path::new(&name))
+          .convert_without_message()
+      })
+      .ok()?;
+    Some(TreeEntry {
+      inner: TreeEntryInner::Ref(reference),
+    })
+  }
 }
 
 impl<'a> AsRef<git2::Tree<'a>> for Tree {
@@ -73,13 +152,31 @@ impl Generator for TreeIter {
   type Next = ();
 
   fn next(&mut self, _value: Option<()>) -> Option<Self::Yield> {
-    self.inner.next().map(|e| TreeEntry { inner: e })
+    self.inner.next().map(|e| TreeEntry {
+      inner: TreeEntryInner::Owned(e),
+    })
   }
+}
+
+pub(crate) enum TreeEntryInner {
+  Owned(git2::TreeEntry<'static>),
+  Ref(SharedReference<Tree, git2::TreeEntry<'static>>),
 }
 
 #[napi]
 pub struct TreeEntry {
-  pub(crate) inner: git2::TreeEntry<'static>,
+  pub(crate) inner: TreeEntryInner,
+}
+
+impl Deref for TreeEntryInner {
+  type Target = git2::TreeEntry<'static>;
+
+  fn deref(&self) -> &Self::Target {
+    match &self {
+      TreeEntryInner::Owned(entry) => entry,
+      TreeEntryInner::Ref(entry) => entry.deref(),
+    }
+  }
 }
 
 #[napi]
@@ -101,7 +198,18 @@ impl TreeEntry {
 
   #[napi]
   /// Get the filename of a tree entry
-  pub fn name_bytes(&self) -> Buffer {
+  pub fn name_bytes(&self) -> Uint8Array {
     self.inner.name_bytes().to_vec().into()
+  }
+
+  #[napi]
+  /// Convert a tree entry to the object it points to.
+  pub fn to_object(&self, env: Env, repo: Reference<Repository>) -> Result<GitObject> {
+    let object = repo.share_with(env, |repo| {
+      self.inner.to_object(&repo.inner).convert_without_message()
+    })?;
+    Ok(GitObject {
+      inner: ObjectParent::Repository(object),
+    })
   }
 }

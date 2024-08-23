@@ -1,5 +1,6 @@
 #![deny(clippy::all)]
 
+pub mod blob;
 pub mod commit;
 pub mod deltas;
 pub mod diff;

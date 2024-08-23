@@ -3,7 +3,11 @@ use std::ops::Deref;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-use crate::{error::IntoNapiError, repo::Repository};
+use crate::{
+  blob::{Blob, BlobParent},
+  error::IntoNapiError,
+  repo::Repository,
+};
 
 #[napi]
 pub enum ObjectType {
@@ -87,6 +91,17 @@ impl GitObject {
   pub fn peel(&self, kind: ObjectType) -> Result<GitObject> {
     Ok(GitObject {
       inner: ObjectParent::Object(self.inner.peel(kind.into()).convert("Peel object failed")?),
+    })
+  }
+
+  #[napi]
+  /// Recursively peel an object until a blob is found
+  pub fn peel_to_blob(&self, env: Env, self_ref: Reference<GitObject>) -> Result<Blob> {
+    let blob = self_ref.share_with(env, |obj| {
+      obj.inner.peel_to_blob().convert_without_message()
+    })?;
+    Ok(Blob {
+      inner: BlobParent::GitObject(blob),
     })
   }
 }
