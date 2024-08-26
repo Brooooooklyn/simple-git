@@ -672,6 +672,24 @@ impl Repository {
   }
 
   #[napi]
+  /// Lookup a tag object by prefix hash from the repository.
+  pub fn find_tag_by_prefix(
+    &self,
+    env: Env,
+    this: Reference<Repository>,
+    prefix_hash: String,
+  ) -> Result<Tag> {
+    Ok(Tag {
+      inner: this.share_with(env, |repo| {
+        repo
+          .inner
+          .find_tag_by_prefix(&prefix_hash)
+          .convert(format!("Find tag from OID [{prefix_hash}] failed"))
+      })?,
+    })
+  }
+
+  #[napi]
   /// Delete an existing tag reference.
   ///
   /// The tag name will be checked for validity, see `tag` for some rules
@@ -701,13 +719,13 @@ impl Repository {
   #[napi]
   /// iterate over all tags calling `cb` on each.
   /// the callback is provided the tag id and name
-  pub fn tag_foreach(&self, cb: Function<(String, Buffer), ()>) -> Result<()> {
+  pub fn tag_foreach(&self, cb: Function<(String, Buffer), bool>) -> Result<()> {
     self
       .inner
       .tag_foreach(|oid, name| {
         let oid = oid.to_string();
         let name = name.to_vec();
-        cb.call((oid, name.into())).is_ok()
+        cb.call((oid, name.into())).unwrap_or(false)
       })
       .convert_without_message()
   }
