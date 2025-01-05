@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 chrono = "0.4"
-git2 = { version = "0.19", features = ["default", "vendored-libgit2", "vendored-openssl"] }
+git2 = { version = "0.20", features = ["default", "vendored-libgit2", "vendored-openssl"] }
 libgit2-sys = { version = "*", features = ["ssh", "https", "ssh_key_from_memory", "vendored", "vendored-openssl"] }
 home = "0.5"
 once_cell = "1"
