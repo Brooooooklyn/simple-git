@@ -22,7 +22,7 @@ features = ["async", "chrono_date", "napi6"]
 version = "2"
 
 [target.'cfg(all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
-dirs = "5"
+dirs = "6"
 
 [build-dependencies]
 napi-build = "2"
