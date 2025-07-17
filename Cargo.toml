@@ -14,7 +14,7 @@ home = "0.5"
 once_cell = "1"
 
 [dependencies.napi]
-version = "2"
+version = "3"
 default-features = false
 features = ["async", "chrono_date", "napi6"]
 
