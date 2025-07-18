@@ -19,7 +19,7 @@ default-features = false
 features = ["async", "chrono_date", "napi6"]
 
 [dependencies.napi-derive]
-version = "2"
+version = "3"
 
 [target.'cfg(all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
 dirs = "6"
