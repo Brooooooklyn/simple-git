@@ -1,7 +1,7 @@
 use std::{mem, path::Path};
 
 use git2::{ErrorClass, ErrorCode};
-use napi::{bindgen_prelude::*, Error, NapiRaw, Status};
+use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
@@ -346,7 +346,7 @@ impl RemoteCallbacks {
   /// import { Cred, FetchOptions, RemoteCallbacks, RepoBuilder, credTypeContains } from '@napi-rs/simple-git'
   ///
   /// const builder = new RepoBuilder()
-
+  ///
   /// const remoteCallbacks = new RemoteCallbacks()
   /// .credentials((cred) => {
   ///   return Cred.sshKey(cred.username, null, join(homedir(), '.ssh', 'id_rsa'), null)
@@ -361,7 +361,7 @@ impl RemoteCallbacks {
   pub fn credentials(
     &mut self,
     env: Env,
-    callback: Function<CredInfo, ClassInstance<Cred>>,
+    callback: Function<CredInfo, &'static mut Cred>,
   ) -> Result<&Self> {
     let func_ref = callback.create_ref()?;
     self
@@ -369,8 +369,8 @@ impl RemoteCallbacks {
       .credentials(move |url: &str, username_from_url, cred| {
         func_ref
           .borrow_back(&env)
-          .and_then(|callback| {
-            callback.call(CredInfo {
+          .and_then(|cb| {
+            cb.call(CredInfo {
               cred_type: cred.into(),
               url: url.to_string(),
               username: username_from_url.unwrap_or("git").to_string(),
@@ -384,15 +384,6 @@ impl RemoteCallbacks {
             )
           })
           .and_then(|cred| {
-            let mut cred: ClassInstance<Cred> = unsafe {
-              FromNapiValue::from_napi_value(env.raw(), cred.raw()).map_err(|err| {
-                git2::Error::new(
-                  ErrorCode::Auth,
-                  ErrorClass::Callback,
-                  format!("Credential callback return value is not instance of Cred: {err}"),
-                )
-              })?
-            };
             if cred.used {
               return Err(git2::Error::new(
                 ErrorCode::Auth,
@@ -438,7 +429,7 @@ impl RemoteCallbacks {
             bytes: bytes as u32,
           })
         }) {
-          eprintln!("Push transfer progress callback failed: {}", err);
+          eprintln!("Push transfer progress callback failed: {err}");
         }
       });
     self
@@ -513,7 +504,7 @@ impl FetchOptions {
   #[napi]
   /// Set fetch depth, a value less or equal to 0 is interpreted as pull
   /// everything (effectively the same as not declaring a limit depth).
-
+  ///
   // FIXME(blyxyas): We currently don't have a test for shallow functions
   // because libgit2 doesn't support local shallow clones.
   // https://github.com/rust-lang/git2-rs/pull/979#issuecomment-1716299900
@@ -545,8 +536,10 @@ impl FetchOptions {
 
   #[napi]
   /// Set extra headers for this fetch operation.
-  pub fn custom_headers(&mut self, headers: Vec<&str>) -> &Self {
-    self.inner.custom_headers(headers.as_slice());
+  pub fn custom_headers(&mut self, headers: Vec<String>) -> &Self {
+    self
+      .inner
+      .custom_headers(&headers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     self
   }
 }

@@ -219,22 +219,22 @@ impl Commit {
   /// [`Repository::commit`]: struct.Repository.html#method.commit
   pub fn amend(
     &self,
-    update_ref: Option<&str>,
+    update_ref: Option<String>,
     author: Option<&Signature>,
     committer: Option<&Signature>,
-    message_encoding: Option<&str>,
-    message: Option<&str>,
+    message_encoding: Option<String>,
+    message: Option<String>,
     tree: Option<&Tree>,
   ) -> Result<String> {
     self
       .inner
       .amend(
-        update_ref,
+        update_ref.as_deref(),
         author.map(|s| &*s.inner),
         committer.map(|s| &*s.inner),
-        message_encoding,
-        message,
-        tree.map(|s| &*s.inner()),
+        message_encoding.as_deref(),
+        message.as_deref(),
+        tree.map(|s| s.inner()),
       )
       .map(|oid| oid.to_string())
       .convert("Amend commit failed")

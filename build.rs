@@ -5,7 +5,7 @@ fn main() {
   let compile_target = std::env::var("TARGET").unwrap();
   match compile_target.as_str() {
     "x86_64-unknown-linux-gnu" => {
-      println!("cargo:rustc-link-search=/usr/x86_64-unknown-linux-gnu/lib");
+      println!("cargo:rustc-link-search=/usr/lib");
     }
     "armv7-unknown-linux-gnueabihf" => {
       const CROSS_LIB_PATH: &str = "/usr/lib/gcc-cross/arm-linux-gnueabihf";

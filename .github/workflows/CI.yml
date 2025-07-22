@@ -2,7 +2,8 @@ name: CI
 env:
   DEBUG: napi:*
   APP_NAME: simple-git
-  MACOSX_DEPLOYMENT_TARGET: "10.13"
+  MACOSX_DEPLOYMENT_TARGET: '10.13'
+  CARGO_INCREMENTAL: '1'
 permissions:
   contents: write
   id-token: write
@@ -19,7 +20,35 @@ permissions:
       - .editorconfig
       - docs/**
   pull_request: null
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'yarn'
+
+      - name: Install
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Cargo fmt
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        run: cargo clippy
   build:
     strategy:
       fail-fast: false
@@ -31,42 +60,26 @@ jobs:
           - host: windows-latest
             build: yarn build --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
+          - host: windows-latest
+            build: yarn build --target i686-pc-windows-msvc
+            target: i686-pc-windows-msvc
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: |-
-              set -e &&
-              apt-get update &&
-              apt-get install perl -y &&
-              rustup target add x86_64-unknown-linux-gnu &&
-              cp /usr/lib/x86_64-linux-gnu/libz.a /usr/x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu/sysroot/lib &&
-              yarn build --target x86_64-unknown-linux-gnu
+            build: |
+              sudo ln -sf /usr/lib/x86_64-linux-gnu/libz.a /usr/lib
+              TARGET_CC=clang yarn build --target x86_64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            build: |-
-              set -e &&
-              apk add perl &&
-              yarn build
+            build: yarn build --target x86_64-unknown-linux-musl -x
           - host: macos-latest
             target: aarch64-apple-darwin
             build: yarn build --target aarch64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
-            build: |-
-              set -e &&
-              apt-get update &&
-              apt-get install -y perl &&
-              unset CC_aarch64_unknown_linux_gnu &&
-              unset CXX_aarch64_unknown_linux_gnu &&
-              yarn build --target aarch64-unknown-linux-gnu
+            build: TARGET_CC=clang yarn build --target aarch64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
-            setup: |
-              sudo apt-get update
-              sudo apt-get install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libatomic1-armhf-cross -y
-            build: yarn build --target armv7-unknown-linux-gnueabihf --zig --zig-link-only
+            build: yarn build --target armv7-unknown-linux-gnueabihf --use-napi-cross
           - host: ubuntu-latest
             target: aarch64-linux-android
             build: yarn build --target aarch64-linux-android
@@ -75,76 +88,68 @@ jobs:
             build: yarn build --target armv7-linux-androideabi
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            build: |-
-              set -e &&
-              apk add perl &&
-              rustup target add aarch64-unknown-linux-musl &&
-              yarn build --target aarch64-unknown-linux-musl
+            build: yarn build --target aarch64-unknown-linux-musl -x
           - host: ubuntu-latest
             target: s390x-unknown-linux-gnu
-            setup: |
-              sudo apt-get update
-              sudo apt-get install -y gcc-s390x-linux-gnu
             build: |
-              export CARGO_TARGET_S390X_UNKNOWN_LINUX_GNU_LINKER=s390x-linux-gnu-gcc
-              yarn build --target s390x-unknown-linux-gnu
+              export CC=clang
+              export TARGET_CC=clang
+              export CFLAGS="-fuse-ld=lld"
+              yarn build --target s390x-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: powerpc64le-unknown-linux-gnu
-            setup: |
-              sudo apt-get update
-              sudo apt-get install -y gcc-powerpc64le-linux-gnu
             build: |
-              export CARGO_TARGET_POWERPC64LE_UNKNOWN_LINUX_GNU_LINKER=powerpc64le-linux-gnu-gcc
-              yarn build --target powerpc64le-unknown-linux-gnu
+              export CC=clang
+              export TARGET_CC=clang
+              export CFLAGS="-fuse-ld=lld"
+              yarn build --target powerpc64le-unknown-linux-gnu --use-napi-cross
           - host: windows-latest
             target: aarch64-pc-windows-msvc
             build: yarn build --target aarch64-pc-windows-msvc
-    name: stable - ${{ matrix.settings.target }} - node@20
+    name: stable - ${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
         uses: actions/setup-node@v4
-        if: ${{ !matrix.settings.docker }}
         with:
-          node-version: 20
+          node-version: 22
           cache: yarn
       - name: Install
         uses: dtolnay/rust-toolchain@stable
-        if: ${{ !matrix.settings.docker }}
         with:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
-      - name: Cache cargo registry
+      - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.napi-rs
             .cargo-cache
-            target
-          key: ${{ matrix.settings.target }}-cargo-cache
+            target/
+          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+      - uses: goto-bus-stop/setup-zig@v2
+        if: ${{ contains(matrix.settings.target, 'musl') }}
+        with:
+          version: 0.14.1
+      - name: Install cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        if: ${{ contains(matrix.settings.target, 'musl') }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
         shell: bash
-      - uses: goto-bus-stop/setup-zig@v2
-        if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' }}
-        with:
-          version: 0.13.0
       - name: Install dependencies
-        run: yarn install --mode=skip-build --immutable
-      - name: Build in docker
-        uses: addnab/docker-run-action@v3
-        if: ${{ matrix.settings.docker }}
-        with:
-          image: ${{ matrix.settings.docker }}
-          options: "-v ${{ github.workspace }}/.cargo-cache/git:/usr/local/cargo/git -v ${{ github.workspace }}/.cargo-cache/registry:/usr/local/cargo/registry -v ${{ github.workspace }}:/build -w /build"
-          run: ${{ matrix.settings.build }}
+        run: yarn install
       - name: Build
         run: ${{ matrix.settings.build }}
-        if: ${{ !matrix.settings.docker }}
         shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -154,8 +159,8 @@ jobs:
           if-no-files-found: error
 
   build-freebsd:
-    name: Build FreeBSD
     runs-on: ubuntu-latest
+    name: Build FreeBSD
     steps:
       - uses: actions/checkout@v4
       - name: Build
@@ -166,13 +171,13 @@ jobs:
           RUSTUP_IO_THREADS: 1
         with:
           operating_system: freebsd
-          version: "14.1"
+          version: '14.2'
           memory: 8G
           cpu_count: 3
-          environment_variables: "DEBUG RUSTUP_IO_THREADS"
+          environment_variables: 'DEBUG RUSTUP_IO_THREADS'
           shell: bash
           run: |
-            sudo pkg install -y -f curl node libnghttp2 npm perl5
+            sudo pkg install -y -f curl node libnghttp2 npm cmake perl5
             sudo npm install -g yarn --ignore-scripts
             curl https://sh.rustup.rs -sSf --output rustup.sh
             sh rustup.sh -y --profile minimal --default-toolchain stable
@@ -181,15 +186,18 @@ jobs:
             rustc --version
             echo "~~~~ node -v ~~~~"
             node -v
+            echo "~~~~ yarn --version ~~~~"
+            yarn --version
             pwd
             ls -lah
             whoami
             env
+            freebsd-version
             yarn install
-            yarn build --target x86_64-unknown-freebsd
-            rm -rf .yarn
+            yarn build
             rm -rf node_modules
             rm -rf target
+            rm -rf .yarn/cache
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -215,8 +223,8 @@ jobs:
             target: x86_64-pc-windows-msvc
             architecture: "x64"
         node:
-          - "18"
           - "20"
+          - "22"
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -248,8 +256,8 @@ jobs:
       fail-fast: false
       matrix:
         node:
-          - "18"
           - "20"
+          - "22"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -277,6 +285,7 @@ jobs:
     name: Publish
     runs-on: ubuntu-latest
     needs:
+      - lint
       - build-freebsd
       - test-macOS-windows-binding
       - test-linux-x64-gnu-binding
@@ -285,16 +294,16 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: yarn
       - name: Install dependencies
-        run: yarn install --mode=skip-build --immutable
+        run: yarn install
+      - name: create npm dirs
+        run: yarn napi create-npm-dirs
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: create npm dirs
-        run: yarn napi create-npm-dir -t .
       - name: Move artifacts
         run: yarn artifacts
       - name: List packages

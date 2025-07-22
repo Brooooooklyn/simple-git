@@ -1,5 +1,5 @@
 [package]
-edition = "2021"
+edition = "2024"
 name = "napi-rs_simple-git"
 version = "0.0.0"
 
@@ -14,12 +14,12 @@ home = "0.5"
 once_cell = "1"
 
 [dependencies.napi]
-version = "2"
+version = "3.0"
 default-features = false
 features = ["async", "chrono_date", "napi6"]
 
 [dependencies.napi-derive]
-version = "2"
+version = "3.0"
 
 [target.'cfg(all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
 dirs = "6"

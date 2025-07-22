@@ -2,13 +2,14 @@ use std::path::Path;
 
 use napi::{Env, JsString, Result};
 
-pub(crate) fn path_to_javascript_string(env: &Env, p: &Path) -> Result<JsString> {
+pub(crate) fn path_to_javascript_string<'env>(
+  env: &'env Env,
+  p: &'env Path,
+) -> Result<JsString<'env>> {
   #[cfg(unix)]
   {
-    use std::borrow::Borrow;
-
     let path = p.to_string_lossy();
-    env.create_string(path.borrow())
+    env.create_string(path.as_ref())
   }
   #[cfg(windows)]
   {

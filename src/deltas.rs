@@ -1,4 +1,4 @@
-use napi::{bindgen_prelude::*, JsString};
+use napi::{JsString, bindgen_prelude::*};
 use napi_derive::napi;
 
 use crate::util::path_to_javascript_string;
@@ -206,11 +206,11 @@ impl DiffFile {
   #[napi]
   /// Returns the path, in bytes, of the entry relative to the working
   /// directory of the repository.
-  pub fn path(&self, env: Env) -> Option<JsString> {
+  pub fn path<'env>(&'env self, env: &'env Env) -> Option<JsString<'env>> {
     self
       .inner
       .path()
-      .and_then(|p| path_to_javascript_string(&env, p).ok())
+      .and_then(|p| path_to_javascript_string(env, p).ok())
   }
 
   #[napi]
