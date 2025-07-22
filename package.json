@@ -7,22 +7,24 @@
     "url": "https://github.com/Brooooooklyn/simple-git"
   },
   "napi": {
-    "name": "simple-git",
-    "triples": {
-      "additional": [
-        "aarch64-apple-darwin",
-        "aarch64-linux-android",
-        "aarch64-unknown-linux-gnu",
-        "aarch64-unknown-linux-musl",
-        "aarch64-pc-windows-msvc",
-        "powerpc64le-unknown-linux-gnu",
-        "s390x-unknown-linux-gnu",
-        "armv7-unknown-linux-gnueabihf",
-        "x86_64-unknown-linux-musl",
-        "x86_64-unknown-freebsd",
-        "armv7-linux-androideabi"
-      ]
-    }
+    "binaryName": "simple-git",
+    "targets": [
+      "x86_64-pc-windows-msvc",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "i686-pc-windows-msvc",
+      "armv7-unknown-linux-gnueabihf",
+      "aarch64-apple-darwin",
+      "aarch64-linux-android",
+      "x86_64-unknown-freebsd",
+      "aarch64-unknown-linux-musl",
+      "aarch64-pc-windows-msvc",
+      "armv7-linux-androideabi",
+      "powerpc64le-unknown-linux-gnu",
+      "s390x-unknown-linux-gnu"
+    ]
   },
   "ava": {
     "timeout": "3m",
@@ -34,10 +36,10 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.4",
-    "@types/node": "^22.0.0",
-    "ava": "^6.1.2",
-    "pretty-ms": "^9.0.0"
+    "@napi-rs/cli": "^3.0.1",
+    "@types/node": "^24.0.15",
+    "ava": "^6.4.1",
+    "pretty-ms": "^9.2.0"
   },
   "engines": {
     "node": ">= 10"

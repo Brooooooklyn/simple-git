@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::RwLock;
 
-use napi::{bindgen_prelude::*, JsString};
+use napi::{JsString, bindgen_prelude::*};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 
@@ -31,7 +31,7 @@ static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
         std::fs::write(&git_config_dir, "").map_err(|err| {
           Error::new(
             Status::GenericFailure,
-            format!("Initialize {:?} failed {}", git_config_dir, err),
+            format!("Initialize {git_config_dir:?} failed {err}"),
           )
         })?;
       }
@@ -115,11 +115,11 @@ impl Task for GitDateTask {
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
     get_file_modified_date(
-      &(**self
+      &self
         .repo
         .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?)
-      .inner,
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
       &self.filepath,
     )
     .convert_without_message()
@@ -142,7 +142,9 @@ pub struct Repository {
 impl Repository {
   #[napi(factory)]
   pub fn init(p: String) -> Result<Repository> {
-    INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
+    INIT_GIT_CONFIG
+      .as_ref()
+      .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
       inner: git2::Repository::init(&p).map_err(|err| {
         Error::new(
@@ -185,7 +187,9 @@ impl Repository {
     flags: RepositoryOpenFlags,
     ceiling_dirs: Vec<String>,
   ) -> Result<Repository> {
-    INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
+    INIT_GIT_CONFIG
+      .as_ref()
+      .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
       inner: git2::Repository::open_ext(path, flags.into(), ceiling_dirs)
         .convert("Failed to open git repo")?,
@@ -198,7 +202,9 @@ impl Repository {
   /// This starts at `path` and looks up the filesystem hierarchy
   /// until it finds a repository.
   pub fn discover(path: String) -> Result<Repository> {
-    INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
+    INIT_GIT_CONFIG
+      .as_ref()
+      .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
       inner: git2::Repository::discover(&path)
         .convert(format!("Discover git repo from [{path}] failed"))?,
@@ -243,7 +249,9 @@ impl Repository {
   ///
   /// The path can point to either a normal or bare repository.
   pub fn new(git_dir: String) -> Result<Self> {
-    INIT_GIT_CONFIG.as_ref().map_err(|err| err.clone())?;
+    INIT_GIT_CONFIG
+      .as_ref()
+      .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
       inner: git2::Repository::open(&git_dir).map_err(|err| {
         Error::new(
@@ -288,8 +296,8 @@ impl Repository {
   #[napi]
   /// Returns the path to the `.git` folder for normal repositories or the
   /// repository itself for bare repositories.
-  pub fn path(&self, env: Env) -> Result<JsString> {
-    path_to_javascript_string(&env, self.inner.path())
+  pub fn path<'env>(&'env self, env: &'env Env) -> Result<JsString<'env>> {
+    path_to_javascript_string(env, self.inner.path())
   }
 
   #[napi]
@@ -302,11 +310,11 @@ impl Repository {
   /// Get the path of the working directory for this repository.
   ///
   /// If this repository is bare, then `None` is returned.
-  pub fn workdir(&self, env: Env) -> Option<JsString> {
+  pub fn workdir<'env>(&'env self, env: &'env Env) -> Option<JsString<'env>> {
     self
       .inner
       .workdir()
-      .and_then(|path| path_to_javascript_string(&env, path).ok())
+      .and_then(move |path| path_to_javascript_string(env, path).ok())
   }
 
   #[napi]
@@ -617,7 +625,7 @@ impl Repository {
   ) -> Result<String> {
     self
       .inner
-      .tag(&name, &*target.inner, &*tagger.inner, &message, force)
+      .tag(&name, &target.inner, &tagger.inner, &message, force)
       .map(|o| o.to_string())
       .convert("Failed to create tag")
   }
@@ -639,7 +647,7 @@ impl Repository {
   ) -> Result<String> {
     self
       .inner
-      .tag_annotation_create(&name, &*target.inner, &*tagger.inner, &message)
+      .tag_annotation_create(&name, &target.inner, &tagger.inner, &message)
       .map(|o| o.to_string())
       .convert("Failed to create tag annotation")
   }
@@ -653,7 +661,7 @@ impl Repository {
   pub fn tag_lightweight(&self, name: String, target: &GitObject, force: bool) -> Result<String> {
     self
       .inner
-      .tag_lightweight(&name, &*target.inner, force)
+      .tag_lightweight(&name, &target.inner, force)
       .map(|o| o.to_string())
       .convert("Failed to create lightweight tag")
   }

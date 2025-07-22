@@ -58,7 +58,7 @@ impl Deref for ObjectParent {
   fn deref(&self) -> &git2::Object<'static> {
     match self {
       ObjectParent::Repository(parent) => parent.deref(),
-      ObjectParent::Object(parent) => &parent,
+      ObjectParent::Object(parent) => parent,
     }
   }
 }
