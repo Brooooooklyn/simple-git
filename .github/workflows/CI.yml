@@ -113,6 +113,11 @@ jobs:
         with:
           node-version: 22
           cache: yarn
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v2
+        if: ${{ contains(matrix.settings.target, 'gnu') }}
+        with:
+          version: "19"
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         with:
