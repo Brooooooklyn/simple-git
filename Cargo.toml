@@ -24,6 +24,9 @@ version = "3.0"
 [target.'cfg(all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
 dirs = "6"
 
+[target.'cfg(all(target_os = "linux", target_env = "gnu", target_arch = "x86_64"))'.dependencies]
+libz-sys = { version = "1", features = ["static"] }
+
 [build-dependencies]
 napi-build = "2"
 
