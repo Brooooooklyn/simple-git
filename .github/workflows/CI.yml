@@ -65,9 +65,7 @@ jobs:
             target: i686-pc-windows-msvc
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            build: |
-              sudo ln -sf /usr/lib/x86_64-linux-gnu/libz.a /usr/lib
-              TARGET_CC=clang yarn build --target x86_64-unknown-linux-gnu --use-napi-cross
+            build: TARGET_CC=clang yarn build --target x86_64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             build: yarn build --target x86_64-unknown-linux-musl -x
