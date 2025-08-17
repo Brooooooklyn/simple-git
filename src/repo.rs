@@ -903,9 +903,10 @@ fn get_file_modified_date(
               let parent_tree = parent.tree().ok()?;
               if let Ok(diff) =
                 repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))
-                && diff.deltas().len() > 0 {
-                  return Some(commit.time().seconds() * 1000);
-                }
+                && diff.deltas().len() > 0
+              {
+                return Some(commit.time().seconds() * 1000);
+              }
             }
           }
           // root commit
