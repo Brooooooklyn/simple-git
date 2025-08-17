@@ -25,16 +25,16 @@ static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
     any(target_arch = "x86_64", target_arch = "aarch64")
   ))]
   {
-    if git2::Config::find_global().is_err() {
-      if let Some(mut git_config_dir) = dirs::home_dir() {
-        git_config_dir.push(".gitconfig");
-        std::fs::write(&git_config_dir, "").map_err(|err| {
-          Error::new(
-            Status::GenericFailure,
-            format!("Initialize {git_config_dir:?} failed {err}"),
-          )
-        })?;
-      }
+    if git2::Config::find_global().is_err()
+      && let Some(mut git_config_dir) = dirs::home_dir()
+    {
+      git_config_dir.push(".gitconfig");
+      std::fs::write(&git_config_dir, "").map_err(|err| {
+        Error::new(
+          Status::GenericFailure,
+          format!("Initialize {git_config_dir:?} failed {err}"),
+        )
+      })?;
     }
   }
   Ok(())
