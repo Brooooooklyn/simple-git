@@ -36,8 +36,8 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@napi-rs/cli": "^3.0.1",
-    "@types/node": "^24.0.15",
+    "@napi-rs/cli": "^3.1.5",
+    "@types/node": "^24.3.0",
     "ava": "^6.4.1",
     "pretty-ms": "^9.2.0"
   },
@@ -48,6 +48,7 @@
     "artifacts": "napi artifacts",
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
+    "preversion": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
     "version": "napi version"

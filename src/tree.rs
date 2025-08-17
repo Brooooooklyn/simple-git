@@ -25,7 +25,7 @@ pub struct Tree {
 
 #[napi]
 impl Tree {
-  pub(crate) fn inner(&self) -> &git2::Tree {
+  pub(crate) fn inner<'repo>(&'repo self) -> &'repo git2::Tree<'repo> {
     match &self.inner {
       TreeParent::Repository(parent) => parent,
       TreeParent::Reference(parent) => parent,

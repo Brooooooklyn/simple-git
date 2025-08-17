@@ -25,16 +25,16 @@ static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
     any(target_arch = "x86_64", target_arch = "aarch64")
   ))]
   {
-    if git2::Config::find_global().is_err() {
-      if let Some(mut git_config_dir) = dirs::home_dir() {
-        git_config_dir.push(".gitconfig");
-        std::fs::write(&git_config_dir, "").map_err(|err| {
-          Error::new(
-            Status::GenericFailure,
-            format!("Initialize {git_config_dir:?} failed {err}"),
-          )
-        })?;
-      }
+    if git2::Config::find_global().is_err()
+      && let Some(mut git_config_dir) = dirs::home_dir()
+    {
+      git_config_dir.push(".gitconfig");
+      std::fs::write(&git_config_dir, "").map_err(|err| {
+        Error::new(
+          Status::GenericFailure,
+          format!("Initialize {git_config_dir:?} failed {err}"),
+        )
+      })?;
     }
   }
   Ok(())
@@ -903,10 +903,9 @@ fn get_file_modified_date(
               let parent_tree = parent.tree().ok()?;
               if let Ok(diff) =
                 repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))
+                && diff.deltas().len() > 0
               {
-                if diff.deltas().len() > 0 {
-                  return Some(commit.time().seconds() * 1000);
-                }
+                return Some(commit.time().seconds() * 1000);
               }
             }
           }

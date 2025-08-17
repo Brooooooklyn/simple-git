@@ -276,6 +276,7 @@ export declare class FetchOptions {
   /**
    * Set fetch depth, a value less or equal to 0 is interpreted as pull
    * everything (effectively the same as not declaring a limit depth).
+   *
    */
   depth(depth: number): this
   /**
@@ -497,6 +498,7 @@ export declare class RemoteCallbacks {
    * import { Cred, FetchOptions, RemoteCallbacks, RepoBuilder, credTypeContains } from '@napi-rs/simple-git'
    *
    * const builder = new RepoBuilder()
+   *
    * const remoteCallbacks = new RemoteCallbacks()
    * .credentials((cred) => {
    *   return Cred.sshKey(cred.username, null, join(homedir(), '.ssh', 'id_rsa'), null)
