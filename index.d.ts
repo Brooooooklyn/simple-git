@@ -23,7 +23,6 @@ export declare class Commit {
   /** Get the tree pointed to by this commit. */
   tree(): Tree
   /**
-   *
    * The returned message will be slightly prettified by removing any
    * potential leading newlines.
    *
@@ -182,9 +181,18 @@ export declare class Cred {
   credtype(): CredentialType
 }
 
-/** An iterator over the diffs in a delta */
-export declare class Deltas {
-  [Symbol.iterator](): Iterator<DiffDelta, void, void>
+/**
+ * An iterator over the diffs in a delta
+ *
+ * This type extends JavaScript's `Iterator`, and so has the iterator helper
+ * methods. It may extend the upcoming TypeScript `Iterator` class in the future.
+ *
+ * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator#iterator_helper_methods
+ * @see https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-6.html#iterator-helper-methods
+ */
+export declare class Deltas extends Iterator<DiffDelta, void, void> {
+
+  next(value?: void): IteratorResult<DiffDelta, void>
 }
 
 export declare class Diff {
@@ -276,7 +284,6 @@ export declare class FetchOptions {
   /**
    * Set fetch depth, a value less or equal to 0 is interpreted as pull
    * everything (effectively the same as not declaring a limit depth).
-   *
    */
   depth(depth: number): this
   /**
@@ -474,7 +481,6 @@ export declare class Remote {
    *
    * Convenience function to connect to a remote, download the data,
    * disconnect and update the remote-tracking branches.
-   *
    */
   fetch(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null): void
   /** Update the tips to the new state */
@@ -840,8 +846,14 @@ export declare class Repository {
   getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }
 
-export declare class RevWalk {
-  [Symbol.iterator](): Iterator<string, void, void>
+/**
+ * This type extends JavaScript's `Iterator`, and so has the iterator helper
+ * methods. It may extend the upcoming TypeScript `Iterator` class in the future.
+ *
+ * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator#iterator_helper_methods
+ * @see https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-6.html#iterator-helper-methods
+ */
+export declare class RevWalk extends Iterator<string, void, void> {
   /**
    * Reset a revwalk to allow re-configuring it.
    *
@@ -927,6 +939,7 @@ export declare class RevWalk {
    * The reference must point to a commitish.
    */
   hideRef(reference: string): this
+  next(value?: void): IteratorResult<string, void>
 }
 
 /**
@@ -1035,8 +1048,16 @@ export declare class TreeEntry {
   toObject(repo: Repository): GitObject
 }
 
-export declare class TreeIter {
-  [Symbol.iterator](): Iterator<TreeEntry, void, void>
+/**
+ * This type extends JavaScript's `Iterator`, and so has the iterator helper
+ * methods. It may extend the upcoming TypeScript `Iterator` class in the future.
+ *
+ * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator#iterator_helper_methods
+ * @see https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-6.html#iterator-helper-methods
+ */
+export declare class TreeIter extends Iterator<TreeEntry, void, void> {
+
+  next(value?: void): IteratorResult<TreeEntry, void>
 }
 
 /** Automatic tag following options. */
