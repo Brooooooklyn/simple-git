@@ -33,6 +33,58 @@ test("Date should be equal with cli", (t) => {
   }
 });
 
+test("Created date should be equal with cli", (t) => {
+  const { repo } = t.context;
+  if (process.env.CI) {
+    t.notThrows(() => repo.getFileCreatedDate(join("src", "lib.rs")));
+  } else {
+    t.deepEqual(
+      new Date(
+        execSync("git log --reverse --format=%cd --date=iso src/lib.rs", {
+          cwd: workDir,
+        })
+          .toString("utf8")
+          .split('\n')[0]
+          .trim(),
+      ).valueOf(),
+      repo.getFileCreatedDate(join("src", "lib.rs")),
+    );
+  }
+});
+
+test("Created date async should work", async (t) => {
+  const { repo } = t.context;
+  if (process.env.CI) {
+    await t.notThrowsAsync(() => repo.getFileCreatedDateAsync(join("src", "lib.rs")));
+  } else {
+    const expectedDate = new Date(
+      execSync("git log --reverse --format=%cd --date=iso src/lib.rs", {
+        cwd: workDir,
+      })
+        .toString("utf8")
+        .split('\n')[0]
+        .trim(),
+    ).valueOf();
+    
+    const actualDate = await repo.getFileCreatedDateAsync(join("src", "lib.rs"));
+    t.deepEqual(expectedDate, actualDate);
+  }
+});
+
+test("Created date should throw for non-existent file", (t) => {
+  const { repo } = t.context;
+  t.throws(() => repo.getFileCreatedDate("non-existent-file.txt"), {
+    message: /Failed to get created date for/
+  });
+});
+
+test("Created date async should throw for non-existent file", async (t) => {
+  const { repo } = t.context;
+  await t.throwsAsync(() => repo.getFileCreatedDateAsync("non-existent-file.txt"), {
+    message: /Failed to get created date for/
+  });
+});
+
 test("Should be able to resolve head", (t) => {
   const { repo } = t.context;
   t.is(

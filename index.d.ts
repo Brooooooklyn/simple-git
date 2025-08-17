@@ -844,6 +844,8 @@ export declare class Repository {
   revWalk(): RevWalk
   getFileLatestModifiedDate(filepath: string): number
   getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  getFileCreatedDate(filepath: string): number
+  getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }
 
 /**

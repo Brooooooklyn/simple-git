@@ -108,6 +108,13 @@ pub struct GitDateTask {
 
 unsafe impl Send for GitDateTask {}
 
+pub struct GitCreatedDateTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  filepath: String,
+}
+
+unsafe impl Send for GitCreatedDateTask {}
+
 #[napi]
 impl Task for GitDateTask {
   type Output = i64;
@@ -125,6 +132,31 @@ impl Task for GitDateTask {
     .convert_without_message()
     .and_then(|value| {
       value.expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
+    })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitCreatedDateTask {
+  type Output = i64;
+  type JsValue = i64;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    get_file_created_date(
+      &self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
+      &self.filepath,
+    )
+    .convert_without_message()
+    .and_then(|value| {
+      value.expect_not_null(format!("Failed to get created date for [{}]", &self.filepath))
     })
   }
 
@@ -876,6 +908,29 @@ impl Repository {
       signal,
     ))
   }
+
+  #[napi]
+  pub fn get_file_created_date(&self, filepath: String) -> Result<i64> {
+    get_file_created_date(&self.inner, &filepath)
+      .convert_without_message()
+      .and_then(|value| value.expect_not_null(format!("Failed to get created date for [{filepath}]")))
+  }
+
+  #[napi]
+  pub fn get_file_created_date_async(
+    &self,
+    self_ref: Reference<Repository>,
+    filepath: String,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitCreatedDateTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitCreatedDateTask {
+        repo: RwLock::new(self_ref),
+        filepath,
+      },
+      signal,
+    ))
+  }
 }
 
 fn get_file_modified_date(
@@ -922,4 +977,31 @@ fn get_file_modified_date(
         None
       }),
   )
+}
+
+fn get_file_created_date(
+  repo: &git2::Repository,
+  filepath: &str,
+) -> std::result::Result<Option<i64>, git2::Error> {
+  // TODO: Add rename detection support using git2::DiffFindOptions for full `git log --follow` semantics
+  let mut rev_walk = repo.revwalk()?;
+  rev_walk.push_head()?;
+  rev_walk.set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)?;
+  let path = PathBuf::from(filepath);
+  
+  let mut earliest_commit_time: Option<i64> = None;
+  
+  // Traverse all commits to find the earliest one that contains the file
+  for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
+    if let Ok(commit) = repo.find_commit(oid) {
+      if let Ok(tree) = commit.tree() {
+        // Check if the file exists in this commit's tree
+        if tree.get_path(&path).is_ok() {
+          earliest_commit_time = Some(commit.time().seconds() * 1000);
+        }
+      }
+    }
+  }
+  
+  Ok(earliest_commit_time)
 }
