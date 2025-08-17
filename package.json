@@ -48,7 +48,7 @@
     "artifacts": "napi artifacts",
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
-    "preversion": "napi build --platform",
+    "preversion": "napi build --platform && git add .",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
     "version": "napi version"
