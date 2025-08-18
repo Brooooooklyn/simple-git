@@ -156,7 +156,10 @@ impl Task for GitCreatedDateTask {
     )
     .convert_without_message()
     .and_then(|value| {
-      value.expect_not_null(format!("Failed to get created date for [{}]", &self.filepath))
+      value.expect_not_null(format!(
+        "Failed to get created date for [{}]",
+        &self.filepath
+      ))
     })
   }
 
@@ -913,7 +916,9 @@ impl Repository {
   pub fn get_file_created_date(&self, filepath: String) -> Result<i64> {
     get_file_created_date(&self.inner, &filepath)
       .convert_without_message()
-      .and_then(|value| value.expect_not_null(format!("Failed to get created date for [{filepath}]")))
+      .and_then(|value| {
+        value.expect_not_null(format!("Failed to get created date for [{filepath}]"))
+      })
   }
 
   #[napi]
@@ -988,20 +993,20 @@ fn get_file_created_date(
   rev_walk.push_head()?;
   rev_walk.set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)?;
   let path = PathBuf::from(filepath);
-  
+
   let mut earliest_commit_time: Option<i64> = None;
-  
+
   // Traverse all commits to find the earliest one that contains the file
   for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
-    if let Ok(commit) = repo.find_commit(oid) {
-      if let Ok(tree) = commit.tree() {
-        // Check if the file exists in this commit's tree
-        if tree.get_path(&path).is_ok() {
-          earliest_commit_time = Some(commit.time().seconds() * 1000);
-        }
+    if let Ok(commit) = repo.find_commit(oid)
+      && let Ok(tree) = commit.tree()
+    {
+      // Check if the file exists in this commit's tree
+      if tree.get_path(&path).is_ok() {
+        earliest_commit_time = Some(commit.time().seconds() * 1000);
       }
     }
   }
-  
+
   Ok(earliest_commit_time)
 }
