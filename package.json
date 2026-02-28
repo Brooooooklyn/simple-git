@@ -38,7 +38,7 @@
   "devDependencies": {
     "@napi-rs/cli": "^3.1.5",
     "@types/node": "^24.3.0",
-    "ava": "^6.4.1",
+    "ava": "^7.0.0",
     "pretty-ms": "^9.2.0"
   },
   "engines": {
