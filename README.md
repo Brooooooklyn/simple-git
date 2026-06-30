@@ -15,19 +15,19 @@ Repository.init('/path/to/repo') // init a git repository
 
 const repo = new Repository('/path/to/repo') // Open an existed repo
 
-const timestamp = new Date(repo.getFileLatestModifiedDate('build.rs')) // get the latest modified timestamp of a `build.rs`
-console.log(timestamp) // 2022-03-13T12:47:47.920Z
+const lastModified = repo.getFileLatestModifiedDate('build.rs') // latest modified date of `build.rs`, a `Date`
+console.log(lastModified) // 2022-03-13T12:47:47.920Z
 
-const timestampFromAsync = new Date(await repo.getFileLatestModifiedDateAsync('build.rs')) // Async version of `getFileLatestModifiedDate`
+const lastModifiedAsync = await repo.getFileLatestModifiedDateAsync('build.rs') // Async version of `getFileLatestModifiedDate`, also a `Date`
 
-console.log(timestamp) // 2022-03-13T12:47:47.920Z
+console.log(lastModifiedAsync) // 2022-03-13T12:47:47.920Z
 
 // Enriched metadata for the last commit that touched a file.
 // Returns `null` (does **not** throw) when the path has no commit history.
 const mod = repo.getFileLatestModification('build.rs')
 if (mod) {
   console.log(mod.authorName, mod.authorEmail) // 'LongYinan' 'github@lyn.one'
-  console.log(new Date(mod.timestamp)) // `timestamp` === `committerTime`, ms since epoch
+  console.log(mod.committerTime) // a `Date`, identical to getFileLatestModifiedDate('build.rs')
   console.log(mod.commitId, mod.summary)
 }
 
@@ -35,7 +35,7 @@ if (mod) {
 // Every input path is present as a key; a never-committed path maps to `null`.
 const mods = repo.getFilesLatestModification(['build.rs', 'Cargo.toml'])
 console.log(mods['build.rs']?.committerName)
-console.log(mods['Cargo.toml']?.timestamp)
+console.log(mods['Cargo.toml']?.committerTime) // a `Date`
 // Empty input returns `{}`:
 console.log(repo.getFilesLatestModification([])) // {}
 
@@ -136,8 +136,8 @@ export class Repository {
   static cloneAsync(url: string, path: string, signal?: AbortSignal | undefined | null): Promise<Repository>
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
-  getFileLatestModifiedDate(filepath: string): number
-  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  getFileLatestModifiedDate(filepath: string): Date
+  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date>
   /**
    * Last commit that modified `filepath`, with author/committer identity.
    * Returns `null` when no commit in history touched the path.
@@ -214,11 +214,9 @@ export class Repository {
 
 /**
  * Last commit that modified a file, with author/committer identity.
- * All times are ms since epoch (UTC; timezone offset ignored).
+ * All times are `Date`s (UTC; timezone offset ignored).
  */
 export interface FileModification {
-  /** Committer time, ms since epoch. Identical to `getFileLatestModifiedDate`. Equals `committerTime`. */
-  timestamp: number
   /** 40-char lowercase hex OID of the last commit that modified the file. */
   commitId: string
   /** Commit summary (first line). Undefined if absent or not valid UTF-8. */
@@ -227,14 +225,14 @@ export interface FileModification {
   authorName?: string
   /** Author email. Undefined if not valid UTF-8. */
   authorEmail?: string
-  /** Author time, ms since epoch. */
-  authorTime: number
+  /** Author time, as a `Date`. */
+  authorTime: Date
   /** Committer name. Undefined if not valid UTF-8. */
   committerName?: string
   /** Committer email. Undefined if not valid UTF-8. */
   committerEmail?: string
-  /** Committer time, ms since epoch. Equals `timestamp`. */
-  committerTime: number
+  /** Committer time, as a `Date`. Identical to `getFileLatestModifiedDate`. */
+  committerTime: Date
 }
 
 /**
@@ -370,7 +368,7 @@ export class PushOptions {
  * value as a forward-compatible escape hatch for flags not surfaced here.
  */
 export interface FileStatus {
-  /** Workdir-relative path. `null` if the path is not valid UTF-8. */
+  /** Workdir-relative path. Undefined if the path is not valid UTF-8. */
   path?: string
   /** Raw `git2::Status` bits — forward-compat escape hatch. */
   bits: number
@@ -445,8 +443,8 @@ export interface BlameHunk {
   finalAuthorName?: string
   /** Author email of the final commit. Undefined if absent or not valid UTF-8. */
   finalAuthorEmail?: string
-  /** Author time of the final commit, ms since epoch. `0` if no signature. */
-  finalTime: number
+  /** Author time of the final commit, as a `Date`. The Unix epoch if no signature. */
+  finalTime: Date
   /** 40-char lowercase hex OID of the commit where this hunk was found. */
   origCommitId: string
   /** Line number where this hunk begins in the original file (1-based). */
@@ -555,13 +553,13 @@ export class Reference {
    * ```ts
    * import { Reference } from '@napi-rs/simple-git'
    *
-   * console.assert(Reference.is_valid_name("HEAD"));
-   * console.assert(Reference.is_valid_name("refs/heads/main"));
+   * console.assert(Reference.isValidName("HEAD"));
+   * console.assert(Reference.isValidName("refs/heads/main"));
    *
    * // But:
-   * console.assert(!Reference.is_valid_name("main"));
-   * console.assert(!Reference.is_valid_name("refs/heads/*"));
-   * console.assert(!Reference.is_valid_name("foo//bar"));
+   * console.assert(!Reference.isValidName("main"));
+   * console.assert(!Reference.isValidName("refs/heads/*"));
+   * console.assert(!Reference.isValidName("foo//bar"));
    * ```
    */
   static isValidName(name: string): boolean
@@ -579,7 +577,7 @@ export class Reference {
    *
    * Returns `None` if the name is not valid utf-8.
    */
-  name(): string | undefined | null
+  name(): string | null
   /**
    * Get the full shorthand of a reference.
    *
@@ -588,28 +586,28 @@ export class Reference {
    *
    * Returns `None` if the shorthand is not valid utf-8.
    */
-  shorthand(): string | undefined | null
+  shorthand(): string | null
   /**
    * Get the OID pointed to by a direct reference.
    *
    * Only available if the reference is direct (i.e. an object id reference,
    * not a symbolic one).
    */
-  target(): string | undefined | null
+  target(): string | null
   /**
    * Return the peeled OID target of this reference.
    *
    * This peeled OID only applies to direct references that point to a hard
    * Tag object: it is the result of peeling such Tag.
    */
-  targetPeel(): string | undefined | null
+  targetPeel(): string | null
   /**
    * Get full name to the reference pointed to by a symbolic reference.
    *
    * May return `None` if the reference is either not symbolic or not a
    * valid utf-8 string.
    */
-  symbolicTarget(): string | undefined | null
+  symbolicTarget(): string | null
 }
 ```
 
