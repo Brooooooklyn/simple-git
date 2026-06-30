@@ -133,3 +133,41 @@ test("commit without parents still makes a root commit", (t) => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Time round-trip: a `new Signature(name, email, Date)` records the instant at
+// whole-second resolution and reads back identically as a `Date` through the
+// commit's author()/committer()/time().
+test("Signature Date round-trips through commit author/committer time", (t) => {
+  const { root, work, repo } = makeRepo();
+  try {
+    // Whole-second instant (no sub-second ms): git stores epoch seconds.
+    const when = new Date("2021-06-15T12:34:56.000Z");
+    const author = new Signature("Round Trip", "round@example.com", when);
+
+    writeFileSync(join(work, "a.txt"), "alpha\n");
+    const index = repo.index();
+    index.addAll();
+    index.write();
+    const tree = repo.findTree(index.writeTree());
+    const oid = repo.commit("HEAD", author, author, "with known time", tree);
+
+    const commit = repo.findCommit(oid);
+    t.truthy(commit);
+
+    const authorWhen = commit.author().when();
+    const committerWhen = commit.committer().when();
+    const commitTime = commit.time();
+    t.true(authorWhen instanceof Date);
+    t.true(committerWhen instanceof Date);
+    t.true(commitTime instanceof Date);
+
+    t.is(authorWhen.getTime(), when.getTime());
+    t.is(committerWhen.getTime(), when.getTime());
+    t.is(commitTime.getTime(), when.getTime());
+
+    // The standalone Signature also reads its own time back unchanged.
+    t.is(author.when().getTime(), when.getTime());
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -1178,8 +1178,8 @@ export declare class Repository {
   blobPath(path: string): string
   /** Create a revwalk that can be used to traverse the commit graph. */
   revWalk(): RevWalk
-  getFileLatestModifiedDate(filepath: string): number
-  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  getFileLatestModifiedDate(filepath: string): Date
+  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date>
   /**
    * Last commit that modified `filepath`, with author/committer identity.
    * Returns `null` when no commit in history touched the path.
@@ -1225,8 +1225,8 @@ export declare class Repository {
   blameLine(path: string, lineNo: number, options?: BlameOptions | undefined | null): BlameHunk | null
   /** Asynchronous variant of `blame_file`, computed off the main thread. */
   blameFileAsync(path: string, options?: BlameOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<BlameHunk>>
-  getFileCreatedDate(filepath: string): number
-  getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  getFileCreatedDate(filepath: string): Date
+  getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date>
 }
 
 /**
@@ -1351,12 +1351,12 @@ export declare class Signature {
   /**
    * Create a new action signature.
    *
-   * The `time` specified is in seconds since the epoch, and the `offset` is
-   * the time zone offset in minutes.
+   * The `time` is a JS `Date`; it is recorded at whole-second resolution with a
+   * zero time-zone offset (UTC).
    *
    * Returns error if either `name` or `email` contain angle brackets.
    */
-  constructor(name: string, email: string, time: number)
+  constructor(name: string, email: string, time: Date)
   /**
    * Gets the name on the signature.
    *
@@ -1369,8 +1369,8 @@ export declare class Signature {
    * Returns `None` if the email is not valid utf-8
    */
   email(): string | null
-  /** Return the time, in seconds, from epoch */
-  when(): number
+  /** Return the time the signature was recorded, as a `Date`. */
+  when(): Date
 }
 
 export declare class Tag {
@@ -1477,8 +1477,8 @@ export interface BlameHunk {
   finalAuthorName?: string
   /** Author email of the final commit. Undefined if absent or not valid UTF-8. */
   finalAuthorEmail?: string
-  /** Author time of the final commit, ms since epoch. `0` if no signature. */
-  finalTime: number
+  /** Author time of the final commit, as a `Date`. The Unix epoch if no signature. */
+  finalTime: Date
   /** 40-char lowercase hex OID of the commit where this hunk was found. */
   origCommitId: string
   /** Line number where this hunk begins in the original file (1-based). */
@@ -1748,11 +1748,9 @@ export declare const enum FileMode {
 
 /**
  * Last commit that modified a file, with author/committer identity.
- * All times are ms since epoch (UTC; timezone offset ignored).
+ * All times are `Date`s (UTC; timezone offset ignored).
  */
 export interface FileModification {
-  /** Committer time, ms since epoch. Identical to `getFileLatestModifiedDate`. Equals `committerTime`. */
-  timestamp: number
   /** 40-char lowercase hex OID of the last commit that modified the file. */
   commitId: string
   /** Commit summary (first line). Undefined if absent or not valid UTF-8. */
@@ -1761,14 +1759,14 @@ export interface FileModification {
   authorName?: string
   /** Author email. Undefined if not valid UTF-8. */
   authorEmail?: string
-  /** Author time, ms since epoch. */
-  authorTime: number
+  /** Author time, as a `Date`. */
+  authorTime: Date
   /** Committer name. Undefined if not valid UTF-8. */
   committerName?: string
   /** Committer email. Undefined if not valid UTF-8. */
   committerEmail?: string
-  /** Committer time, ms since epoch. Equals `timestamp`. */
-  committerTime: number
+  /** Committer time, as a `Date`. Identical to `getFileLatestModifiedDate`. */
+  committerTime: Date
 }
 
 /**

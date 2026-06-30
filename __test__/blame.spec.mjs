@@ -21,7 +21,7 @@ function assertHunkShape(t, hunk) {
   t.regex(hunk.finalCommitId, /^[0-9a-f]{40}$/, "finalCommitId is 40-char hex");
   t.is(typeof hunk.finalStartLine, "number");
   t.true(hunk.finalStartLine >= 1, "finalStartLine is 1-based");
-  t.is(typeof hunk.finalTime, "number");
+  t.true(hunk.finalTime instanceof Date, "finalTime is a Date");
   t.regex(hunk.origCommitId, /^[0-9a-f]{40}$/, "origCommitId is 40-char hex");
   t.is(typeof hunk.origStartLine, "number");
   t.is(typeof hunk.isBoundary, "boolean");

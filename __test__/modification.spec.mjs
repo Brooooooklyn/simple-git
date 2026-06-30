@@ -23,9 +23,13 @@ test("getFileLatestModification returns enriched metadata", (t) => {
   const mod = repo.getFileLatestModification("build.rs");
   t.truthy(mod);
 
-  // Byte-identical delegation guard (runs unconditionally; two native methods).
-  t.is(mod.timestamp, repo.getFileLatestModifiedDate("build.rs"));
-  t.is(mod.committerTime, mod.timestamp);
+  // Delegation guard (runs unconditionally; two native methods). committerTime
+  // is the same instant getFileLatestModifiedDate returns -- both now Date.
+  t.true(mod.committerTime instanceof Date);
+  t.is(
+    mod.committerTime.getTime(),
+    repo.getFileLatestModifiedDate("build.rs").getTime(),
+  );
   t.regex(mod.commitId, /^[0-9a-f]{40}$/);
 
   // Value parity with git CLI; skip on CI where the checkout may be shallow/squashed.
@@ -43,7 +47,7 @@ test("getFileLatestModification returns enriched metadata", (t) => {
     t.truthy(mod.authorEmail);
     t.is(typeof mod.summary, "string");
   }
-  t.is(typeof mod.authorTime, "number");
+  t.true(mod.authorTime instanceof Date);
 });
 
 // Test #2 — async matches sync.
@@ -72,7 +76,10 @@ test("getFileLatestModification resolves a file whose only commit is the root", 
   const mod = repo.getFileLatestModification("LICENSE");
   t.truthy(mod);
   t.regex(mod.commitId, /^[0-9a-f]{40}$/);
-  t.is(mod.timestamp, repo.getFileLatestModifiedDate("LICENSE"));
+  t.is(
+    mod.committerTime.getTime(),
+    repo.getFileLatestModifiedDate("LICENSE").getTime(),
+  );
 });
 
 // Test #4 — bulk resolves many paths in one pass; cross-validate vs single-file.

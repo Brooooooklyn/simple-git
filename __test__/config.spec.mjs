@@ -129,7 +129,7 @@ test("signature reads identity from config", (t) => {
     const sig = new Repository(dir).signature();
     t.is(sig.name(), "tester");
     t.is(sig.email(), "tester@example.com");
-    t.is(typeof sig.when(), "number");
+    t.true(sig.when() instanceof Date);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

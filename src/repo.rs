@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
+use chrono::{DateTime, Utc};
 use napi::{JsString, bindgen_prelude::*};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
@@ -13,7 +14,9 @@ use crate::commit::{Commit, CommitInner};
 use crate::config::Config;
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
-use crate::file_modification::{FileModification, get_file_modification, get_files_modification};
+use crate::file_modification::{
+  FileModification, get_file_modification, get_files_modification, time_to_date,
+};
 use crate::index::Index;
 use crate::object::{GitObject, ObjectParent};
 use crate::reference;
@@ -150,8 +153,8 @@ unsafe impl Send for GitBlameTask {}
 
 #[napi]
 impl Task for GitDateTask {
-  type Output = i64;
-  type JsValue = i64;
+  type Output = DateTime<Utc>;
+  type JsValue = DateTime<Utc>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
     get_file_modification(
@@ -165,7 +168,7 @@ impl Task for GitDateTask {
     .convert_without_message()
     .and_then(|value| {
       value
-        .map(|m| m.timestamp)
+        .map(|m| m.committer_time)
         .expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
     })
   }
@@ -177,8 +180,8 @@ impl Task for GitDateTask {
 
 #[napi]
 impl Task for GitCreatedDateTask {
-  type Output = i64;
-  type JsValue = i64;
+  type Output = DateTime<Utc>;
+  type JsValue = DateTime<Utc>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
     get_file_created_date(
@@ -1296,12 +1299,12 @@ impl Repository {
   }
 
   #[napi]
-  pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<i64> {
+  pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<DateTime<Utc>> {
     get_file_modification(&self.inner, &filepath)
       .convert_without_message()
       .and_then(|value| {
         value
-          .map(|m| m.timestamp)
+          .map(|m| m.committer_time)
           .expect_not_null(format!("Failed to get commit for [{filepath}]"))
       })
   }
@@ -1454,7 +1457,7 @@ impl Repository {
   }
 
   #[napi]
-  pub fn get_file_created_date(&self, filepath: String) -> Result<i64> {
+  pub fn get_file_created_date(&self, filepath: String) -> Result<DateTime<Utc>> {
     get_file_created_date(&self.inner, &filepath)
       .convert_without_message()
       .and_then(|value| {
@@ -1501,7 +1504,7 @@ fn collect_statuses(
 fn get_file_created_date(
   repo: &git2::Repository,
   filepath: &str,
-) -> std::result::Result<Option<i64>, git2::Error> {
+) -> std::result::Result<Option<DateTime<Utc>>, git2::Error> {
   // TODO: Add rename detection support using git2::DiffFindOptions for full `git log --follow` semantics
   let mut rev_walk = repo.revwalk()?;
   rev_walk.push_head()?;
@@ -1511,7 +1514,7 @@ fn get_file_created_date(
   rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
   let path = PathBuf::from(filepath);
 
-  let mut earliest_commit_time: Option<i64> = None;
+  let mut earliest_commit_time: Option<DateTime<Utc>> = None;
 
   // Traverse all commits to find the earliest one that contains the file
   for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
@@ -1520,7 +1523,7 @@ fn get_file_created_date(
     {
       // Check if the file exists in this commit's tree
       if tree.get_path(&path).is_ok() {
-        earliest_commit_time = Some(commit.time().seconds() * 1000);
+        earliest_commit_time = Some(time_to_date(commit.time().seconds())?);
       }
     }
   }

@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
 use napi_derive::napi;
 
 /// Last commit that modified a file, with author/committer identity.
-/// All times are ms since epoch (UTC; timezone offset ignored).
+/// All times are `Date`s (UTC; timezone offset ignored).
 #[napi(object)]
 pub struct FileModification {
-  /// Committer time, ms since epoch. Identical to `getFileLatestModifiedDate`. Equals `committerTime`.
-  pub timestamp: i64,
   /// 40-char lowercase hex OID of the last commit that modified the file.
   pub commit_id: String,
   /// Commit summary (first line). Undefined if absent or not valid UTF-8.
@@ -17,32 +16,42 @@ pub struct FileModification {
   pub author_name: Option<String>,
   /// Author email. Undefined if not valid UTF-8.
   pub author_email: Option<String>,
-  /// Author time, ms since epoch.
-  pub author_time: i64,
+  /// Author time, as a `Date`.
+  pub author_time: DateTime<Utc>,
   /// Committer name. Undefined if not valid UTF-8.
   pub committer_name: Option<String>,
   /// Committer email. Undefined if not valid UTF-8.
   pub committer_email: Option<String>,
-  /// Committer time, ms since epoch. Equals `timestamp`.
-  pub committer_time: i64,
+  /// Committer time, as a `Date`. Identical to `getFileLatestModifiedDate`.
+  pub committer_time: DateTime<Utc>,
 }
 
-pub(crate) fn build_modification(commit: &git2::Commit) -> FileModification {
+/// Convert git2 epoch seconds into a UTC `Date`. Errors (as a `git2::Error`, to
+/// fit the surrounding history walk's `Result<_, git2::Error>`) only on the
+/// practically unreachable out-of-range case.
+pub(crate) fn time_to_date(seconds: i64) -> std::result::Result<DateTime<Utc>, git2::Error> {
+  DateTime::from_timestamp(seconds, 0)
+    .ok_or_else(|| git2::Error::from_str(&format!("Invalid commit timestamp: {seconds}")))
+}
+
+pub(crate) fn build_modification(
+  commit: &git2::Commit,
+) -> std::result::Result<FileModification, git2::Error> {
   let author = commit.author();
   let committer = commit.committer();
-  // Byte-identical to the legacy value (repo.rs get_file_modified_date): commit.time(), NOT committer.when().
-  let committer_time = commit.time().seconds() * 1000;
-  FileModification {
-    timestamp: committer_time,
+  // Mirrors the legacy value (repo.rs get_file_modified_date): commit.time(), NOT committer.when().
+  let committer_time = time_to_date(commit.time().seconds())?;
+  let author_time = time_to_date(author.when().seconds())?;
+  Ok(FileModification {
     commit_id: commit.id().to_string(),
     summary: commit.summary().ok().flatten().map(|s| s.to_owned()),
     author_name: author.name().ok().map(|s| s.to_owned()),
     author_email: author.email().ok().map(|s| s.to_owned()),
-    author_time: author.when().seconds() * 1000,
+    author_time,
     committer_name: committer.name().ok().map(|s| s.to_owned()),
     committer_email: committer.email().ok().map(|s| s.to_owned()),
     committer_time,
-  }
+  })
 }
 
 /// Single-file walk: find the most recent commit that modified `filepath`.
@@ -63,39 +72,42 @@ pub(crate) fn get_file_modification(
   // first commit whose diff touches the path is its latest modification.
   rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
   let path = PathBuf::from(filepath);
-  Ok(
-    rev_walk
-      .by_ref()
-      .filter_map(|oid| oid.ok())
-      .find_map(|oid| {
-        let commit = repo.find_commit(oid).ok()?;
-        match commit.parent_count() {
-          // commit with parent
-          1 => {
-            let tree = commit.tree().ok()?;
-            if let Ok(parent) = commit.parent(0) {
-              let parent_tree = parent.tree().ok()?;
-              if let Ok(diff) =
-                repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))
-                && diff.deltas().len() > 0
-              {
-                return Some(build_modification(&commit));
-              }
-            }
-          }
-          // root commit
-          0 => {
-            let tree = commit.tree().ok()?;
-            if tree.get_path(&path).is_ok() {
-              return Some(build_modification(&commit));
-            }
-          }
-          // ignore merge commits
-          _ => {}
+  for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
+    let Ok(commit) = repo.find_commit(oid) else {
+      continue;
+    };
+    match commit.parent_count() {
+      // commit with parent
+      1 => {
+        let Ok(tree) = commit.tree() else {
+          continue;
         };
-        None
-      }),
-  )
+        if let Ok(parent) = commit.parent(0) {
+          let Ok(parent_tree) = parent.tree() else {
+            continue;
+          };
+          if let Ok(diff) =
+            repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))
+            && diff.deltas().len() > 0
+          {
+            return Ok(Some(build_modification(&commit)?));
+          }
+        }
+      }
+      // root commit
+      0 => {
+        let Ok(tree) = commit.tree() else {
+          continue;
+        };
+        if tree.get_path(&path).is_ok() {
+          return Ok(Some(build_modification(&commit)?));
+        }
+      }
+      // ignore merge commits
+      _ => {}
+    }
+  }
+  Ok(None)
 }
 
 /// Bulk walk: resolve the last commit that modified each of `filepaths` in a
@@ -165,7 +177,7 @@ pub(crate) fn get_files_modification(
               && unresolved.contains(p)
             {
               let key = p.to_owned();
-              result.insert(key.clone(), Some(build_modification(&commit)));
+              result.insert(key.clone(), Some(build_modification(&commit)?));
               unresolved.remove(&key);
             }
           }
@@ -176,7 +188,7 @@ pub(crate) fn get_files_modification(
         if let Ok(tree) = commit.tree() {
           for p in unresolved.clone() {
             if tree.get_path(Path::new(&p)).is_ok() {
-              result.insert(p.clone(), Some(build_modification(&commit)));
+              result.insert(p.clone(), Some(build_modification(&commit)?));
               unresolved.remove(&p);
             }
           }

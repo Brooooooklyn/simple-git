@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+use chrono::{DateTime, Utc};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
@@ -62,14 +63,15 @@ impl Signature {
   #[napi(constructor)]
   /// Create a new action signature.
   ///
-  /// The `time` specified is in seconds since the epoch, and the `offset` is
-  /// the time zone offset in minutes.
+  /// The `time` is a JS `Date`; it is recorded at whole-second resolution with a
+  /// zero time-zone offset (UTC).
   ///
   /// Returns error if either `name` or `email` contain angle brackets.
-  pub fn new(name: String, email: String, time: i64) -> Result<Self> {
+  pub fn new(name: String, email: String, time: DateTime<Utc>) -> Result<Self> {
     Ok(Signature {
       inner: SignatureInner::Signature(
-        git2::Signature::new(&name, &email, &git2::Time::new(time, 0)).convert_without_message()?,
+        git2::Signature::new(&name, &email, &git2::Time::new(time.timestamp(), 0))
+          .convert_without_message()?,
       ),
     })
   }
@@ -91,9 +93,10 @@ impl Signature {
   }
 
   #[napi]
-  /// Return the time, in seconds, from epoch
-  pub fn when(&self) -> i64 {
-    self.inner.when().seconds()
+  /// Return the time the signature was recorded, as a `Date`.
+  pub fn when(&self) -> Result<DateTime<Utc>> {
+    DateTime::from_timestamp(self.inner.when().seconds(), 0)
+      .ok_or_else(|| Error::from_reason("Invalid signature time"))
   }
 }
 

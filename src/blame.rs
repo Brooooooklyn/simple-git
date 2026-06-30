@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use chrono::{DateTime, Utc};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
@@ -48,8 +49,8 @@ pub struct BlameHunk {
   pub final_author_name: Option<String>,
   /// Author email of the final commit. Undefined if absent or not valid UTF-8.
   pub final_author_email: Option<String>,
-  /// Author time of the final commit, ms since epoch. `0` if no signature.
-  pub final_time: i64,
+  /// Author time of the final commit, as a `Date`. The Unix epoch if no signature.
+  pub final_time: DateTime<Utc>,
   /// 40-char lowercase hex OID of the commit where this hunk was found.
   pub orig_commit_id: String,
   /// Line number where this hunk begins in the original file (1-based).
@@ -105,17 +106,20 @@ pub(crate) fn build_blame_opts(opts: Option<BlameOptions>) -> Result<git2::Blame
 /// Eagerly copy a borrowed `git2::BlameHunk` into an owned `BlameHunk`.
 ///
 /// The author identity is read from `final_signature()` (which may be absent,
-/// e.g. for in-memory buffer blames); time is ms since epoch.
-pub(crate) fn hunk_to_struct(hunk: &git2::BlameHunk) -> BlameHunk {
-  let (final_author_name, final_author_email, final_time) = match hunk.final_signature() {
+/// e.g. for in-memory buffer blames); `final_time` is a `Date`, falling back to
+/// the Unix epoch when no signature is present.
+pub(crate) fn hunk_to_struct(hunk: &git2::BlameHunk) -> Result<BlameHunk> {
+  let (final_author_name, final_author_email, final_seconds) = match hunk.final_signature() {
     Some(sig) => (
       sig.name().ok().map(|s| s.to_owned()),
       sig.email().ok().map(|s| s.to_owned()),
-      sig.when().seconds() * 1000,
+      sig.when().seconds(),
     ),
     None => (None, None, 0),
   };
-  BlameHunk {
+  let final_time = DateTime::from_timestamp(final_seconds, 0)
+    .ok_or_else(|| Error::from_reason("Invalid blame final time"))?;
+  Ok(BlameHunk {
     lines_in_hunk: hunk.lines_in_hunk() as u32,
     final_commit_id: hunk.final_commit_id().to_string(),
     final_start_line: hunk.final_start_line() as u32,
@@ -128,7 +132,7 @@ pub(crate) fn hunk_to_struct(hunk: &git2::BlameHunk) -> BlameHunk {
     // paths collapse to `None`.
     orig_path: hunk.path().and_then(|p| p.to_str()).map(|s| s.to_owned()),
     is_boundary: hunk.is_boundary(),
-  }
+  })
 }
 
 /// Compute the blame for `path` and eagerly materialize every hunk so nothing
@@ -142,7 +146,7 @@ pub(crate) fn collect_blame(
   let blame = repo
     .blame_file(Path::new(path), Some(&mut opts))
     .convert_without_message()?;
-  Ok(blame.iter().map(|hunk| hunk_to_struct(&hunk)).collect())
+  blame.iter().map(|hunk| hunk_to_struct(&hunk)).collect()
 }
 
 /// Compute the blame for `path` and return the single hunk covering `line_no`
@@ -157,9 +161,8 @@ pub(crate) fn blame_single_line(
   let blame = repo
     .blame_file(Path::new(path), Some(&mut opts))
     .convert_without_message()?;
-  Ok(
-    blame
-      .get_line(line_no as usize)
-      .map(|hunk| hunk_to_struct(&hunk)),
-  )
+  blame
+    .get_line(line_no as usize)
+    .map(|hunk| hunk_to_struct(&hunk))
+    .transpose()
 }

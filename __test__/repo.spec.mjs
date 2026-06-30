@@ -20,7 +20,9 @@ test("Date should be equal with cli", (t) => {
   if (process.env.CI) {
     t.notThrows(() => repo.getFileLatestModifiedDate(join("src", "lib.rs")));
   } else {
-    t.deepEqual(
+    const actual = repo.getFileLatestModifiedDate(join("src", "lib.rs"));
+    t.true(actual instanceof Date);
+    t.is(
       new Date(
         execSync("git log -1 --format=%cd --date=iso src/lib.rs", {
           cwd: workDir,
@@ -28,7 +30,7 @@ test("Date should be equal with cli", (t) => {
           .toString("utf8")
           .trim(),
       ).valueOf(),
-      repo.getFileLatestModifiedDate(join("src", "lib.rs")),
+      actual.getTime(),
     );
   }
 });
@@ -38,7 +40,9 @@ test("Created date should be equal with cli", (t) => {
   if (process.env.CI) {
     t.notThrows(() => repo.getFileCreatedDate(join("src", "lib.rs")));
   } else {
-    t.deepEqual(
+    const actual = repo.getFileCreatedDate(join("src", "lib.rs"));
+    t.true(actual instanceof Date);
+    t.is(
       new Date(
         execSync("git log --reverse --format=%cd --date=iso src/lib.rs", {
           cwd: workDir,
@@ -47,7 +51,7 @@ test("Created date should be equal with cli", (t) => {
           .split('\n')[0]
           .trim(),
       ).valueOf(),
-      repo.getFileCreatedDate(join("src", "lib.rs")),
+      actual.getTime(),
     );
   }
 });
@@ -65,9 +69,10 @@ test("Created date async should work", async (t) => {
         .split('\n')[0]
         .trim(),
     ).valueOf();
-    
+
     const actualDate = await repo.getFileCreatedDateAsync(join("src", "lib.rs"));
-    t.deepEqual(expectedDate, actualDate);
+    t.true(actualDate instanceof Date);
+    t.is(expectedDate, actualDate.getTime());
   }
 });
 
