@@ -192,7 +192,7 @@ export interface FileModification {
  * A git configuration store. Obtain one with `repo.config()` (system + global +
  * repository, prioritized) or `Config.openDefault()` (system/global/XDG only).
  */
-export declare class Config {
+export class Config {
   /** Open global, XDG and system config into one prioritized object. */
   static openDefault(): Config
   /** Get a string config value (highest-priority occurrence wins). */
@@ -252,7 +252,7 @@ export declare const enum ConfigLevel {
  * methods change memory only; call `write()` to persist it or `writeTree()` to
  * write its current state to the object database as a tree.
  */
-export declare class Index {
+export class Index {
   /** Add or update an index entry from a file on disk. */
   addPath(path: string): void
   /** Add or update entries matching files in the working directory. */
@@ -273,7 +273,7 @@ export declare class Index {
  * A git branch — a thin wrapper around an underlying reference; the full
  * reference name is available via `referenceName`.
  */
-export declare class Branch {
+export class Branch {
   /** Name of the local or remote branch (`null` if not valid utf-8). */
   name(): string | null
   /** Whether the current local branch is pointed at by HEAD. */
@@ -296,7 +296,7 @@ export declare const enum BranchType {
   Remote = 1
 }
 
-export declare class PushOptions {
+export class PushOptions {
   constructor()
   /** Set the callbacks to use for the push operation. */
   remoteCallback(callback: RemoteCallbacks): this

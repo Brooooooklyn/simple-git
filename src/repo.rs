@@ -844,10 +844,7 @@ impl Repository {
       if err.code() == git2::ErrorCode::NotFound {
         return Ok(None);
       }
-      return Err(napi::Error::new(
-        napi::Status::GenericFailure,
-        format!("libgit2 error: {err}"),
-      ));
+      return Err(err).convert(format!("Find branch [{name}] failed"));
     }
     let inner = this_ref.share_with(env, move |repo| {
       repo
