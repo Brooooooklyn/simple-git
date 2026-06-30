@@ -46,6 +46,20 @@ test("getFileLatestModification returns enriched metadata", (t) => {
   t.is(typeof mod.authorTime, "number");
 });
 
+// Test #2 — async matches sync.
+test("getFileLatestModificationAsync matches sync result", async (t) => {
+  const { repo } = t.context;
+  const sync = repo.getFileLatestModification("build.rs");
+  const asyncResult = await repo.getFileLatestModificationAsync("build.rs");
+  t.deepEqual(asyncResult, sync);
+
+  // Async missing path resolves to null (mirrors sync null-on-missing, no throw).
+  t.is(
+    await repo.getFileLatestModificationAsync("does-not-exist-xyz.nope"),
+    null,
+  );
+});
+
 // Test #3 — null for a path that was never committed.
 test("getFileLatestModification returns null for missing path", (t) => {
   const { repo } = t.context;

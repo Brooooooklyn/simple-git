@@ -116,6 +116,13 @@ pub struct GitCreatedDateTask {
 
 unsafe impl Send for GitCreatedDateTask {}
 
+pub struct GitModificationTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  filepath: String,
+}
+
+unsafe impl Send for GitModificationTask {}
+
 #[napi]
 impl Task for GitDateTask {
   type Output = i64;
@@ -164,6 +171,28 @@ impl Task for GitCreatedDateTask {
         &self.filepath
       ))
     })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitModificationTask {
+  type Output = Option<FileModification>;
+  type JsValue = Option<FileModification>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    get_file_modification(
+      &self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
+      &self.filepath,
+    )
+    .convert_without_message()
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -925,6 +954,22 @@ impl Repository {
     filepath: String,
   ) -> Result<Option<FileModification>> {
     get_file_modification(&self.inner, &filepath).convert_without_message()
+  }
+
+  #[napi]
+  pub fn get_file_latest_modification_async(
+    &self,
+    self_ref: Reference<Repository>,
+    filepath: String,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitModificationTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitModificationTask {
+        repo: RwLock::new(self_ref),
+        filepath,
+      },
+      signal,
+    ))
   }
 
   #[napi]
