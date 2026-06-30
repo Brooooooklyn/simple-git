@@ -558,13 +558,13 @@ export declare class Reference {
    * ```ts
    * import { Reference } from '@napi-rs/simple-git'
    *
-   * console.assert(Reference.is_valid_name("HEAD"));
-   * console.assert(Reference.is_valid_name("refs/heads/main"));
+   * console.assert(Reference.isValidName("HEAD"));
+   * console.assert(Reference.isValidName("refs/heads/main"));
    *
    * // But:
-   * console.assert(!Reference.is_valid_name("main"));
-   * console.assert(!Reference.is_valid_name("refs/heads/*"));
-   * console.assert(!Reference.is_valid_name("foo//bar"));
+   * console.assert(!Reference.isValidName("main"));
+   * console.assert(!Reference.isValidName("refs/heads/*"));
+   * console.assert(!Reference.isValidName("foo//bar"));
    * ```
    */
   static isValidName(name: string): boolean
@@ -707,6 +707,9 @@ export declare class Remote {
    * headers, ...). It must NOT carry `RemoteCallbacks`: those hold JS-backed
    * callbacks bound to the main JS thread and cannot be invoked safely from a
    * worker thread. If callbacks are required, use the synchronous `fetch`.
+   *
+   * Safety: do not use the same `Remote` from the main thread while this async
+   * operation is pending; the underlying git2 handle is not `Sync`.
    */
   fetchAsync(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<void>
   /**
@@ -717,6 +720,9 @@ export declare class Remote {
    * JS-backed callbacks bound to the main JS thread and cannot be invoked
    * safely from a worker thread. If callbacks (e.g. `pushUpdateReference`) are
    * required, use the synchronous `push`.
+   *
+   * Safety: do not use the same `Remote` from the main thread while this async
+   * operation is pending; the underlying git2 handle is not `Sync`.
    */
   pushAsync(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<void>
   /**
@@ -865,6 +871,9 @@ export declare class Repository {
    *
    * The network/clone work runs on a worker thread and the resulting
    * `Repository` is constructed on the main thread once the clone completes.
+   *
+   * Safety: the resulting `Repository` only exists once the promise resolves; the
+   * underlying git2 handle is not `Sync`, so use it only from the main thread.
    */
   static cloneAsync(url: string, path: string, signal?: AbortSignal | undefined | null): Promise<Repository>
   /**
@@ -990,7 +999,9 @@ export declare class Repository {
   /**
    * Add a fetch refspec to the remote's configuration
    *
-   * Add the given refspec to the fetch list in the configuration. No loaded
+   * Add the given refspec to the fetch list in the configuration for the
+   * named remote, without loading it. No loaded remote instances will be
+   * affected.
    */
   remoteAddFetch(name: string, refspec: string): this
   /**
@@ -1001,10 +1012,10 @@ export declare class Repository {
    */
   remoteAddPush(name: string, refspec: string): this
   /**
-   * Add a push refspec to the remote's configuration.
+   * Set the URL of a remote in the repository's configuration.
    *
-   * Add the given refspec to the push list in the configuration. No
-   * loaded remote instances will be affected.
+   * Updates the configured fetch URL for the named remote. No loaded
+   * remote instances will be affected.
    */
   remoteSetUrl(name: string, url: string): this
   /**
@@ -1214,6 +1225,9 @@ export declare class Repository {
    * Resolves with the new commit's OID hex string. Arguments mirror `commit`:
    * the `author`/`committer` signatures are copied and the `tree` is captured
    * by OID, so the work can be moved to a worker thread safely.
+   *
+   * Safety: do not use the same `Repository` from the main thread while this
+   * async operation is pending; the underlying git2 handle is not `Sync`.
    */
   commitAsync(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null, signal?: AbortSignal | undefined | null): Promise<string>
   /**
@@ -1476,9 +1490,22 @@ export declare class Tree {
   getId(id: string): TreeEntry | null
   /** Lookup a tree entry by its position in the tree */
   get(index: number): TreeEntry | null
-  /** Lookup a tree entry by its filename */
+  /**
+   * Lookup a direct child entry of this tree by its name.
+   *
+   * `name` is a single path component (a filename), not a multi-component
+   * path; this does not descend into subtrees. To follow a relative path
+   * through nested subtrees, use `getPath`.
+   */
   getName(name: string): TreeEntry | null
-  /** Lookup a tree entry by its filename */
+  /**
+   * Lookup a tree entry by a relative path, descending through subtrees.
+   *
+   * `name` is a path relative to this tree and may contain multiple
+   * components (e.g. `src/lib.rs`); each component is resolved in turn,
+   * walking into nested subtrees. To look up a direct child by its name,
+   * use `getName`.
+   */
   getPath(name: string): TreeEntry | null
 }
 
@@ -1834,7 +1861,7 @@ export interface FileModification {
  * value as a forward-compatible escape hatch for flags not surfaced here.
  */
 export interface FileStatus {
-  /** Workdir-relative path. `null` if the path is not valid UTF-8. */
+  /** Workdir-relative path. Undefined if the path is not valid UTF-8. */
   path?: string
   /** Raw `git2::Status` bits — forward-compat escape hatch. */
   bits: number

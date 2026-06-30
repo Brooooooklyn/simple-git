@@ -97,7 +97,11 @@ impl Tree {
   }
 
   #[napi]
-  /// Lookup a tree entry by its filename
+  /// Lookup a direct child entry of this tree by its name.
+  ///
+  /// `name` is a single path component (a filename), not a multi-component
+  /// path; this does not descend into subtrees. To follow a relative path
+  /// through nested subtrees, use `getPath`.
   pub fn get_name(&self, this_ref: Reference<Tree>, env: Env, name: String) -> Option<TreeEntry> {
     let reference = this_ref
       .share_with(env, |tree| {
@@ -114,7 +118,12 @@ impl Tree {
   }
 
   #[napi]
-  /// Lookup a tree entry by its filename
+  /// Lookup a tree entry by a relative path, descending through subtrees.
+  ///
+  /// `name` is a path relative to this tree and may contain multiple
+  /// components (e.g. `src/lib.rs`); each component is resolved in turn,
+  /// walking into nested subtrees. To look up a direct child by its name,
+  /// use `getName`.
   pub fn get_path(&self, this_ref: Reference<Tree>, env: Env, name: String) -> Option<TreeEntry> {
     let reference = this_ref
       .share_with(env, |tree| {

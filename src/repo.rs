@@ -497,6 +497,9 @@ impl Repository {
   ///
   /// The network/clone work runs on a worker thread and the resulting
   /// `Repository` is constructed on the main thread once the clone completes.
+  ///
+  /// Safety: the resulting `Repository` only exists once the promise resolves; the
+  /// underlying git2 handle is not `Sync`, so use it only from the main thread.
   pub fn clone_async(
     url: String,
     path: String,
@@ -816,7 +819,9 @@ impl Repository {
   #[napi]
   /// Add a fetch refspec to the remote's configuration
   ///
-  /// Add the given refspec to the fetch list in the configuration. No loaded
+  /// Add the given refspec to the fetch list in the configuration for the
+  /// named remote, without loading it. No loaded remote instances will be
+  /// affected.
   pub fn remote_add_fetch(&self, name: String, refspec: String) -> Result<&Self> {
     self
       .inner
@@ -839,10 +844,10 @@ impl Repository {
   }
 
   #[napi]
-  /// Add a push refspec to the remote's configuration.
+  /// Set the URL of a remote in the repository's configuration.
   ///
-  /// Add the given refspec to the push list in the configuration. No
-  /// loaded remote instances will be affected.
+  /// Updates the configured fetch URL for the named remote. No loaded
+  /// remote instances will be affected.
   pub fn remote_set_url(&self, name: String, url: String) -> Result<&Self> {
     self
       .inner
@@ -1398,6 +1403,9 @@ impl Repository {
   /// Resolves with the new commit's OID hex string. Arguments mirror `commit`:
   /// the `author`/`committer` signatures are copied and the `tree` is captured
   /// by OID, so the work can be moved to a worker thread safely.
+  ///
+  /// Safety: do not use the same `Repository` from the main thread while this
+  /// async operation is pending; the underlying git2 handle is not `Sync`.
   pub fn commit_async(
     &self,
     self_ref: Reference<Repository>,

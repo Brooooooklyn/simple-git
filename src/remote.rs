@@ -297,6 +297,9 @@ impl Remote {
   /// headers, ...). It must NOT carry `RemoteCallbacks`: those hold JS-backed
   /// callbacks bound to the main JS thread and cannot be invoked safely from a
   /// worker thread. If callbacks are required, use the synchronous `fetch`.
+  ///
+  /// Safety: do not use the same `Remote` from the main thread while this async
+  /// operation is pending; the underlying git2 handle is not `Sync`.
   pub fn fetch_async(
     &self,
     self_ref: Reference<Remote>,
@@ -337,6 +340,9 @@ impl Remote {
   /// JS-backed callbacks bound to the main JS thread and cannot be invoked
   /// safely from a worker thread. If callbacks (e.g. `pushUpdateReference`) are
   /// required, use the synchronous `push`.
+  ///
+  /// Safety: do not use the same `Remote` from the main thread while this async
+  /// operation is pending; the underlying git2 handle is not `Sync`.
   pub fn push_async(
     &self,
     self_ref: Reference<Remote>,

@@ -35,13 +35,13 @@ impl Reference {
   /// ```ts
   /// import { Reference } from '@napi-rs/simple-git'
   ///
-  /// console.assert(Reference.is_valid_name("HEAD"));
-  /// console.assert(Reference.is_valid_name("refs/heads/main"));
+  /// console.assert(Reference.isValidName("HEAD"));
+  /// console.assert(Reference.isValidName("refs/heads/main"));
   ///
   /// // But:
-  /// console.assert(!Reference.is_valid_name("main"));
-  /// console.assert(!Reference.is_valid_name("refs/heads/*"));
-  /// console.assert(!Reference.is_valid_name("foo//bar"));
+  /// console.assert(!Reference.isValidName("main"));
+  /// console.assert(!Reference.isValidName("refs/heads/*"));
+  /// console.assert(!Reference.isValidName("foo//bar"));
   /// ```
   pub fn is_valid_name(name: String) -> bool {
     git2::Reference::is_valid_name(&name)

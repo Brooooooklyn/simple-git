@@ -32,7 +32,7 @@ pub struct StatusOptions {
 /// value as a forward-compatible escape hatch for flags not surfaced here.
 #[napi(object)]
 pub struct FileStatus {
-  /// Workdir-relative path. `null` if the path is not valid UTF-8.
+  /// Workdir-relative path. Undefined if the path is not valid UTF-8.
   pub path: Option<String>,
   /// Raw `git2::Status` bits — forward-compat escape hatch.
   pub bits: u32,
