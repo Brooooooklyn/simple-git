@@ -210,18 +210,23 @@ export declare class Config {
    * first) and the first occurrence is returned. Errors if the value is not
    * valid utf-8 or the key is missing.
    */
-  getStringValue(name: string): string
+  getString(name: string): string
   /** Get the value of a boolean config variable. */
   getBool(name: string): boolean
-  /** Get the value of an i32 config variable. */
-  getI32(name: string): number
-  /** Get the value of an i64 config variable. */
-  getI64(name: string): number
+  /** Get the value of an i32 config variable, as a JS `number`. */
+  getNumber(name: string): number
+  /**
+   * Get the value of an i64 config variable, as a JS `bigint`.
+   *
+   * Returns a `bigint` rather than a `number` so values beyond
+   * `Number.MAX_SAFE_INTEGER` (2^53 - 1) survive without truncation.
+   */
+  getBigInt(name: string): bigint
   /**
    * Set the value of a string config variable in the config file with the
    * highest level (usually the local one).
    */
-  setStr(name: string, value: string): void
+  setString(name: string, value: string): void
   /**
    * Set the value of a boolean config variable in the config file with the
    * highest level (usually the local one).
@@ -229,14 +234,17 @@ export declare class Config {
   setBool(name: string, value: boolean): void
   /**
    * Set the value of an i32 config variable in the config file with the
-   * highest level (usually the local one).
+   * highest level (usually the local one). Takes a JS `number`.
    */
-  setI32(name: string, value: number): void
+  setNumber(name: string, value: number): void
   /**
    * Set the value of an i64 config variable in the config file with the
-   * highest level (usually the local one).
+   * highest level (usually the local one). Takes a JS `bigint`.
+   *
+   * Errors with `InvalidArg` if the `bigint` does not fit losslessly in an
+   * i64 rather than silently truncating it.
    */
-  setI64(name: string, value: number): void
+  setBigInt(name: string, value: bigint): void
   /**
    * Delete a config variable from the config file with the highest level
    * (usually the local one).

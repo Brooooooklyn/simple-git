@@ -49,8 +49,8 @@ const scanned = await repo.statusesAsync({ includeIgnored: true }) // off-thread
 
 // ---- Config + default signature ----
 const config = repo.config() // => Config (system + global + repo, prioritized)
-config.setStr('user.name', 'LongYinan')
-console.log(config.getStringValue('user.name')) // 'LongYinan'
+config.setString('user.name', 'LongYinan')
+console.log(config.getString('user.name')) // 'LongYinan'
 console.log(config.getBool('core.bare')) // false
 const sig = repo.signature() // built from user.name / user.email
 console.log(sig.name(), sig.email()) // 'LongYinan' 'github@lyn.one'
@@ -196,15 +196,17 @@ export class Config {
   /** Open global, XDG and system config into one prioritized object. */
   static openDefault(): Config
   /** Get a string config value (highest-priority occurrence wins). */
-  getStringValue(name: string): string
+  getString(name: string): string
   getBool(name: string): boolean
-  getI32(name: string): number
-  getI64(name: string): number
+  getNumber(name: string): number
+  /** i64 value as a `bigint` (no >2^53 truncation). */
+  getBigInt(name: string): bigint
   /** Set a value in the highest-level config file (usually the local one). */
-  setStr(name: string, value: string): void
+  setString(name: string, value: string): void
   setBool(name: string, value: boolean): void
-  setI32(name: string, value: number): void
-  setI64(name: string, value: number): void
+  setNumber(name: string, value: number): void
+  /** Set an i64 value from a `bigint`; throws if it doesn't fit in i64. */
+  setBigInt(name: string, value: bigint): void
   /** Delete a variable from the highest-level config file. */
   removeEntry(name: string): void
   /** Create a read-only point-in-time snapshot of this configuration. */

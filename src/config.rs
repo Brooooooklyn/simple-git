@@ -77,7 +77,7 @@ impl Config {
   /// All config files are searched in order of their level (highest priority
   /// first) and the first occurrence is returned. Errors if the value is not
   /// valid utf-8 or the key is missing.
-  pub fn get_string_value(&self, name: String) -> Result<String> {
+  pub fn get_string(&self, name: String) -> Result<String> {
     self.inner.get_string(&name).convert_without_message()
   }
 
@@ -88,21 +88,25 @@ impl Config {
   }
 
   #[napi]
-  /// Get the value of an i32 config variable.
-  pub fn get_i32(&self, name: String) -> Result<i32> {
+  /// Get the value of an i32 config variable, as a JS `number`.
+  pub fn get_number(&self, name: String) -> Result<i32> {
     self.inner.get_i32(&name).convert_without_message()
   }
 
   #[napi]
-  /// Get the value of an i64 config variable.
-  pub fn get_i64(&self, name: String) -> Result<i64> {
-    self.inner.get_i64(&name).convert_without_message()
+  /// Get the value of an i64 config variable, as a JS `bigint`.
+  ///
+  /// Returns a `bigint` rather than a `number` so values beyond
+  /// `Number.MAX_SAFE_INTEGER` (2^53 - 1) survive without truncation.
+  pub fn get_big_int(&self, name: String) -> Result<BigInt> {
+    let value = self.inner.get_i64(&name).convert_without_message()?;
+    Ok(BigInt::from(value))
   }
 
   #[napi]
   /// Set the value of a string config variable in the config file with the
   /// highest level (usually the local one).
-  pub fn set_str(&mut self, name: String, value: String) -> Result<()> {
+  pub fn set_string(&mut self, name: String, value: String) -> Result<()> {
     self.inner.set_str(&name, &value).convert_without_message()
   }
 
@@ -115,15 +119,25 @@ impl Config {
 
   #[napi]
   /// Set the value of an i32 config variable in the config file with the
-  /// highest level (usually the local one).
-  pub fn set_i32(&mut self, name: String, value: i32) -> Result<()> {
+  /// highest level (usually the local one). Takes a JS `number`.
+  pub fn set_number(&mut self, name: String, value: i32) -> Result<()> {
     self.inner.set_i32(&name, value).convert_without_message()
   }
 
   #[napi]
   /// Set the value of an i64 config variable in the config file with the
-  /// highest level (usually the local one).
-  pub fn set_i64(&mut self, name: String, value: i64) -> Result<()> {
+  /// highest level (usually the local one). Takes a JS `bigint`.
+  ///
+  /// Errors with `InvalidArg` if the `bigint` does not fit losslessly in an
+  /// i64 rather than silently truncating it.
+  pub fn set_big_int(&mut self, name: String, value: BigInt) -> Result<()> {
+    let (value, lossless) = value.get_i64();
+    if !lossless {
+      return Err(Error::new(
+        Status::InvalidArg,
+        format!("BigInt value for `{name}` does not fit in a 64-bit signed integer"),
+      ));
+    }
     self.inner.set_i64(&name, value).convert_without_message()
   }
 
