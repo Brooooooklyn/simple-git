@@ -6,6 +6,7 @@ use napi::{JsString, bindgen_prelude::*};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 
+use crate::blame::{BlameHunk, BlameOptions, blame_single_line, collect_blame};
 use crate::commit::{Commit, CommitInner};
 use crate::config::Config;
 use crate::diff::Diff;
@@ -141,6 +142,14 @@ pub struct GitStatusTask {
 
 unsafe impl Send for GitStatusTask {}
 
+pub struct GitBlameTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  filepath: String,
+  options: Option<BlameOptions>,
+}
+
+unsafe impl Send for GitBlameTask {}
+
 #[napi]
 impl Task for GitDateTask {
   type Output = i64;
@@ -252,6 +261,28 @@ impl Task for GitStatusTask {
         .read()
         .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
         .inner,
+      self.options.clone(),
+    )
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitBlameTask {
+  type Output = Vec<BlameHunk>;
+  type JsValue = Vec<BlameHunk>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    collect_blame(
+      &self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
+      &self.filepath,
       self.options.clone(),
     )
   }
@@ -1164,6 +1195,48 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitStatusTask {
         repo: RwLock::new(self_ref),
+        options,
+      },
+      signal,
+    ))
+  }
+
+  #[napi]
+  /// Compute the blame for `path`: who last changed each line, as an ordered
+  /// list of hunks (contiguous runs of lines sharing one final commit).
+  ///
+  /// `path` is workdir-relative. Pass `options` to restrict the line/commit
+  /// range or enable copy tracking. Each `BlameHunk` is eagerly materialized
+  /// so it outlives the underlying libgit2 blame.
+  pub fn blame_file(&self, path: String, options: Option<BlameOptions>) -> Result<Vec<BlameHunk>> {
+    collect_blame(&self.inner, &path, options)
+  }
+
+  #[napi]
+  /// Blame `path` and return only the hunk covering `line_no` (1-based), or
+  /// `null` when the line is out of range.
+  pub fn blame_line(
+    &self,
+    path: String,
+    line_no: u32,
+    options: Option<BlameOptions>,
+  ) -> Result<Option<BlameHunk>> {
+    blame_single_line(&self.inner, &path, line_no, options)
+  }
+
+  #[napi]
+  /// Asynchronous variant of `blame_file`, computed off the main thread.
+  pub fn blame_file_async(
+    &self,
+    self_ref: Reference<Repository>,
+    path: String,
+    options: Option<BlameOptions>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitBlameTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitBlameTask {
+        repo: RwLock::new(self_ref),
+        filepath: path,
         options,
       },
       signal,

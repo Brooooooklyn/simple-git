@@ -1073,6 +1073,22 @@ export declare class Repository {
   statusFile(path: string): FileStatus
   /** Asynchronous variant of `statuses`, computed off the main thread. */
   statusesAsync(options?: StatusOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<FileStatus>>
+  /**
+   * Compute the blame for `path`: who last changed each line, as an ordered
+   * list of hunks (contiguous runs of lines sharing one final commit).
+   *
+   * `path` is workdir-relative. Pass `options` to restrict the line/commit
+   * range or enable copy tracking. Each `BlameHunk` is eagerly materialized
+   * so it outlives the underlying libgit2 blame.
+   */
+  blameFile(path: string, options?: BlameOptions | undefined | null): Array<BlameHunk>
+  /**
+   * Blame `path` and return only the hunk covering `line_no` (1-based), or
+   * `null` when the line is out of range.
+   */
+  blameLine(path: string, lineNo: number, options?: BlameOptions | undefined | null): BlameHunk | null
+  /** Asynchronous variant of `blame_file`, computed off the main thread. */
+  blameFileAsync(path: string, options?: BlameOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<BlameHunk>>
   getFileCreatedDate(filepath: string): number
   getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }
@@ -1301,6 +1317,62 @@ export declare const enum AutotagOption {
   None = 2,
   /** Ask for all the tags */
   All = 3
+}
+
+/**
+ * A single blame hunk: a contiguous run of lines attributed to one commit.
+ *
+ * All identity fields are copied out of the borrowed `git2::BlameHunk` so the
+ * value can safely outlive the underlying `git2::Blame`.
+ */
+export interface BlameHunk {
+  /** Number of lines covered by this hunk. */
+  linesInHunk: number
+  /** 40-char lowercase hex OID of the commit where these lines were last changed. */
+  finalCommitId: string
+  /** Line number where this hunk begins in the final file (1-based). */
+  finalStartLine: number
+  /** Author name of the final commit. Undefined if absent or not valid UTF-8. */
+  finalAuthorName?: string
+  /** Author email of the final commit. Undefined if absent or not valid UTF-8. */
+  finalAuthorEmail?: string
+  /** Author time of the final commit, ms since epoch. `0` if no signature. */
+  finalTime: number
+  /** 40-char lowercase hex OID of the commit where this hunk was found. */
+  origCommitId: string
+  /** Line number where this hunk begins in the original file (1-based). */
+  origStartLine: number
+  /** Path to the file where this hunk originated. Undefined if not valid UTF-8. */
+  origPath?: string
+  /** Whether this hunk was tracked to a boundary commit (root or `oldest_commit`). */
+  isBoundary: boolean
+}
+
+/**
+ * Options controlling how a blame is computed.
+ *
+ * Every field is optional; omitted fields fall back to libgit2's defaults
+ * (no copy tracking, the whole file, starting from the current HEAD).
+ */
+export interface BlameOptions {
+  /** Track lines that have moved within a file. Defaults to `false`. */
+  trackCopiesSameFile?: boolean
+  /** Track lines that have moved across files in the same commit. Defaults to `false`. */
+  trackCopiesSameCommitMoves?: boolean
+  /** 40-char hex OID of the newest commit to consider (the blame starts here). */
+  newestCommit?: string
+  /** 40-char hex OID of the oldest commit to consider (a boundary). */
+  oldestCommit?: string
+  /** Restrict the search to first-parent history only. Defaults to `false`. */
+  firstParent?: boolean
+  /** Map names/emails through the repository's mailmap. Defaults to `false`. */
+  useMailmap?: boolean
+  /** Ignore whitespace differences. Defaults to `false`. */
+  ignoreWhitespace?: boolean
+  /** The first line in the file to blame (1-based). */
+  minLine?: number
+  /** The last line in the file to blame (1-based). */
+  maxLine?: number
 }
 
 export declare const enum CloneLocal {
