@@ -100,6 +100,17 @@ const callbacks = new RemoteCallbacks()
   })
 remote.push(['refs/heads/main'], new PushOptions().remoteCallback(callbacks))
 
+// ---- Async (off-main-thread) network + commit ----
+// Clone, commit, fetch and push also have async variants that run their git
+// work on a worker thread and return a Promise. `commitAsync` mirrors `commit`.
+const cloned = await Repository.cloneAsync('https://example.com/repo.git', '/tmp/clone')
+const asyncOid = await repo.commitAsync('HEAD', sig, sig, 'async commit', tree, [parent])
+// fetchAsync / pushAsync accept data-only Fetch/Push options. They do NOT accept
+// RemoteCallbacks (JS callbacks can't run off the main thread) — use the sync
+// fetch()/push() when you need credential or progress callbacks.
+await remote.fetchAsync(['refs/heads/main:refs/remotes/origin/main'])
+await remote.pushAsync(['refs/heads/main'], new PushOptions().packbuilderParallelism(1))
+
 // ---- Tags & diff ----
 // tagForeach hands the callback a single { id, nameBytes } object per tag.
 repo.tagForeach(({ id, nameBytes }) => {
@@ -118,6 +129,11 @@ repo.diffTreeToWorkdir(headTree, { showUnmodified: true })
 export class Repository {
   static init(p: string): Repository
   constructor(gitDir: string)
+  /**
+   * Asynchronous variant of `clone`, performed off the main thread. Resolves
+   * with a ready-to-use `Repository` once the clone completes.
+   */
+  static cloneAsync(url: string, path: string, signal?: AbortSignal | undefined | null): Promise<Repository>
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
   getFileLatestModifiedDate(filepath: string): number
@@ -160,6 +176,8 @@ export class Repository {
   referenceSymbolic(name: string, target: string, force: boolean, logMessage: string): Reference
   /** Create a new commit; `parents` is an optional list of parent OID hex strings. */
   commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null): string
+  /** Asynchronous variant of `commit`, performed off the main thread. Resolves with the new commit's OID hex. */
+  commitAsync(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null, signal?: AbortSignal | undefined | null): Promise<string>
   /** Get the index (staging area) for this repository. */
   index(): Index
   /** Write an in-memory buffer to the object database as a blob; returns its OID hex. */

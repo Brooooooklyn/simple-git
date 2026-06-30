@@ -701,6 +701,25 @@ export declare class Remote {
    */
   push(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null): void
   /**
+   * Asynchronous variant of `fetch`, performed off the main thread.
+   *
+   * `fetchOptions` may carry data-only settings (depth, prune, proxy url,
+   * headers, ...). It must NOT carry `RemoteCallbacks`: those hold JS-backed
+   * callbacks bound to the main JS thread and cannot be invoked safely from a
+   * worker thread. If callbacks are required, use the synchronous `fetch`.
+   */
+  fetchAsync(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<void>
+  /**
+   * Asynchronous variant of `push`, performed off the main thread.
+   *
+   * `pushOptions` may carry data-only settings (packbuilder parallelism,
+   * proxy url, headers, ...). It must NOT carry `RemoteCallbacks`: those hold
+   * JS-backed callbacks bound to the main JS thread and cannot be invoked
+   * safely from a worker thread. If callbacks (e.g. `pushUpdateReference`) are
+   * required, use the synchronous `push`.
+   */
+  pushAsync(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<void>
+  /**
    * Update the tips to the new state
    *
    * `update_fetchhead` is a raw bitset of `RemoteUpdateFlags` OR-ed together
@@ -841,6 +860,13 @@ export declare class Repository {
    * delegate to a fresh `RepoBuilder`
    */
   static clone(url: string, path: string): Repository
+  /**
+   * Asynchronous variant of `clone`, performed off the main thread.
+   *
+   * The network/clone work runs on a worker thread and the resulting
+   * `Repository` is constructed on the main thread once the clone completes.
+   */
+  static cloneAsync(url: string, path: string, signal?: AbortSignal | undefined | null): Promise<Repository>
   /**
    * Clone a remote repository, initialize and update its submodules
    * recursively.
@@ -1182,6 +1208,14 @@ export declare class Repository {
    * be the current tip of `update_ref`).
    */
   commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null): string
+  /**
+   * Asynchronous variant of `commit`, performed off the main thread.
+   *
+   * Resolves with the new commit's OID hex string. Arguments mirror `commit`:
+   * the `author`/`committer` signatures are copied and the `tree` is captured
+   * by OID, so the work can be moved to a worker thread safely.
+   */
+  commitAsync(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null, signal?: AbortSignal | undefined | null): Promise<string>
   /**
    * Get the index (staging area) file for this repository.
    *

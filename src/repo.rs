@@ -151,6 +151,38 @@ pub struct GitBlameTask {
 
 unsafe impl Send for GitBlameTask {}
 
+pub struct GitCommitTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  update_ref: Option<String>,
+  author: git2::Signature<'static>,
+  committer: git2::Signature<'static>,
+  message: String,
+  tree_oid: git2::Oid,
+  parents: Vec<String>,
+}
+
+// SAFETY: `git2::Signature` is `!Send`, but each signature stored here is an
+// owned `'static` copy (produced via `to_owned()` on the main thread). The
+// `Reference<Repository>` and these signatures are *moved* into the task and
+// only ever dereferenced inside `compute()` on a single worker thread — never
+// shared with or concurrently accessed by the main thread. No aliasing, no
+// concurrent access, so the move across threads is sound.
+unsafe impl Send for GitCommitTask {}
+
+pub struct GitCloneTask {
+  url: String,
+  path: String,
+  result: Option<git2::Repository>,
+}
+
+// SAFETY: `git2::Repository` is `!Send`. The handle is created inside
+// `compute()` on the worker thread and stored here, then *moved out* inside
+// `resolve()` on the main thread. `compute()` always completes before
+// `resolve()` runs, so the handle is never touched from two threads at once
+// and is only ever owned by a single thread at a time. After `resolve()` the
+// napi `Repository` lives entirely on the main thread.
+unsafe impl Send for GitCloneTask {}
+
 #[napi]
 impl Task for GitDateTask {
   type Output = DateTime<Utc>;
@@ -294,6 +326,74 @@ impl Task for GitBlameTask {
 }
 
 #[napi]
+impl Task for GitCommitTask {
+  type Output = String;
+  type JsValue = String;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    let repo_ref = self
+      .repo
+      .read()
+      .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?;
+    let repo = &repo_ref.inner;
+    let tree = repo
+      .find_tree(self.tree_oid)
+      .convert(format!("Find tree from OID [{}] failed", self.tree_oid))?;
+    let parent_commits = self
+      .parents
+      .iter()
+      .map(|oid| {
+        let oid = git2::Oid::from_str(oid).convert(format!("Invalid OID [{oid}]"))?;
+        repo
+          .find_commit(oid)
+          .convert(format!("Find commit from OID [{oid}] failed"))
+      })
+      .collect::<Result<Vec<git2::Commit>>>()?;
+    let parent_refs = parent_commits.iter().collect::<Vec<&git2::Commit>>();
+    repo
+      .commit(
+        self.update_ref.as_deref(),
+        &self.author,
+        &self.committer,
+        self.message.as_str(),
+        &tree,
+        &parent_refs,
+      )
+      .convert_without_message()
+      .map(|oid| oid.to_string())
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitCloneTask {
+  type Output = ();
+  type JsValue = Repository;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    let inner = git2::Repository::clone(&self.url, &self.path).convert("Failed to clone repo")?;
+    self.result = Some(inner);
+    Ok(())
+  }
+
+  fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
+    self
+      .result
+      .take()
+      .map(|inner| Repository { inner })
+      .ok_or_else(|| {
+        napi::Error::new(
+          Status::GenericFailure,
+          "Clone task produced no repository".to_string(),
+        )
+      })
+  }
+}
+
+#[napi]
 pub struct Repository {
   pub(crate) inner: git2::Repository,
 }
@@ -390,6 +490,26 @@ impl Repository {
     Ok(Self {
       inner: git2::Repository::clone(&url, path).convert("Failed to clone repo")?,
     })
+  }
+
+  #[napi]
+  /// Asynchronous variant of `clone`, performed off the main thread.
+  ///
+  /// The network/clone work runs on a worker thread and the resulting
+  /// `Repository` is constructed on the main thread once the clone completes.
+  pub fn clone_async(
+    url: String,
+    path: String,
+    signal: Option<AbortSignal>,
+  ) -> AsyncTask<GitCloneTask> {
+    AsyncTask::with_optional_signal(
+      GitCloneTask {
+        url,
+        path,
+        result: None,
+      },
+      signal,
+    )
   }
 
   #[napi(factory)]
@@ -1269,6 +1389,38 @@ impl Repository {
       )
       .convert_without_message()
       .map(|oid| oid.to_string())
+  }
+
+  #[napi]
+  #[allow(clippy::too_many_arguments)]
+  /// Asynchronous variant of `commit`, performed off the main thread.
+  ///
+  /// Resolves with the new commit's OID hex string. Arguments mirror `commit`:
+  /// the `author`/`committer` signatures are copied and the `tree` is captured
+  /// by OID, so the work can be moved to a worker thread safely.
+  pub fn commit_async(
+    &self,
+    self_ref: Reference<Repository>,
+    update_ref: Option<String>,
+    author: &Signature,
+    committer: &Signature,
+    message: String,
+    tree: &Tree,
+    parents: Option<Vec<String>>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitCommitTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitCommitTask {
+        repo: RwLock::new(self_ref),
+        update_ref,
+        author: author.as_ref().to_owned(),
+        committer: committer.as_ref().to_owned(),
+        message,
+        tree_oid: tree.as_ref().id(),
+        parents: parents.unwrap_or_default(),
+      },
+      signal,
+    ))
   }
 
   #[napi]

@@ -1,3 +1,4 @@
+use std::sync::RwLock;
 use std::{mem, path::Path};
 
 use git2::{ErrorClass, ErrorCode};
@@ -289,6 +290,92 @@ impl Remote {
       .convert_without_message()
   }
 
+  #[napi(ts_return_type = "Promise<void>")]
+  /// Asynchronous variant of `fetch`, performed off the main thread.
+  ///
+  /// `fetchOptions` may carry data-only settings (depth, prune, proxy url,
+  /// headers, ...). It must NOT carry `RemoteCallbacks`: those hold JS-backed
+  /// callbacks bound to the main JS thread and cannot be invoked safely from a
+  /// worker thread. If callbacks are required, use the synchronous `fetch`.
+  pub fn fetch_async(
+    &self,
+    self_ref: Reference<Remote>,
+    refspecs: Vec<String>,
+    fetch_options: Option<&mut FetchOptions>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<RemoteFetchTask>> {
+    let options = match fetch_options {
+      Some(o) => {
+        if o.has_remote_callbacks {
+          return Err(Error::new(
+            Status::GenericFailure,
+            "fetchAsync does not support RemoteCallbacks; use the synchronous fetch() instead"
+              .to_string(),
+          ));
+        }
+        let mut taken = git2::FetchOptions::default();
+        mem::swap(&mut o.inner, &mut taken);
+        Some(taken)
+      }
+      None => None,
+    };
+    Ok(AsyncTask::with_optional_signal(
+      RemoteFetchTask {
+        remote: RwLock::new(self_ref),
+        refspecs,
+        options,
+      },
+      signal,
+    ))
+  }
+
+  #[napi(ts_return_type = "Promise<void>")]
+  /// Asynchronous variant of `push`, performed off the main thread.
+  ///
+  /// `pushOptions` may carry data-only settings (packbuilder parallelism,
+  /// proxy url, headers, ...). It must NOT carry `RemoteCallbacks`: those hold
+  /// JS-backed callbacks bound to the main JS thread and cannot be invoked
+  /// safely from a worker thread. If callbacks (e.g. `pushUpdateReference`) are
+  /// required, use the synchronous `push`.
+  pub fn push_async(
+    &self,
+    self_ref: Reference<Remote>,
+    refspecs: Vec<String>,
+    push_options: Option<&mut PushOptions>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<RemotePushTask>> {
+    let options = match push_options {
+      Some(o) => {
+        if o.used {
+          return Err(Error::new(
+            Status::GenericFailure,
+            "PushOptions can only be used once".to_string(),
+          ));
+        }
+        if o.has_remote_callbacks {
+          return Err(Error::new(
+            Status::GenericFailure,
+            "pushAsync does not support RemoteCallbacks; use the synchronous push() instead"
+              .to_string(),
+          ));
+        }
+        let mut taken = git2::PushOptions::default();
+        mem::swap(&mut o.inner, &mut taken);
+        o.used = true;
+        Some(taken)
+      }
+      None => None,
+    };
+    Ok(AsyncTask::with_optional_signal(
+      RemotePushTask {
+        remote: RwLock::new(self_ref),
+        refspecs,
+        options,
+      },
+      signal,
+    ))
+  }
+
   #[napi]
   /// Update the tips to the new state
   ///
@@ -311,6 +398,82 @@ impl Remote {
         msg.as_deref(),
       )
       .convert_without_message()
+  }
+}
+
+pub struct RemoteFetchTask {
+  remote: RwLock<Reference<Remote>>,
+  refspecs: Vec<String>,
+  options: Option<git2::FetchOptions<'static>>,
+}
+
+// SAFETY: `Reference<Remote>` and `git2::FetchOptions` are `!Send`. They are
+// *moved* into the task and only ever touched inside `compute()` on a single
+// worker thread (the underlying git2 handle is never accessed concurrently
+// from the main thread while the promise is pending), and the napi `Reference`
+// is dropped on the main thread after `resolve()`. Crucially, the stored
+// `FetchOptions` is only ever constructed here when the source `FetchOptions`
+// carries NO `RemoteCallbacks` (guarded by `has_remote_callbacks` in
+// `fetch_async`), so it holds only plain owned data (depth/prune/proxy
+// url/headers) with no JS `Env` or threadsafe-function captured — nothing that
+// would be unsound to use off the JS thread.
+unsafe impl Send for RemoteFetchTask {}
+
+#[napi]
+impl Task for RemoteFetchTask {
+  type Output = ();
+  type JsValue = ();
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    let mut remote = self
+      .remote
+      .write()
+      .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?;
+    let mut options = self.options.take().unwrap_or_default();
+    remote
+      .inner
+      .fetch(self.refspecs.as_slice(), Some(&mut options), None)
+      .convert_without_message()
+  }
+
+  fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(())
+  }
+}
+
+pub struct RemotePushTask {
+  remote: RwLock<Reference<Remote>>,
+  refspecs: Vec<String>,
+  options: Option<git2::PushOptions<'static>>,
+}
+
+// SAFETY: identical reasoning to `RemoteFetchTask`. The stored `PushOptions`
+// is only ever built when the source `PushOptions` carries NO
+// `RemoteCallbacks` (guarded by `has_remote_callbacks` in `push_async`), so it
+// captures no JS `Env`/threadsafe function; it and the moved `Reference` are
+// only accessed on the worker thread during `compute()`, never concurrently
+// with the main thread.
+unsafe impl Send for RemotePushTask {}
+
+#[napi]
+impl Task for RemotePushTask {
+  type Output = ();
+  type JsValue = ();
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    let mut remote = self
+      .remote
+      .write()
+      .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?;
+    let mut options = self.options.take().unwrap_or_default();
+    remote
+      .inner
+      .push(self.refspecs.as_slice(), Some(&mut options))
+      .convert_without_message()
+  }
+
+  fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(())
   }
 }
 
@@ -477,6 +640,10 @@ impl RemoteCallbacks {
 pub struct FetchOptions {
   pub(crate) inner: git2::FetchOptions<'static>,
   pub(crate) used: bool,
+  /// `true` once `remote_callback` has attached JS-backed `RemoteCallbacks`.
+  /// `fetch_async` rejects options with callbacks because they cannot be run
+  /// off the main JS thread.
+  pub(crate) has_remote_callbacks: bool,
 }
 
 #[napi]
@@ -487,6 +654,7 @@ impl FetchOptions {
     FetchOptions {
       inner: git2::FetchOptions::new(),
       used: false,
+      has_remote_callbacks: false,
     }
   }
 
@@ -503,6 +671,7 @@ impl FetchOptions {
     mem::swap(&mut cbs, &mut callback.inner);
     self.inner.remote_callbacks(cbs);
     callback.used = true;
+    self.has_remote_callbacks = true;
     Ok(self)
   }
 
@@ -585,6 +754,10 @@ impl FetchOptions {
 pub struct PushOptions {
   pub(crate) inner: git2::PushOptions<'static>,
   pub(crate) used: bool,
+  /// `true` once `remote_callback` has attached JS-backed `RemoteCallbacks`.
+  /// `push_async` rejects options with callbacks because they cannot be run
+  /// off the main JS thread.
+  pub(crate) has_remote_callbacks: bool,
 }
 
 #[napi]
@@ -595,6 +768,7 @@ impl PushOptions {
     PushOptions {
       inner: git2::PushOptions::new(),
       used: false,
+      has_remote_callbacks: false,
     }
   }
 
@@ -611,6 +785,7 @@ impl PushOptions {
     mem::swap(&mut cbs, &mut callback.inner);
     self.inner.remote_callbacks(cbs);
     callback.used = true;
+    self.has_remote_callbacks = true;
     Ok(self)
   }
 

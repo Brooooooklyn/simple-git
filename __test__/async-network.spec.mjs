@@ -1,0 +1,179 @@
+import { execSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import test from "ava";
+
+import {
+  PushOptions,
+  RemoteCallbacks,
+  Repository,
+  Signature,
+} from "../index.js";
+
+// Every test here is fully local: bare repos on disk act as "remotes", so the
+// network is never touched. Async variants run their git work off the main
+// thread; we `await` the returned Promises. Caller cleans up `root`.
+
+const sig = () => Signature.now("tester", "tester@example.com");
+
+const bareRev = (bare, ref) =>
+  execSync(`git --git-dir="${bare}" rev-parse ${ref}`).toString().trim();
+
+const workRev = (work, ref) =>
+  execSync(`git rev-parse ${ref}`, { cwd: work }).toString().trim();
+
+// A bare "remote" with a single commit on `main`, produced by a throwaway work
+// repo that pushes into it. Returns the bare path + that commit's OID.
+function makeBareWithCommit(root) {
+  const bare = join(root, "remote.git");
+  const seed = join(root, "seed");
+  execSync(`git init -q --bare -b main "${bare}"`);
+  execSync(`git init -q -b main "${seed}"`);
+  const run = (args) => execSync(`git ${args}`, { cwd: seed });
+  run("config user.name tester");
+  run("config user.email tester@example.com");
+  run("config commit.gpgsign false");
+  run("config core.autocrlf false");
+  writeFileSync(join(seed, "file.txt"), "hello\n");
+  run("add file.txt");
+  run('commit -q -m "initial commit"');
+  run(`remote add origin "${bare}"`);
+  run("push -q origin main");
+  return { bare, head: bareRev(bare, "refs/heads/main") };
+}
+
+// A working repo wired to a fresh bare remote, with one local commit on `main`
+// that has NOT been pushed yet. Mirrors push.spec's setup.
+function makePushSetup(root) {
+  const bare = join(root, "remote.git");
+  const work = join(root, "work");
+  execSync(`git init -q --bare -b main "${bare}"`);
+  execSync(`git init -q -b main "${work}"`);
+  const run = (args) => execSync(`git ${args}`, { cwd: work });
+  run("config user.name tester");
+  run("config user.email tester@example.com");
+  run("config commit.gpgsign false");
+  run("config core.autocrlf false");
+  writeFileSync(join(work, "file.txt"), "hello\n");
+  run("add file.txt");
+  run('commit -q -m "initial commit"');
+  run(`remote add origin "${bare}"`);
+  return { bare, work, head: workRev(work, "HEAD") };
+}
+
+// cloneAsync of a local bare repo resolves to a usable Repository whose HEAD
+// points at the bare remote's commit.
+test("cloneAsync clones a local bare repo into a usable Repository", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-clone-async-"));
+  try {
+    const { bare, head } = makeBareWithCommit(root);
+    const dest = join(root, "cloned");
+    const repo = await Repository.cloneAsync(bare, dest);
+    t.true(repo instanceof Repository);
+    // A usable repo: HEAD resolves and points at the remote's commit.
+    t.is(repo.head().target(), head);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// commitAsync returns a 40-hex OID that findCommit can resolve, off-thread.
+test("commitAsync returns a resolvable commit OID", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-commit-async-"));
+  const work = join(root, "work");
+  try {
+    execSync(`git init -q -b main "${work}"`);
+    const run = (args) => execSync(`git ${args}`, { cwd: work });
+    run("config user.name tester");
+    run("config user.email tester@example.com");
+    run("config commit.gpgsign false");
+    run("config core.autocrlf false");
+    const repo = new Repository(work);
+
+    const author = sig();
+    writeFileSync(join(work, "a.txt"), "alpha\n");
+    const index = repo.index();
+    index.addAll();
+    index.write();
+    const tree = repo.findTree(index.writeTree());
+
+    const oid = await repo.commitAsync("HEAD", author, author, "async root", tree);
+    t.is(typeof oid, "string");
+    t.is(oid.length, 40);
+    t.regex(oid, /^[0-9a-f]{40}$/);
+
+    // The OID resolves and HEAD advanced to it.
+    t.truthy(repo.findCommit(oid));
+    t.is(workRev(work, "HEAD"), oid);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// pushAsync advances the bare remote ref, like the sync push.
+test("pushAsync updates the bare remote ref", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-"));
+  try {
+    const { bare, work, head } = makePushSetup(root);
+    const remote = new Repository(work).findRemote("origin");
+    await remote.pushAsync(["refs/heads/main:refs/heads/main"], null);
+    t.is(bareRev(bare, "refs/heads/main"), head);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// pushAsync flows a (callback-free) PushOptions through successfully.
+test("pushAsync accepts a callback-free PushOptions", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-opts-"));
+  try {
+    const { bare, work, head } = makePushSetup(root);
+    const remote = new Repository(work).findRemote("origin");
+    const options = new PushOptions().packbuilderParallelism(1);
+    await remote.pushAsync(["refs/heads/main:refs/heads/main"], options);
+    t.is(bareRev(bare, "refs/heads/main"), head);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Documented limitation: JS-backed RemoteCallbacks cannot run off the main
+// thread, so pushAsync rejects options that carry them up front (the argument
+// is validated synchronously, before any work is scheduled). Use sync push.
+test("pushAsync rejects PushOptions carrying RemoteCallbacks", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-cb-"));
+  try {
+    const { work } = makePushSetup(root);
+    const remote = new Repository(work).findRemote("origin");
+    const callbacks = new RemoteCallbacks().pushUpdateReference(() => {});
+    const options = new PushOptions().remoteCallback(callbacks);
+    const err = t.throws(() =>
+      remote.pushAsync(["refs/heads/main:refs/heads/main"], options),
+    );
+    t.regex(err.message, /RemoteCallbacks/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// fetchAsync updates a remote-tracking ref, like the sync fetch.
+test("fetchAsync updates a remote-tracking ref", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-fetch-async-"));
+  try {
+    const { bare, head } = makeBareWithCommit(root);
+    const consumer = join(root, "consumer");
+    execSync(`git init -q -b main "${consumer}"`);
+    execSync(`git remote add origin "${bare}"`, { cwd: consumer });
+
+    const remote = new Repository(consumer).findRemote("origin");
+    await remote.fetchAsync(
+      ["refs/heads/main:refs/remotes/origin/main"],
+      null,
+    );
+    t.is(workRev(consumer, "refs/remotes/origin/main"), head);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
