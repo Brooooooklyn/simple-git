@@ -46,7 +46,7 @@ impl Blob {
 
   #[napi]
   /// Get the size in bytes of the contents of this blob.
-  pub fn size(&self) -> u64 {
-    self.inner.size() as u64
+  pub fn size(&self) -> i64 {
+    self.inner.size() as i64
   }
 }

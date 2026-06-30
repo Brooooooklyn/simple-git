@@ -244,8 +244,8 @@ impl Commit {
   /// Get the number of parents of this commit.
   ///
   /// Use the `parents` iterator to return an iterator over all parents.
-  pub fn parent_count(&self) -> usize {
-    self.inner.parent_count()
+  pub fn parent_count(&self) -> u32 {
+    self.inner.parent_count() as u32
   }
 
   #[napi]

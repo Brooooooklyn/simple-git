@@ -8,7 +8,7 @@ export declare class Blob {
   /** Get the content of this blob. */
   content(): Uint8Array
   /** Get the size in bytes of the contents of this blob. */
-  size(): bigint
+  size(): number
 }
 
 /**
@@ -170,7 +170,7 @@ export declare class Commit {
    *
    * Use the `parents` iterator to return an iterator over all parents.
    */
-  parentCount(): bigint
+  parentCount(): number
   /**
    * Get the specified parent of the commit.
    *
@@ -369,7 +369,7 @@ export declare class DiffFile {
    */
   path(): string | null
   /** Returns the size of this entry, in bytes */
-  size(): bigint
+  size(): number
   /** Returns `true` if file(s) are treated as binary data. */
   isBinary(): boolean
   /** Returns `true` if file(s) are treated as text data. */
@@ -1410,7 +1410,7 @@ export declare class Tree {
   /** Get the id (SHA1) of a repository object */
   id(): string
   /** Get the number of entries listed in a tree. */
-  len(): bigint
+  size(): number
   /** Return `true` if there is not entry */
   isEmpty(): boolean
   /** Returns an iterator over the entries in this tree. */

@@ -214,8 +214,8 @@ impl DiffFile {
 
   #[napi]
   /// Returns the size of this entry, in bytes
-  pub fn size(&self) -> u64 {
-    self.inner.size()
+  pub fn size(&self) -> i64 {
+    self.inner.size() as i64
   }
 
   #[napi]

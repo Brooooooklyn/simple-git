@@ -41,8 +41,8 @@ impl Tree {
 
   #[napi]
   /// Get the number of entries listed in a tree.
-  pub fn len(&self) -> u64 {
-    self.inner().len() as u64
+  pub fn size(&self) -> u32 {
+    self.inner().len() as u32
   }
 
   #[napi]
