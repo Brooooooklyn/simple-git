@@ -86,6 +86,38 @@ test("findTagByPrefix resolves by prefix and is null when absent", (t) => {
   }
 });
 
+// tagForeach hands the callback a single object { id, nameBytes } per tag:
+// `id` is the 40-char OID hex string, `nameBytes` is the raw reference name as
+// a Buffer (e.g. "refs/tags/v1.0.0").
+test("tagForeach yields a { id, nameBytes } object per tag", (t) => {
+  const { root, work, repo } = makeRepo();
+  try {
+    const target = repo.findCommit(rootCommit(work, repo)).asObject();
+    repo.tag("v1.0.0", target, sig(), "release one\n", false);
+    repo.tag("v2.0.0", target, sig(), "release two\n", false);
+
+    const seen = [];
+    repo.tagForeach((tag) => {
+      seen.push(tag);
+      return true;
+    });
+
+    // One callback invocation per tag, each receiving a single object arg.
+    t.is(seen.length, 2);
+    for (const tag of seen) {
+      t.is(typeof tag, "object");
+      t.is(typeof tag.id, "string");
+      t.is(tag.id.length, 40);
+      t.true(Buffer.isBuffer(tag.nameBytes));
+    }
+
+    const names = seen.map((tag) => tag.nameBytes.toString("utf8")).sort();
+    t.deepEqual(names, ["refs/tags/v1.0.0", "refs/tags/v2.0.0"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // tagAnnotation (renamed from tagAnnotationCreate) creates an annotated tag
 // object WITHOUT a reference; the returned OID is still resolvable via findTag.
 test("tagAnnotation creates a refless annotated tag resolvable by findTag", (t) => {

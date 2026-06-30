@@ -89,10 +89,27 @@ console.log(repo.blameLine('build.rs', 10)?.finalAuthorName) // hunk for line 10
 
 // ---- Push ----
 const remote = repo.findRemote('origin')!
-const callbacks = new RemoteCallbacks().pushUpdateReference((refname, status) => {
-  console.log(refname, status) // 'refs/heads/main' null   (null === accepted)
-})
+const callbacks = new RemoteCallbacks()
+  // Per-ref result: one object per updated reference.
+  .pushUpdateReference(({ refname, status }) => {
+    console.log(refname, status) // 'refs/heads/main' null   (null === accepted)
+  })
+  // Pack-transfer progress: a single PushTransferProgress object.
+  .pushTransferProgress(({ current, total, bytes }) => {
+    console.log(`${current}/${total} objects, ${bytes} bytes`)
+  })
 remote.push(['refs/heads/main'], new PushOptions().remoteCallback(callbacks))
+
+// ---- Tags & diff ----
+// tagForeach hands the callback a single { id, nameBytes } object per tag.
+repo.tagForeach(({ id, nameBytes }) => {
+  console.log(id, nameBytes.toString('utf8')) // '<40-hex>' 'refs/tags/v1.0.0'
+  return true // return false to stop iterating
+})
+// DiffOptions.showUnmodified pulls unmodified files into the diff so they show
+// up in `deltas()` (with an Unmodified status) instead of being skipped.
+const headTree = repo.head().peelToTree()
+repo.diffTreeToWorkdir(headTree, { showUnmodified: true })
 ```
 
 ### API

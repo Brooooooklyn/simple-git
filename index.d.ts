@@ -742,16 +742,21 @@ export declare class RemoteCallbacks {
   credentials(callback: (arg: CredInfo) => Cred): this
   /** The callback through which progress is monitored. */
   transferProgress(callback: (arg: Progress) => void): this
-  /** The callback through which progress of push transfer is monitored */
-  pushTransferProgress(callback: (current: number, total: number, bytes: number) => void): this
+  /**
+   * The callback through which progress of push transfer is monitored.
+   *
+   * The callback receives a single `PushTransferProgress` object describing how
+   * many objects have been processed and how many bytes have been sent.
+   */
+  pushTransferProgress(callback: (arg: PushTransferProgress) => void): this
   /**
    * Set a callback to get invoked for each updated reference on a push.
    *
-   * The callback is invoked once per reference with the reference name and a
-   * status message sent by the server. `status` is `null` when the reference
-   * was updated successfully; otherwise it is the server's rejection reason.
+   * The callback is invoked once per reference with a single
+   * `PushUpdateReference` object. `status` is `null` when the reference was
+   * updated successfully; otherwise it is the server's rejection reason.
    */
-  pushUpdateReference(callback: (refname: string, status: string | null) => void): this
+  pushUpdateReference(callback: (arg: PushUpdateReference) => void): this
 }
 
 export declare class RepoBuilder {
@@ -1125,9 +1130,12 @@ export declare class Repository {
   tagNames(pattern?: string | undefined | null): Array<string>
   /**
    * iterate over all tags calling `cb` on each.
-   * the callback is provided the tag id and name
+   *
+   * The callback receives a single `TagForeachItem` object carrying the tag's
+   * OID (`id`, a 40-char hex string) and its raw reference name (`nameBytes`,
+   * a `Buffer`). Return `true` to continue iteration, `false` to stop.
    */
-  tagForeach(cb: (arg: [string, Buffer]) => boolean): void
+  tagForeach(cb: (arg: TagForeachItem) => boolean): void
   /**
    * Create a diff between a tree and the working directory.
    *
@@ -1148,7 +1156,7 @@ export declare class Repository {
    *
    * If `None` is passed for `tree`, then an empty tree is used.
    */
-  diffTreeToWorkdir(oldTree?: Tree | undefined | null): Diff
+  diffTreeToWorkdir(oldTree?: Tree | undefined | null, options?: DiffOptions | undefined | null): Diff
   /**
    * Create a diff between a tree and the working directory using index data
    * to account for staged deletes, tracked files, etc.
@@ -1157,7 +1165,7 @@ export declare class Repository {
    * the index to the working directory and blending the results into a
    * single diff that includes staged deleted, etc.
    */
-  diffTreeToWorkdirWithIndex(oldTree?: Tree | undefined | null): Diff
+  diffTreeToWorkdirWithIndex(oldTree?: Tree | undefined | null, options?: DiffOptions | undefined | null): Diff
   /**
    * Create new commit in the repository
    *
@@ -1717,10 +1725,11 @@ export declare function diffFlagsContains(flags: number, flag: DiffFlags): boole
 
 export interface DiffOptions {
   /**
-   * When generating output, include the names of unmodified files if they
-   * are included in the `Diff`. Normally these are skipped in the formats
-   * that list files (e.g. name-only, name-status, raw). Even with this these
-   * will not be included in the patch format.
+   * Include unmodified files in the diff. Normally unmodified entries are
+   * skipped entirely; when this is `true` they are pulled into the diff (so
+   * they appear in `Diff.deltas()` with an `Unmodified` status) and are also
+   * shown in the listing output formats (name-only, name-status, raw). They
+   * are still never emitted in the patch format.
    */
   showUnmodified?: boolean
 }
@@ -1848,6 +1857,20 @@ export interface PushTransferProgress {
   current: number
   total: number
   bytes: number
+}
+
+/** A single reference update reported during a push. */
+export interface PushUpdateReference {
+  /**
+   * The full name of the reference that was updated (e.g.
+   * `refs/heads/main`).
+   */
+  refname: string
+  /**
+   * `null` when the reference was updated successfully; otherwise the
+   * server's rejection reason.
+   */
+  status: string | null
 }
 
 /** An enumeration of all possible kinds of references. */
@@ -1993,4 +2016,15 @@ export interface StatusOptions {
   renamesIndexToWorkdir?: boolean
   /** Restrict the scan to the given pathspecs. */
   pathspec?: Array<string>
+}
+
+/** A single tag visited during `Repository.tagForeach`. */
+export interface TagForeachItem {
+  /** The tag's OID as a 40-char hex string. */
+  id: string
+  /**
+   * The tag's raw reference name (e.g. `refs/tags/v1.0.0`) as bytes, since it
+   * is not guaranteed to be valid UTF-8.
+   */
+  nameBytes: Buffer
 }

@@ -12,7 +12,7 @@ use crate::branch::{Branch, BranchType};
 use crate::checkout::{CheckoutOptions, build_checkout_builder};
 use crate::commit::{Commit, CommitInner};
 use crate::config::Config;
-use crate::diff::Diff;
+use crate::diff::{Diff, DiffOptions};
 use crate::error::{IntoNapiError, NotNullError};
 use crate::file_modification::{
   FileModification, get_file_modification, get_files_modification, time_to_date,
@@ -1143,14 +1143,19 @@ impl Repository {
 
   #[napi]
   /// iterate over all tags calling `cb` on each.
-  /// the callback is provided the tag id and name
-  pub fn tag_foreach(&self, cb: Function<(String, Buffer), bool>) -> Result<()> {
+  ///
+  /// The callback receives a single `TagForeachItem` object carrying the tag's
+  /// OID (`id`, a 40-char hex string) and its raw reference name (`nameBytes`,
+  /// a `Buffer`). Return `true` to continue iteration, `false` to stop.
+  pub fn tag_foreach(&self, cb: Function<TagForeachItem, bool>) -> Result<()> {
     self
       .inner
       .tag_foreach(|oid, name| {
-        let oid = oid.to_string();
-        let name = name.to_vec();
-        cb.call((oid, name.into())).unwrap_or(false)
+        cb.call(TagForeachItem {
+          id: oid.to_string(),
+          name_bytes: name.to_vec().into(),
+        })
+        .unwrap_or(false)
       })
       .convert_without_message()
   }
@@ -1179,8 +1184,9 @@ impl Repository {
     env: Env,
     self_reference: Reference<Repository>,
     old_tree: Option<&Tree>,
+    options: Option<DiffOptions>,
   ) -> Result<Diff> {
-    let mut diff_options = git2::DiffOptions::default();
+    let mut diff_options = build_diff_options(options);
     Ok(Diff {
       inner: self_reference.share_with(env, |repo| {
         repo
@@ -1203,8 +1209,9 @@ impl Repository {
     env: Env,
     self_reference: Reference<Repository>,
     old_tree: Option<&Tree>,
+    options: Option<DiffOptions>,
   ) -> Result<Diff> {
-    let mut diff_options = git2::DiffOptions::default();
+    let mut diff_options = build_diff_options(options);
     Ok(Diff {
       inner: self_reference.share_with(env, |repo| {
         repo
@@ -1487,6 +1494,33 @@ impl Repository {
       signal,
     ))
   }
+}
+
+#[napi(object)]
+/// A single tag visited during `Repository.tagForeach`.
+pub struct TagForeachItem {
+  /// The tag's OID as a 40-char hex string.
+  pub id: String,
+  /// The tag's raw reference name (e.g. `refs/tags/v1.0.0`) as bytes, since it
+  /// is not guaranteed to be valid UTF-8.
+  pub name_bytes: Buffer,
+}
+
+/// Translate the JS-facing `DiffOptions` into a configured `git2::DiffOptions`.
+fn build_diff_options(options: Option<DiffOptions>) -> git2::DiffOptions {
+  let mut diff_options = git2::DiffOptions::default();
+  if let Some(options) = options
+    && options.show_unmodified.unwrap_or(false)
+  {
+    // libgit2's `SHOW_UNMODIFIED` only affects formatted output and only for
+    // unmodified entries that are already part of the diff; on its own it never
+    // adds them. To make unmodified files actually observable (e.g. via
+    // `Diff.deltas()`) we must also turn on `INCLUDE_UNMODIFIED`, which is what
+    // pulls those records into the diff in the first place.
+    diff_options.include_unmodified(true);
+    diff_options.show_unmodified(true);
+  }
+  diff_options
 }
 
 /// Run a status scan and eagerly materialize the borrowed `Statuses<'repo>`

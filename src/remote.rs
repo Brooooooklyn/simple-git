@@ -412,8 +412,11 @@ impl RemoteCallbacks {
     self
   }
 
-  #[napi(ts_args_type = "callback: (current: number, total: number, bytes: number) => void")]
-  /// The callback through which progress of push transfer is monitored
+  #[napi]
+  /// The callback through which progress of push transfer is monitored.
+  ///
+  /// The callback receives a single `PushTransferProgress` object describing how
+  /// many objects have been processed and how many bytes have been sent.
   pub fn push_transfer_progress(
     &mut self,
     env: Env,
@@ -435,21 +438,29 @@ impl RemoteCallbacks {
     self
   }
 
-  #[napi(ts_args_type = "callback: (refname: string, status: string | null) => void")]
+  #[napi]
   /// Set a callback to get invoked for each updated reference on a push.
   ///
-  /// The callback is invoked once per reference with the reference name and a
-  /// status message sent by the server. `status` is `null` when the reference
-  /// was updated successfully; otherwise it is the server's rejection reason.
+  /// The callback is invoked once per reference with a single
+  /// `PushUpdateReference` object. `status` is `null` when the reference was
+  /// updated successfully; otherwise it is the server's rejection reason.
   pub fn push_update_reference(
     &mut self,
     env: Env,
-    callback: FunctionRef<FnArgs<(String, Option<String>)>, ()>,
+    callback: FunctionRef<PushUpdateReference, ()>,
   ) -> &Self {
     self.inner.push_update_reference(move |refname, status| {
       callback
         .borrow_back(&env)
-        .and_then(|cb| cb.call((refname.to_string(), status.map(|s| s.to_string())).into()))
+        .and_then(|cb| {
+          cb.call(PushUpdateReference {
+            refname: refname.to_string(),
+            status: match status {
+              Some(s) => Either::A(s.to_string()),
+              None => Either::B(Null),
+            },
+          })
+        })
         .map_err(|err| {
           git2::Error::new(
             ErrorCode::GenericError,
@@ -713,6 +724,17 @@ pub struct PushTransferProgress {
   pub current: u32,
   pub total: u32,
   pub bytes: u32,
+}
+
+#[napi(object)]
+/// A single reference update reported during a push.
+pub struct PushUpdateReference {
+  /// The full name of the reference that was updated (e.g.
+  /// `refs/heads/main`).
+  pub refname: String,
+  /// `null` when the reference was updated successfully; otherwise the
+  /// server's rejection reason.
+  pub status: Either<String, Null>,
 }
 
 #[napi]

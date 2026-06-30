@@ -9,10 +9,11 @@ use crate::error::IntoNapiError;
 #[napi(object)]
 #[derive(Debug, Default)]
 pub struct DiffOptions {
-  /// When generating output, include the names of unmodified files if they
-  /// are included in the `Diff`. Normally these are skipped in the formats
-  /// that list files (e.g. name-only, name-status, raw). Even with this these
-  /// will not be included in the patch format.
+  /// Include unmodified files in the diff. Normally unmodified entries are
+  /// skipped entirely; when this is `true` they are pulled into the diff (so
+  /// they appear in `Diff.deltas()` with an `Unmodified` status) and are also
+  /// shown in the listing output formats (name-only, name-status, raw). They
+  /// are still never emitted in the patch format.
   pub show_unmodified: Option<bool>,
 }
 
