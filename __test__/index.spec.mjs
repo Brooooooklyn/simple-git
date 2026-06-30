@@ -74,10 +74,15 @@ test("commit with parents builds a two-commit history", (t) => {
       .split("\n");
     t.is(log.length, 2);
 
-    const parentOfSecond = execSync(`git rev-parse ${secondOid}^`, { cwd: work })
+    // `git rev-list --parents -n 1 <oid>` prints "<oid> <parent>...": no shell
+    // metacharacters (unlike `<oid>^`, whose caret cmd.exe eats on Windows).
+    const lineage = execSync(`git rev-list --parents -n 1 ${secondOid}`, {
+      cwd: work,
+    })
       .toString()
-      .trim();
-    t.is(parentOfSecond, firstOid);
+      .trim()
+      .split(/\s+/);
+    t.deepEqual(lineage, [secondOid, firstOid]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -117,10 +122,13 @@ test("commit without parents still makes a root commit", (t) => {
       .trim()
       .split("\n");
     t.is(log.length, 1);
-    // A root commit has no parent: `<oid>^` must fail to resolve.
-    t.throws(() =>
-      execSync(`git rev-parse ${oid}^`, { cwd: work, stdio: "pipe" }),
-    );
+    // A root commit has no parent: `git rev-list --parents` lists only the
+    // commit itself, with no parent OIDs following it.
+    const lineage = execSync(`git rev-list --parents -n 1 ${oid}`, { cwd: work })
+      .toString()
+      .trim()
+      .split(/\s+/);
+    t.deepEqual(lineage, [oid]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

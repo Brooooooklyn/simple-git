@@ -21,6 +21,10 @@ function makeRepo() {
   // Keep the temp repo hermetic: never inherit a global commit.gpgsign that
   // would make `git commit` fail (or block on a signing agent).
   run("config commit.gpgsign false");
+  // Git-for-Windows defaults core.autocrlf=true, so libgit2's checkout would
+  // rewrite the workdir file with CRLF ("v1\r\n") and break the LF assertions
+  // below. Pin it off so blobs round-trip byte-for-byte on every platform.
+  run("config core.autocrlf false");
 
   writeFileSync(join(work, "file.txt"), "v1\n");
   run("add file.txt");
