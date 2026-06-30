@@ -519,6 +519,7 @@ module.exports.DiffFile = nativeBinding.DiffFile
 module.exports.FetchOptions = nativeBinding.FetchOptions
 module.exports.GitObject = nativeBinding.GitObject
 module.exports.ProxyOptions = nativeBinding.ProxyOptions
+module.exports.PushOptions = nativeBinding.PushOptions
 module.exports.Reference = nativeBinding.Reference
 module.exports.Remote = nativeBinding.Remote
 module.exports.RemoteCallbacks = nativeBinding.RemoteCallbacks

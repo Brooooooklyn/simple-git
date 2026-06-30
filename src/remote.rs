@@ -293,6 +293,38 @@ impl Remote {
   }
 
   #[napi]
+  /// Perform a push.
+  ///
+  /// If `refspecs` is empty the configured push refspecs are used. Delete a
+  /// remote ref by pushing `":refs/heads/branch"`. To detect per-ref server
+  /// rejections, set a `pushUpdateReference` callback on the `RemoteCallbacks`.
+  pub fn push(
+    &mut self,
+    refspecs: Vec<String>,
+    push_options: Option<&mut PushOptions>,
+  ) -> Result<()> {
+    let mut default_push_options = git2::PushOptions::default();
+    let mut options = match push_options {
+      Some(o) => {
+        if o.used {
+          return Err(Error::new(
+            Status::GenericFailure,
+            "PushOptions can only be used once".to_string(),
+          ));
+        }
+        std::mem::swap(&mut o.inner, &mut default_push_options);
+        o.used = true;
+        default_push_options
+      }
+      None => git2::PushOptions::default(),
+    };
+    self
+      .inner
+      .push(refspecs.as_slice(), Some(&mut options))
+      .convert_without_message()
+  }
+
+  #[napi]
   /// Update the tips to the new state
   pub fn update_tips(
     &mut self,
@@ -434,6 +466,32 @@ impl RemoteCallbacks {
       });
     self
   }
+
+  #[napi(ts_args_type = "callback: (refname: string, status: string | null) => void")]
+  /// Set a callback to get invoked for each updated reference on a push.
+  ///
+  /// The callback is invoked once per reference with the reference name and a
+  /// status message sent by the server. `status` is `null` when the reference
+  /// was updated successfully; otherwise it is the server's rejection reason.
+  pub fn push_update_reference(
+    &mut self,
+    env: Env,
+    callback: FunctionRef<FnArgs<(String, Option<String>)>, ()>,
+  ) -> &Self {
+    self.inner.push_update_reference(move |refname, status| {
+      callback
+        .borrow_back(&env)
+        .and_then(|cb| cb.call((refname.to_string(), status.map(|s| s.to_string())).into()))
+        .map_err(|err| {
+          git2::Error::new(
+            ErrorCode::GenericError,
+            ErrorClass::Callback,
+            format!("Call push_update_reference callback failed {err}"),
+          )
+        })
+    });
+    self
+  }
 }
 
 #[napi]
@@ -540,6 +598,97 @@ impl FetchOptions {
     self
       .inner
       .custom_headers(&headers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    self
+  }
+}
+
+#[napi]
+pub struct PushOptions {
+  pub(crate) inner: git2::PushOptions<'static>,
+  pub(crate) used: bool,
+}
+
+#[napi]
+impl PushOptions {
+  #[napi(constructor)]
+  #[allow(clippy::new_without_default)]
+  pub fn new() -> PushOptions {
+    PushOptions {
+      inner: git2::PushOptions::new(),
+      used: false,
+    }
+  }
+
+  #[napi]
+  /// Set the callbacks to use for the push operation.
+  pub fn remote_callback(&mut self, callback: &mut RemoteCallbacks) -> Result<&Self> {
+    if callback.used {
+      return Err(Error::new(
+        Status::GenericFailure,
+        "RemoteCallbacks can only be used once".to_string(),
+      ));
+    }
+    let mut cbs = git2::RemoteCallbacks::default();
+    mem::swap(&mut cbs, &mut callback.inner);
+    self.inner.remote_callbacks(cbs);
+    callback.used = true;
+    Ok(self)
+  }
+
+  #[napi]
+  /// Set the proxy options to use for the push operation.
+  pub fn proxy_options(&mut self, options: &mut ProxyOptions) -> Result<&Self> {
+    if options.used {
+      return Err(Error::new(
+        Status::GenericFailure,
+        "ProxyOptions can only be used once".to_string(),
+      ));
+    }
+    let mut opts = git2::ProxyOptions::default();
+    mem::swap(&mut opts, &mut options.inner);
+    self.inner.proxy_options(opts);
+    options.used = true;
+    Ok(self)
+  }
+
+  #[napi]
+  /// If the transport being used to push to the remote requires the creation
+  /// of a pack file, this controls the number of worker threads used by the
+  /// packbuilder when creating that pack file to be sent to the remote.
+  ///
+  /// If set to 0 the packbuilder will auto-detect the number of threads to
+  /// create, and the default value is 1.
+  pub fn packbuilder_parallelism(&mut self, parallel: u32) -> &Self {
+    self.inner.packbuilder_parallelism(parallel);
+    self
+  }
+
+  #[napi]
+  /// Set remote redirection settings; whether redirects to another host are
+  /// permitted.
+  ///
+  /// By default, git will follow a redirect on the initial request
+  /// (`/info/refs`), but not subsequent requests.
+  pub fn follow_redirects(&mut self, opt: RemoteRedirect) -> &Self {
+    self.inner.follow_redirects(opt.into());
+    self
+  }
+
+  #[napi]
+  /// Set extra headers for this push operation.
+  pub fn custom_headers(&mut self, headers: Vec<String>) -> &Self {
+    self
+      .inner
+      .custom_headers(&headers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    self
+  }
+
+  #[napi]
+  /// Set "push options" to deliver to the remote.
+  pub fn remote_push_options(&mut self, options: Vec<String>) -> &Self {
+    self
+      .inner
+      .remote_push_options(&options.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     self
   }
 }

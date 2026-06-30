@@ -407,6 +407,35 @@ export declare class ProxyOptions {
   url(url: string): this
 }
 
+export declare class PushOptions {
+  constructor()
+  /** Set the callbacks to use for the push operation. */
+  remoteCallback(callback: RemoteCallbacks): this
+  /** Set the proxy options to use for the push operation. */
+  proxyOptions(options: ProxyOptions): this
+  /**
+   * If the transport being used to push to the remote requires the creation
+   * of a pack file, this controls the number of worker threads used by the
+   * packbuilder when creating that pack file to be sent to the remote.
+   *
+   * If set to 0 the packbuilder will auto-detect the number of threads to
+   * create, and the default value is 1.
+   */
+  packbuilderParallelism(parallel: number): this
+  /**
+   * Set remote redirection settings; whether redirects to another host are
+   * permitted.
+   *
+   * By default, git will follow a redirect on the initial request
+   * (`/info/refs`), but not subsequent requests.
+   */
+  followRedirects(opt: RemoteRedirect): this
+  /** Set extra headers for this push operation. */
+  customHeaders(headers: Array<string>): this
+  /** Set "push options" to deliver to the remote. */
+  remotePushOptions(options: Array<string>): this
+}
+
 export declare class Reference {
   /**
    * Ensure the reference name is well-formed.
@@ -552,6 +581,14 @@ export declare class Remote {
    * disconnect and update the remote-tracking branches.
    */
   fetch(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null): void
+  /**
+   * Perform a push.
+   *
+   * If `refspecs` is empty the configured push refspecs are used. Delete a
+   * remote ref by pushing `":refs/heads/branch"`. To detect per-ref server
+   * rejections, set a `pushUpdateReference` callback on the `RemoteCallbacks`.
+   */
+  push(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null): void
   /** Update the tips to the new state */
   updateTips(updateFetchhead: RemoteUpdateFlags, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
 }
@@ -591,6 +628,14 @@ export declare class RemoteCallbacks {
   transferProgress(callback: (arg: Progress) => void): this
   /** The callback through which progress of push transfer is monitored */
   pushTransferProgress(callback: (current: number, total: number, bytes: number) => void): this
+  /**
+   * Set a callback to get invoked for each updated reference on a push.
+   *
+   * The callback is invoked once per reference with the reference name and a
+   * status message sent by the server. `status` is `null` when the reference
+   * was updated successfully; otherwise it is the server's rejection reason.
+   */
+  pushUpdateReference(callback: (refname: string, status: string | null) => void): this
 }
 
 export declare class RepoBuilder {
