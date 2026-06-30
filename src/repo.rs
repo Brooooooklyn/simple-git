@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
 
 use chrono::{DateTime, Utc};
 use napi::{JsString, bindgen_prelude::*};
@@ -108,51 +107,47 @@ pub enum RepositoryOpenFlags {
   FromEnv = 16,
 }
 
+// Async tasks below capture only owned, `Send` data (a repository `path`
+// String plus the operation's own owned params) on the JS thread. Each
+// `compute()` runs on a libuv worker and REOPENS its own worker-local
+// `git2::Repository` from `path`, so it never aliases the JS-visible handle the
+// main thread still holds (`git2::Repository` is `Send` but NOT `Sync`). The
+// reopened handle is dropped before `compute()` returns. Because every field is
+// `Send`, these read-only tasks are auto-`Send` and need no `unsafe impl Send`.
+
 pub struct GitDateTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  path: String,
   filepath: String,
 }
-
-unsafe impl Send for GitDateTask {}
 
 pub struct GitCreatedDateTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  path: String,
   filepath: String,
 }
-
-unsafe impl Send for GitCreatedDateTask {}
 
 pub struct GitModificationTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  path: String,
   filepath: String,
 }
 
-unsafe impl Send for GitModificationTask {}
-
 pub struct GitBulkModificationTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  path: String,
   filepaths: Vec<String>,
 }
 
-unsafe impl Send for GitBulkModificationTask {}
-
 pub struct GitStatusTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  path: String,
   options: Option<StatusOptions>,
 }
 
-unsafe impl Send for GitStatusTask {}
-
 pub struct GitBlameTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  path: String,
   filepath: String,
   options: Option<BlameOptions>,
 }
 
-unsafe impl Send for GitBlameTask {}
-
 pub struct GitCommitTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  path: String,
   update_ref: Option<String>,
   author: git2::Signature<'static>,
   committer: git2::Signature<'static>,
@@ -161,12 +156,14 @@ pub struct GitCommitTask {
   parents: Vec<String>,
 }
 
-// SAFETY: `git2::Signature` is `!Send`, but each signature stored here is an
-// owned `'static` copy (produced via `to_owned()` on the main thread). The
-// `Reference<Repository>` and these signatures are *moved* into the task and
-// only ever dereferenced inside `compute()` on a single worker thread — never
-// shared with or concurrently accessed by the main thread. No aliasing, no
-// concurrent access, so the move across threads is sound.
+// SAFETY: every field is `Send` EXCEPT the two `git2::Signature<'static>`
+// values, which are `!Send` only because the type holds a raw pointer (each is
+// an owned `'static` copy produced via `to_owned()` on the main thread, with no
+// borrow of any repository). They are *moved* into the task and only ever read
+// inside `compute()` on a single worker thread — never shared with, nor
+// concurrently accessed by, the main thread. The repository is REOPENED from
+// the owned `path` inside `compute()`, so the task never touches the
+// JS-visible handle. No aliasing, no concurrent access: the move is sound.
 unsafe impl Send for GitCommitTask {}
 
 pub struct GitCloneTask {
@@ -189,20 +186,15 @@ impl Task for GitDateTask {
   type JsValue = DateTime<Utc>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_modification(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepath,
-    )
-    .convert_without_message()
-    .and_then(|value| {
-      value
-        .map(|m| m.committer_time)
-        .expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
-    })
+    let repo = git2::Repository::open(&self.path)
+      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    get_file_modification(&repo, &self.filepath)
+      .convert_without_message()
+      .and_then(|value| {
+        value
+          .map(|m| m.committer_time)
+          .expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
+      })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -216,21 +208,16 @@ impl Task for GitCreatedDateTask {
   type JsValue = DateTime<Utc>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_created_date(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepath,
-    )
-    .convert_without_message()
-    .and_then(|value| {
-      value.expect_not_null(format!(
-        "Failed to get created date for [{}]",
-        &self.filepath
-      ))
-    })
+    let repo = git2::Repository::open(&self.path)
+      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    get_file_created_date(&repo, &self.filepath)
+      .convert_without_message()
+      .and_then(|value| {
+        value.expect_not_null(format!(
+          "Failed to get created date for [{}]",
+          &self.filepath
+        ))
+      })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -244,15 +231,9 @@ impl Task for GitModificationTask {
   type JsValue = Option<FileModification>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_modification(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepath,
-    )
-    .convert_without_message()
+    let repo = git2::Repository::open(&self.path)
+      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    get_file_modification(&repo, &self.filepath).convert_without_message()
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -266,15 +247,9 @@ impl Task for GitBulkModificationTask {
   type JsValue = HashMap<String, Option<FileModification>>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_files_modification(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepaths,
-    )
-    .convert_without_message()
+    let repo = git2::Repository::open(&self.path)
+      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    get_files_modification(&repo, &self.filepaths).convert_without_message()
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -288,14 +263,9 @@ impl Task for GitStatusTask {
   type JsValue = Vec<FileStatus>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    collect_statuses(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      self.options.clone(),
-    )
+    let repo = git2::Repository::open(&self.path)
+      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    collect_statuses(&repo, self.options.clone())
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -309,15 +279,9 @@ impl Task for GitBlameTask {
   type JsValue = Vec<BlameHunk>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    collect_blame(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepath,
-      self.options.clone(),
-    )
+    let repo = git2::Repository::open(&self.path)
+      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    collect_blame(&repo, &self.filepath, self.options.clone())
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -331,11 +295,8 @@ impl Task for GitCommitTask {
   type JsValue = String;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo_ref = self
-      .repo
-      .read()
-      .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?;
-    let repo = &repo_ref.inner;
+    let repo = git2::Repository::open(&self.path)
+      .convert(format!("Failed to open git repo: [{}]", self.path))?;
     let tree = repo
       .find_tree(self.tree_oid)
       .convert(format!("Find tree from OID [{}] failed", self.tree_oid))?;
@@ -705,6 +666,7 @@ impl Repository {
     env: Env,
     name: String,
   ) -> Option<Remote> {
+    let repo_path = self.inner.path().to_string_lossy().into_owned();
     Some(Remote {
       inner: self_ref
         .share_with(env, move |repo| {
@@ -714,6 +676,7 @@ impl Repository {
             .convert(format!("Failed to get remote [{}]", &name))
         })
         .ok()?,
+      repo_path,
     })
   }
 
@@ -727,6 +690,7 @@ impl Repository {
     name: String,
     url: String,
   ) -> Result<Remote> {
+    let repo_path = self.inner.path().to_string_lossy().into_owned();
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -734,6 +698,7 @@ impl Repository {
           .remote(&name, &url)
           .convert(format!("Failed to add remote [{}]", &name))
       })?,
+      repo_path,
     })
   }
 
@@ -748,6 +713,7 @@ impl Repository {
     url: String,
     refspec: String,
   ) -> Result<Remote> {
+    let repo_path = self.inner.path().to_string_lossy().into_owned();
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -755,6 +721,7 @@ impl Repository {
           .remote_with_fetch(&name, &url, &refspec)
           .convert("Failed to add remote")
       })?,
+      repo_path,
     })
   }
 
@@ -770,6 +737,7 @@ impl Repository {
     this: Reference<Repository>,
     url: String,
   ) -> Result<Remote> {
+    let repo_path = self.inner.path().to_string_lossy().into_owned();
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -777,6 +745,7 @@ impl Repository {
           .remote_anonymous(&url)
           .convert("Failed to create anonymous remote")
       })?,
+      repo_path,
     })
   }
 
@@ -1408,7 +1377,6 @@ impl Repository {
   /// async operation is pending; the underlying git2 handle is not `Sync`.
   pub fn commit_async(
     &self,
-    self_ref: Reference<Repository>,
     update_ref: Option<String>,
     author: &Signature,
     committer: &Signature,
@@ -1419,7 +1387,7 @@ impl Repository {
   ) -> Result<AsyncTask<GitCommitTask>> {
     Ok(AsyncTask::with_optional_signal(
       GitCommitTask {
-        repo: RwLock::new(self_ref),
+        path: self.inner.path().to_string_lossy().into_owned(),
         update_ref,
         author: author.as_ref().to_owned(),
         committer: committer.as_ref().to_owned(),
@@ -1486,13 +1454,12 @@ impl Repository {
   #[napi]
   pub fn get_file_latest_modified_date_async(
     &self,
-    self_ref: Reference<Repository>,
     filepath: String,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitDateTask>> {
     Ok(AsyncTask::with_optional_signal(
       GitDateTask {
-        repo: RwLock::new(self_ref),
+        path: self.inner.path().to_string_lossy().into_owned(),
         filepath,
       },
       signal,
@@ -1509,13 +1476,12 @@ impl Repository {
   #[napi]
   pub fn get_file_latest_modification_async(
     &self,
-    self_ref: Reference<Repository>,
     filepath: String,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitModificationTask>> {
     Ok(AsyncTask::with_optional_signal(
       GitModificationTask {
-        repo: RwLock::new(self_ref),
+        path: self.inner.path().to_string_lossy().into_owned(),
         filepath,
       },
       signal,
@@ -1535,13 +1501,12 @@ impl Repository {
   #[napi]
   pub fn get_files_latest_modification_async(
     &self,
-    self_ref: Reference<Repository>,
     filepaths: Vec<String>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitBulkModificationTask>> {
     Ok(AsyncTask::with_optional_signal(
       GitBulkModificationTask {
-        repo: RwLock::new(self_ref),
+        path: self.inner.path().to_string_lossy().into_owned(),
         filepaths,
       },
       signal,
@@ -1575,13 +1540,12 @@ impl Repository {
   /// Asynchronous variant of `statuses`, computed off the main thread.
   pub fn statuses_async(
     &self,
-    self_ref: Reference<Repository>,
     options: Option<StatusOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitStatusTask>> {
     Ok(AsyncTask::with_optional_signal(
       GitStatusTask {
-        repo: RwLock::new(self_ref),
+        path: self.inner.path().to_string_lossy().into_owned(),
         options,
       },
       signal,
@@ -1615,14 +1579,13 @@ impl Repository {
   /// Asynchronous variant of `blame_file`, computed off the main thread.
   pub fn blame_file_async(
     &self,
-    self_ref: Reference<Repository>,
     path: String,
     options: Option<BlameOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitBlameTask>> {
     Ok(AsyncTask::with_optional_signal(
       GitBlameTask {
-        repo: RwLock::new(self_ref),
+        path: self.inner.path().to_string_lossy().into_owned(),
         filepath: path,
         options,
       },
@@ -1642,13 +1605,12 @@ impl Repository {
   #[napi]
   pub fn get_file_created_date_async(
     &self,
-    self_ref: Reference<Repository>,
     filepath: String,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitCreatedDateTask>> {
     Ok(AsyncTask::with_optional_signal(
       GitCreatedDateTask {
-        repo: RwLock::new(self_ref),
+        path: self.inner.path().to_string_lossy().into_owned(),
         filepath,
       },
       signal,

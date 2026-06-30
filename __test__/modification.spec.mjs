@@ -64,6 +64,17 @@ test("getFileLatestModificationAsync matches sync result", async (t) => {
   );
 });
 
+// Test #2b — getFileLatestModifiedDateAsync (GitDateTask) matches its sync
+// sibling. Covers the previously-untested async date path; both return a Date
+// for the same instant.
+test("getFileLatestModifiedDateAsync matches sync result", async (t) => {
+  const { repo } = t.context;
+  const sync = repo.getFileLatestModifiedDate("build.rs");
+  const asyncResult = await repo.getFileLatestModifiedDateAsync("build.rs");
+  t.true(asyncResult instanceof Date);
+  t.is(asyncResult.getTime(), sync.getTime());
+});
+
 // Test #3 — null for a path that was never committed.
 test("getFileLatestModification returns null for missing path", (t) => {
   const { repo } = t.context;

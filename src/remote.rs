@@ -1,4 +1,3 @@
-use std::sync::RwLock;
 use std::{mem, path::Path};
 
 use git2::{ErrorClass, ErrorCode};
@@ -150,6 +149,12 @@ pub enum RemoteUpdateFlags {
 #[napi]
 pub struct Remote {
   pub(crate) inner: SharedReference<crate::repo::Repository, git2::Remote<'static>>,
+  /// Gitdir of the owning repository (`Repository::path()`), captured on the JS
+  /// thread. `git2::Remote` exposes no owning-repo/path accessor, so the async
+  /// `fetch`/`push` workers reopen the repository from this path and re-resolve
+  /// the remote there instead of moving the JS-visible handle off-thread. Not a
+  /// `#[napi]` field, so it is invisible to the JS surface.
+  pub(crate) repo_path: String,
 }
 
 #[napi]
@@ -302,7 +307,6 @@ impl Remote {
   /// operation is pending; the underlying git2 handle is not `Sync`.
   pub fn fetch_async(
     &self,
-    self_ref: Reference<Remote>,
     refspecs: Vec<String>,
     fetch_options: Option<&mut FetchOptions>,
     signal: Option<AbortSignal>,
@@ -324,7 +328,9 @@ impl Remote {
     };
     Ok(AsyncTask::with_optional_signal(
       RemoteFetchTask {
-        remote: RwLock::new(self_ref),
+        repo_path: self.repo_path.clone(),
+        remote_name: self.inner.name().ok().flatten().map(|s| s.to_owned()),
+        remote_url: self.inner.url().ok().map(|s| s.to_owned()),
         refspecs,
         options,
       },
@@ -345,7 +351,6 @@ impl Remote {
   /// operation is pending; the underlying git2 handle is not `Sync`.
   pub fn push_async(
     &self,
-    self_ref: Reference<Remote>,
     refspecs: Vec<String>,
     push_options: Option<&mut PushOptions>,
     signal: Option<AbortSignal>,
@@ -374,7 +379,9 @@ impl Remote {
     };
     Ok(AsyncTask::with_optional_signal(
       RemotePushTask {
-        remote: RwLock::new(self_ref),
+        repo_path: self.repo_path.clone(),
+        remote_name: self.inner.name().ok().flatten().map(|s| s.to_owned()),
+        remote_url: self.inner.url().ok().map(|s| s.to_owned()),
         refspecs,
         options,
       },
@@ -408,21 +415,24 @@ impl Remote {
 }
 
 pub struct RemoteFetchTask {
-  remote: RwLock<Reference<Remote>>,
+  repo_path: String,
+  remote_name: Option<String>,
+  remote_url: Option<String>,
   refspecs: Vec<String>,
   options: Option<git2::FetchOptions<'static>>,
 }
 
-// SAFETY: `Reference<Remote>` and `git2::FetchOptions` are `!Send`. They are
+// SAFETY: every field is `Send` EXCEPT `git2::FetchOptions`, which is `!Send`
+// only because it holds a `Vec<*const c_char>` of raw header pointers. It is
 // *moved* into the task and only ever touched inside `compute()` on a single
-// worker thread (the underlying git2 handle is never accessed concurrently
-// from the main thread while the promise is pending), and the napi `Reference`
-// is dropped on the main thread after `resolve()`. Crucially, the stored
-// `FetchOptions` is only ever constructed here when the source `FetchOptions`
-// carries NO `RemoteCallbacks` (guarded by `has_remote_callbacks` in
-// `fetch_async`), so it holds only plain owned data (depth/prune/proxy
-// url/headers) with no JS `Env` or threadsafe-function captured — nothing that
-// would be unsound to use off the JS thread.
+// worker thread. Crucially, the stored `FetchOptions` is only ever constructed
+// when the source `FetchOptions` carries NO `RemoteCallbacks` (guarded by
+// `has_remote_callbacks` in `fetch_async`), so it holds only plain owned data
+// (depth/prune/proxy url/headers) with no JS `Env` or threadsafe function
+// captured — nothing unsound to use off the JS thread. The repository handle is
+// REOPENED from the owned `repo_path` inside `compute()` and the remote is
+// re-resolved there, so the task never aliases the JS-visible handle. No
+// aliasing, no concurrent access: the move is sound.
 unsafe impl Send for RemoteFetchTask {}
 
 #[napi]
@@ -431,13 +441,15 @@ impl Task for RemoteFetchTask {
   type JsValue = ();
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let mut remote = self
-      .remote
-      .write()
-      .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?;
+    let repo = git2::Repository::open(&self.repo_path)
+      .convert(format!("Failed to open git repo: [{}]", self.repo_path))?;
+    let mut remote = match &self.remote_name {
+      Some(name) => repo.find_remote(name),
+      None => repo.remote_anonymous(self.remote_url.as_deref().unwrap_or_default()),
+    }
+    .convert("Failed to resolve remote")?;
     let mut options = self.options.take().unwrap_or_default();
     remote
-      .inner
       .fetch(self.refspecs.as_slice(), Some(&mut options), None)
       .convert_without_message()
   }
@@ -448,17 +460,21 @@ impl Task for RemoteFetchTask {
 }
 
 pub struct RemotePushTask {
-  remote: RwLock<Reference<Remote>>,
+  repo_path: String,
+  remote_name: Option<String>,
+  remote_url: Option<String>,
   refspecs: Vec<String>,
   options: Option<git2::PushOptions<'static>>,
 }
 
-// SAFETY: identical reasoning to `RemoteFetchTask`. The stored `PushOptions`
-// is only ever built when the source `PushOptions` carries NO
-// `RemoteCallbacks` (guarded by `has_remote_callbacks` in `push_async`), so it
-// captures no JS `Env`/threadsafe function; it and the moved `Reference` are
-// only accessed on the worker thread during `compute()`, never concurrently
-// with the main thread.
+// SAFETY: identical reasoning to `RemoteFetchTask`. Every field is `Send`
+// EXCEPT `git2::PushOptions`, which is `!Send` only for its `Vec<*const c_char>`
+// raw header pointers. The stored `PushOptions` is only ever built when the
+// source `PushOptions` carries NO `RemoteCallbacks` (guarded by
+// `has_remote_callbacks` in `push_async`), so it captures no JS `Env`/threadsafe
+// function. The repository is REOPENED from the owned `repo_path` and the remote
+// re-resolved inside `compute()`, all on a single worker thread — never aliasing
+// or concurrently accessing the JS-visible handle.
 unsafe impl Send for RemotePushTask {}
 
 #[napi]
@@ -467,13 +483,15 @@ impl Task for RemotePushTask {
   type JsValue = ();
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let mut remote = self
-      .remote
-      .write()
-      .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?;
+    let repo = git2::Repository::open(&self.repo_path)
+      .convert(format!("Failed to open git repo: [{}]", self.repo_path))?;
+    let mut remote = match &self.remote_name {
+      Some(name) => repo.find_remote(name),
+      None => repo.remote_anonymous(self.remote_url.as_deref().unwrap_or_default()),
+    }
+    .convert("Failed to resolve remote")?;
     let mut options = self.options.take().unwrap_or_default();
     remote
-      .inner
       .push(self.refspecs.as_slice(), Some(&mut options))
       .convert_without_message()
   }
