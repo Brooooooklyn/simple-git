@@ -140,7 +140,12 @@ impl Reference {
   /// May return `None` if the reference is either not symbolic or not a
   /// valid utf-8 string.
   pub fn symbolic_target(&self) -> Option<String> {
-    self.inner.symbolic_target().ok().flatten().map(|s| s.to_owned())
+    self
+      .inner
+      .symbolic_target()
+      .ok()
+      .flatten()
+      .map(|s| s.to_owned())
   }
 
   #[napi]
