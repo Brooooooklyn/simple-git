@@ -7,6 +7,7 @@ use napi_derive::napi;
 use once_cell::sync::Lazy;
 
 use crate::blame::{BlameHunk, BlameOptions, blame_single_line, collect_blame};
+use crate::branch::{Branch, BranchType};
 use crate::commit::{Commit, CommitInner};
 use crate::config::Config;
 use crate::diff::Diff;
@@ -781,6 +782,108 @@ impl Repository {
     Some(Commit {
       inner: CommitInner::Repository(commit),
     })
+  }
+
+  #[napi]
+  /// List the branches in the repository.
+  ///
+  /// Pass `filter` to restrict the listing to local or remote branches; omit it
+  /// to list both. Branches whose names are not valid utf-8 are skipped (they
+  /// cannot be re-resolved by name).
+  pub fn branches(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    filter: Option<BranchType>,
+  ) -> Result<Vec<Branch>> {
+    // The `Branches<'repo>` iterator yields branches borrowing the repository,
+    // which cannot escape into a `SharedReference`. Collect each branch's name
+    // and type first, then rebuild owned `Branch`es by re-finding them.
+    let mut specs: Vec<(String, git2::BranchType)> = Vec::new();
+    {
+      let branches = self
+        .inner
+        .branches(filter.map(Into::into))
+        .convert("Failed to list branches")?;
+      for branch in branches {
+        let (branch, branch_type) = branch.convert_without_message()?;
+        if let Some(name) = branch.name().convert_without_message()? {
+          specs.push((name.to_owned(), branch_type));
+        }
+      }
+    }
+    let mut result = Vec::with_capacity(specs.len());
+    for (name, branch_type) in specs {
+      let inner = this_ref.clone(env)?.share_with(env, move |repo| {
+        repo
+          .inner
+          .find_branch(&name, branch_type)
+          .convert(format!("Find branch [{name}] failed"))
+      })?;
+      result.push(Branch { inner });
+    }
+    Ok(result)
+  }
+
+  #[napi]
+  /// Lookup a branch by its name in a repository.
+  ///
+  /// Returns `null` when no branch with that name and type exists.
+  pub fn find_branch(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    name: String,
+    branch_type: BranchType,
+  ) -> Result<Option<Branch>> {
+    let branch_type: git2::BranchType = branch_type.into();
+    // Probe first so a genuine "not found" maps to `None` while other errors
+    // surface, and the `SharedReference` is only built when the branch exists.
+    if let Err(err) = self.inner.find_branch(&name, branch_type) {
+      if err.code() == git2::ErrorCode::NotFound {
+        return Ok(None);
+      }
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        format!("libgit2 error: {err}"),
+      ));
+    }
+    let inner = this_ref.share_with(env, move |repo| {
+      repo
+        .inner
+        .find_branch(&name, branch_type)
+        .convert(format!("Find branch [{name}] failed"))
+    })?;
+    Ok(Some(Branch { inner }))
+  }
+
+  #[napi]
+  /// Create a new branch pointing at a target commit.
+  ///
+  /// A new direct reference will be created pointing to this target commit. If
+  /// `force` is true and a branch already exists with the given name, it will
+  /// be replaced.
+  pub fn branch(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    branch_name: String,
+    target: &Commit,
+    force: bool,
+  ) -> Result<Branch> {
+    // Create the branch ref; the returned borrowed branch is dropped, then the
+    // owned `Branch` is rebuilt by re-finding it inside `share_with`.
+    self
+      .inner
+      .branch(&branch_name, &target.inner, force)
+      .convert(format!("Failed to create branch [{branch_name}]"))?;
+    let inner = this_ref.share_with(env, move |repo| {
+      repo
+        .inner
+        .find_branch(&branch_name, git2::BranchType::Local)
+        .convert(format!("Find branch [{branch_name}] failed"))
+    })?;
+    Ok(Branch { inner })
   }
 
   #[napi]

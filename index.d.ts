@@ -11,6 +11,39 @@ export declare class Blob {
   size(): bigint
 }
 
+/**
+ * A git branch.
+ *
+ * A branch is a thin wrapper around an underlying reference; the full
+ * reference name is available via `reference_name`.
+ */
+export declare class Branch {
+  /**
+   * Return the name of the given local or remote branch.
+   *
+   * Returns `None` if the name is not valid utf-8.
+   */
+  name(): string | null
+  /** Determine if the current local branch is pointed at by HEAD. */
+  isHead(): boolean
+  /**
+   * Get the full name of the reference backing this branch
+   * (e.g. `refs/heads/main`).
+   *
+   * Returns `None` if the reference name is not valid utf-8.
+   */
+  referenceName(): string | null
+  /** Delete an existing branch reference. */
+  delete(): void
+  /**
+   * Return the reference supporting the remote tracking branch, given a local
+   * branch reference.
+   *
+   * Returns `None` when the branch has no configured upstream.
+   */
+  upstream(): Branch | null
+}
+
 export declare class Commit {
   /** Get the id (SHA1) of a repository object */
   id(): string
@@ -923,6 +956,28 @@ export declare class Repository {
   findTree(oid: string): Tree | null
   findCommit(oid: string): Commit | null
   /**
+   * List the branches in the repository.
+   *
+   * Pass `filter` to restrict the listing to local or remote branches; omit it
+   * to list both. Branches whose names are not valid utf-8 are skipped (they
+   * cannot be re-resolved by name).
+   */
+  branches(filter?: BranchType | undefined | null): Array<Branch>
+  /**
+   * Lookup a branch by its name in a repository.
+   *
+   * Returns `null` when no branch with that name and type exists.
+   */
+  findBranch(name: string, branchType: BranchType): Branch | null
+  /**
+   * Create a new branch pointing at a target commit.
+   *
+   * A new direct reference will be created pointing to this target commit. If
+   * `force` is true and a branch already exists with the given name, it will
+   * be replaced.
+   */
+  branch(branchName: string, target: Commit, force: boolean): Branch
+  /**
    * Create a new tag in the repository from an object
    *
    * A new reference will also be created pointing to this tag object. If
@@ -1373,6 +1428,14 @@ export interface BlameOptions {
   minLine?: number
   /** The last line in the file to blame (1-based). */
   maxLine?: number
+}
+
+/** An enumeration for the possible types of branches. */
+export declare const enum BranchType {
+  /** A local branch not on a remote. */
+  Local = 0,
+  /** A branch for a remote. */
+  Remote = 1
 }
 
 export declare const enum CloneLocal {
