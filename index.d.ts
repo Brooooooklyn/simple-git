@@ -150,6 +150,75 @@ export declare class Commit {
   asObject(): GitObject
 }
 
+/**
+ * A git configuration store.
+ *
+ * Obtain one with `Repository.config()` (a prioritized view of system, global
+ * and repository config) or `Config.openDefault()` (system/global/XDG only).
+ */
+export declare class Config {
+  /**
+   * Open the global, XDG and system configuration files into a single
+   * prioritized config object that can be used when accessing default config
+   * data outside a repository.
+   */
+  static openDefault(): Config
+  /**
+   * Get the value of a string config variable as an owned string.
+   *
+   * All config files are searched in order of their level (highest priority
+   * first) and the first occurrence is returned. Errors if the value is not
+   * valid utf-8 or the key is missing.
+   */
+  getStringValue(name: string): string
+  /** Get the value of a boolean config variable. */
+  getBool(name: string): boolean
+  /** Get the value of an i32 config variable. */
+  getI32(name: string): number
+  /** Get the value of an i64 config variable. */
+  getI64(name: string): number
+  /**
+   * Set the value of a string config variable in the config file with the
+   * highest level (usually the local one).
+   */
+  setStr(name: string, value: string): void
+  /**
+   * Set the value of a boolean config variable in the config file with the
+   * highest level (usually the local one).
+   */
+  setBool(name: string, value: boolean): void
+  /**
+   * Set the value of an i32 config variable in the config file with the
+   * highest level (usually the local one).
+   */
+  setI32(name: string, value: number): void
+  /**
+   * Set the value of an i64 config variable in the config file with the
+   * highest level (usually the local one).
+   */
+  setI64(name: string, value: number): void
+  /**
+   * Delete a config variable from the config file with the highest level
+   * (usually the local one).
+   */
+  removeEntry(name: string): void
+  /**
+   * Create a read-only point-in-time snapshot of this configuration.
+   *
+   * A snapshot gives a consistent view for looking up complex values. Note
+   * that `get_*` on a live (non-snapshot) config re-reads the underlying
+   * files on each call.
+   */
+  snapshot(): Config
+  /**
+   * List configuration entries, optionally filtered by a glob pattern.
+   *
+   * Each borrowed entry is eagerly materialized into an owned `ConfigEntry`.
+   * Entries whose name or value is not valid utf-8 are skipped.
+   */
+  entries(glob?: string | undefined | null): Array<ConfigEntry>
+}
+
 export declare class Cred {
   /**
    * Create a "default" credential usable for Negotiate mechanisms like NTLM
@@ -621,6 +690,21 @@ export declare class Repository {
   constructor(gitDir: string)
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
+  /**
+   * Get the configuration file for this repository.
+   *
+   * If a configuration file has not been set, the default config set for the
+   * repository will be returned, including global and system configurations.
+   */
+  config(): Config
+  /**
+   * Create a new action signature with default user and now timestamp.
+   *
+   * This looks up the `user.name` and `user.email` from the configuration and
+   * uses the current time as the timestamp. It returns an error if either the
+   * `user.name` or `user.email` are not set.
+   */
+  signature(): Signature
   /** Tests whether this repository is a shallow clone. */
   isShallow(): boolean
   /** Tests whether this repository is empty. */
@@ -1117,6 +1201,40 @@ export declare const enum CloneLocal {
   None = 2,
   /** Bypass the git-aware transport, but don't try to use hardlinks. */
   NoLinks = 3
+}
+
+/**
+ * A single configuration entry: its fully-qualified name, value, and the
+ * level (file) it was read from.
+ */
+export interface ConfigEntry {
+  name: string
+  value: string
+  level: ConfigLevel
+}
+
+/**
+ * The priority level a configuration entry or file applies to. Higher levels
+ * take precedence; `Local` (the repository's own `.git/config`) is where
+ * `set_*`/`remove_entry` write by default.
+ */
+export declare const enum ConfigLevel {
+  /** System-wide on Windows, for compatibility with portable git */
+  ProgramData = 0,
+  /** System-wide configuration file, e.g. /etc/gitconfig */
+  System = 1,
+  /** XDG-compatible configuration file, e.g. ~/.config/git/config */
+  Xdg = 2,
+  /** User-specific configuration, e.g. ~/.gitconfig */
+  Global = 3,
+  /** Repository specific config, e.g. $PWD/.git/config */
+  Local = 4,
+  /** Worktree specific configuration file, e.g. $GIT_DIR/config.worktree */
+  Worktree = 5,
+  /** Application specific configuration file */
+  App = 6,
+  /** Highest level available */
+  Highest = 7
 }
 
 /** Types of credentials that can be requested by a credential callback. */

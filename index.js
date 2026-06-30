@@ -510,6 +510,7 @@ if (!nativeBinding) {
 module.exports = nativeBinding
 module.exports.Blob = nativeBinding.Blob
 module.exports.Commit = nativeBinding.Commit
+module.exports.Config = nativeBinding.Config
 module.exports.Cred = nativeBinding.Cred
 module.exports.Deltas = nativeBinding.Deltas
 module.exports.Diff = nativeBinding.Diff
@@ -531,6 +532,7 @@ module.exports.TreeEntry = nativeBinding.TreeEntry
 module.exports.TreeIter = nativeBinding.TreeIter
 module.exports.AutotagOption = nativeBinding.AutotagOption
 module.exports.CloneLocal = nativeBinding.CloneLocal
+module.exports.ConfigLevel = nativeBinding.ConfigLevel
 module.exports.CredentialType = nativeBinding.CredentialType
 module.exports.credTypeContains = nativeBinding.credTypeContains
 module.exports.Delta = nativeBinding.Delta

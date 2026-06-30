@@ -7,6 +7,7 @@ use napi_derive::napi;
 use once_cell::sync::Lazy;
 
 use crate::commit::{Commit, CommitInner};
+use crate::config::Config;
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
 use crate::file_modification::{FileModification, get_file_modification, get_files_modification};
@@ -399,6 +400,29 @@ impl Repository {
           .convert("Get the HEAD of Repository failed")
       })?,
     })
+  }
+
+  #[napi]
+  /// Get the configuration file for this repository.
+  ///
+  /// If a configuration file has not been set, the default config set for the
+  /// repository will be returned, including global and system configurations.
+  pub fn config(&self) -> Result<Config> {
+    Ok(Config {
+      inner: self.inner.config().convert_without_message()?,
+    })
+  }
+
+  #[napi]
+  /// Create a new action signature with default user and now timestamp.
+  ///
+  /// This looks up the `user.name` and `user.email` from the configuration and
+  /// uses the current time as the timestamp. It returns an error if either the
+  /// `user.name` or `user.email` are not set.
+  pub fn signature(&self) -> Result<Signature> {
+    Ok(Signature::from_git2(
+      self.inner.signature().convert_without_message()?,
+    ))
   }
 
   #[napi]

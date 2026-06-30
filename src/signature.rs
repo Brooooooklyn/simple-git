@@ -35,6 +35,16 @@ pub struct Signature {
   pub(crate) inner: SignatureInner,
 }
 
+impl Signature {
+  /// Wrap an owned `git2::Signature<'static>` (e.g. from
+  /// `Repository::signature`) into the napi `Signature` class.
+  pub(crate) fn from_git2(sig: git2::Signature<'static>) -> Signature {
+    Signature {
+      inner: SignatureInner::Signature(sig),
+    }
+  }
+}
+
 #[napi]
 impl Signature {
   #[napi(factory)]
