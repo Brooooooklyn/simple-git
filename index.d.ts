@@ -1211,6 +1211,31 @@ export declare const enum FileMode {
   Commit = 6
 }
 
+/**
+ * Last commit that modified a file, with author/committer identity.
+ * All times are ms since epoch (UTC; timezone offset ignored).
+ */
+export interface FileModification {
+  /** Committer time, ms since epoch. Identical to `getFileLatestModifiedDate`. Equals `committerTime`. */
+  timestamp: number
+  /** 40-char lowercase hex OID of the last commit that modified the file. */
+  commitId: string
+  /** Commit summary (first line). Undefined if absent or not valid UTF-8. */
+  summary?: string
+  /** Author name. Undefined if not valid UTF-8. */
+  authorName?: string
+  /** Author email. Undefined if not valid UTF-8. */
+  authorEmail?: string
+  /** Author time, ms since epoch. */
+  authorTime: number
+  /** Committer name. Undefined if not valid UTF-8. */
+  committerName?: string
+  /** Committer email. Undefined if not valid UTF-8. */
+  committerEmail?: string
+  /** Committer time, ms since epoch. Equals `timestamp`. */
+  committerTime: number
+}
+
 export declare const enum ObjectType {
   /** Any kind of git object */
   Any = 0,

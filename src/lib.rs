@@ -5,6 +5,7 @@ pub mod commit;
 pub mod deltas;
 pub mod diff;
 mod error;
+pub mod file_modification;
 pub mod object;
 pub mod reference;
 pub mod remote;
