@@ -172,13 +172,11 @@ pub struct GitCloneTask {
   result: Option<git2::Repository>,
 }
 
-// SAFETY: `git2::Repository` is `!Send`. The handle is created inside
-// `compute()` on the worker thread and stored here, then *moved out* inside
-// `resolve()` on the main thread. `compute()` always completes before
-// `resolve()` runs, so the handle is never touched from two threads at once
-// and is only ever owned by a single thread at a time. After `resolve()` the
-// napi `Repository` lives entirely on the main thread.
-unsafe impl Send for GitCloneTask {}
+// `git2::Repository` is `Send` (see git2's `unsafe impl Send for Repository`),
+// so `GitCloneTask` — whose fields are all `Send` — is auto-`Send` and needs no
+// manual impl. The cloned handle is created inside `compute()` on the worker
+// thread, moved out in `resolve()` on the main thread, and (because `compute()`
+// completes before `resolve()` runs) is only ever owned by one thread at a time.
 
 #[napi]
 impl Task for GitDateTask {
