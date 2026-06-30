@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use napi::{JsString, bindgen_prelude::*};
@@ -15,6 +15,7 @@ use crate::reference;
 use crate::remote::Remote;
 use crate::rev_walk::RevWalk;
 use crate::signature::Signature;
+use crate::status::{FileStatus, StatusOptions, build_status_opts, status_from_bits};
 use crate::tag::Tag;
 use crate::tree::{Tree, TreeEntry, TreeParent};
 use crate::util::path_to_javascript_string;
@@ -131,6 +132,13 @@ pub struct GitBulkModificationTask {
 
 unsafe impl Send for GitBulkModificationTask {}
 
+pub struct GitStatusTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  options: Option<StatusOptions>,
+}
+
+unsafe impl Send for GitStatusTask {}
+
 #[napi]
 impl Task for GitDateTask {
   type Output = i64;
@@ -223,6 +231,27 @@ impl Task for GitBulkModificationTask {
       &self.filepaths,
     )
     .convert_without_message()
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitStatusTask {
+  type Output = Vec<FileStatus>;
+  type JsValue = Vec<FileStatus>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    collect_statuses(
+      &self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
+      self.options.clone(),
+    )
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -1026,6 +1055,46 @@ impl Repository {
   }
 
   #[napi]
+  /// List the working-tree and index status of files in the repository.
+  ///
+  /// Mirrors `git status`. By default untracked files are included and ignored
+  /// files are not; pass `options` to tune the scan. Each returned `FileStatus`
+  /// decodes the `git2::Status` flags into booleans plus the raw `bits`.
+  pub fn statuses(&self, options: Option<StatusOptions>) -> Result<Vec<FileStatus>> {
+    collect_statuses(&self.inner, options)
+  }
+
+  #[napi]
+  /// Get the status of a single file by its workdir-relative path.
+  ///
+  /// This is more efficient than scanning the whole tree when only one path is
+  /// of interest. Errors (e.g. an ambiguous path) surface as a napi error.
+  pub fn status_file(&self, path: String) -> Result<FileStatus> {
+    let status = self
+      .inner
+      .status_file(Path::new(&path))
+      .convert_without_message()?;
+    Ok(status_from_bits(status, Some(path)))
+  }
+
+  #[napi]
+  /// Asynchronous variant of `statuses`, computed off the main thread.
+  pub fn statuses_async(
+    &self,
+    self_ref: Reference<Repository>,
+    options: Option<StatusOptions>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitStatusTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitStatusTask {
+        repo: RwLock::new(self_ref),
+        options,
+      },
+      signal,
+    ))
+  }
+
+  #[napi]
   pub fn get_file_created_date(&self, filepath: String) -> Result<i64> {
     get_file_created_date(&self.inner, &filepath)
       .convert_without_message()
@@ -1049,6 +1118,25 @@ impl Repository {
       signal,
     ))
   }
+}
+
+/// Run a status scan and eagerly materialize the borrowed `Statuses<'repo>`
+/// into owned `FileStatus` values so nothing referencing the repository escapes.
+fn collect_statuses(
+  repo: &git2::Repository,
+  options: Option<StatusOptions>,
+) -> Result<Vec<FileStatus>> {
+  let mut opts = build_status_opts(options);
+  let statuses = repo.statuses(Some(&mut opts)).convert_without_message()?;
+  Ok(
+    statuses
+      .iter()
+      .map(|entry| {
+        let path = entry.path().ok().map(|p| p.to_owned());
+        status_from_bits(entry.status(), path)
+      })
+      .collect(),
+  )
 }
 
 fn get_file_created_date(

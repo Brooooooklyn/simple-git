@@ -856,6 +856,23 @@ export declare class Repository {
    */
   getFilesLatestModification(filepaths: Array<string>): Record<string, FileModification | undefined | null>
   getFilesLatestModificationAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
+  /**
+   * List the working-tree and index status of files in the repository.
+   *
+   * Mirrors `git status`. By default untracked files are included and ignored
+   * files are not; pass `options` to tune the scan. Each returned `FileStatus`
+   * decodes the `git2::Status` flags into booleans plus the raw `bits`.
+   */
+  statuses(options?: StatusOptions | undefined | null): Array<FileStatus>
+  /**
+   * Get the status of a single file by its workdir-relative path.
+   *
+   * This is more efficient than scanning the whole tree when only one path is
+   * of interest. Errors (e.g. an ambiguous path) surface as a napi error.
+   */
+  statusFile(path: string): FileStatus
+  /** Asynchronous variant of `statuses`, computed off the main thread. */
+  statusesAsync(options?: StatusOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<FileStatus>>
   getFileCreatedDate(filepath: string): number
   getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }
@@ -1248,6 +1265,43 @@ export interface FileModification {
   committerTime: number
 }
 
+/**
+ * Status of a single file in the working tree and/or index.
+ *
+ * The boolean flags mirror the `git2::Status` bits; `bits` carries the raw
+ * value as a forward-compatible escape hatch for flags not surfaced here.
+ */
+export interface FileStatus {
+  /** Workdir-relative path. `null` if the path is not valid UTF-8. */
+  path?: string
+  /** Raw `git2::Status` bits — forward-compat escape hatch. */
+  bits: number
+  /** Staged: a new file was added to the index. */
+  isIndexNew: boolean
+  /** Staged: a tracked file was modified in the index. */
+  isIndexModified: boolean
+  /** Staged: a tracked file was deleted from the index. */
+  isIndexDeleted: boolean
+  /** Staged: a tracked file was renamed in the index. */
+  isIndexRenamed: boolean
+  /** Staged: a tracked file changed type in the index. */
+  isIndexTypechange: boolean
+  /** Unstaged: an untracked file (new in the working directory). */
+  isWtNew: boolean
+  /** Unstaged: a tracked file was modified in the working directory. */
+  isWtModified: boolean
+  /** Unstaged: a tracked file was deleted from the working directory. */
+  isWtDeleted: boolean
+  /** Unstaged: a tracked file changed type in the working directory. */
+  isWtTypechange: boolean
+  /** Unstaged: a tracked file was renamed in the working directory. */
+  isWtRenamed: boolean
+  /** The file is ignored. */
+  isIgnored: boolean
+  /** The file has merge conflicts. */
+  isConflicted: boolean
+}
+
 export declare const enum ObjectType {
   /** Any kind of git object */
   Any = 0,
@@ -1369,4 +1423,32 @@ export declare const enum Sort {
    * 1 << 2
    */
   Reverse = 4
+}
+
+/**
+ * Options controlling how a working-tree status scan is performed.
+ *
+ * Every field is optional; omitted fields fall back to the git CLI defaults
+ * (`include_untracked` is `true`, everything else `false`).
+ */
+export interface StatusOptions {
+  /** Include untracked files in the status. Defaults to `true`. */
+  includeUntracked?: boolean
+  /** Include ignored files in the status. Defaults to `false`. */
+  includeIgnored?: boolean
+  /** Include unmodified files in the status. Defaults to `false`. */
+  includeUnmodified?: boolean
+  /** Skip submodules. Defaults to `false`. */
+  excludeSubmodules?: boolean
+  /**
+   * Recurse into untracked directories instead of reporting the directory
+   * itself. Defaults to `false`.
+   */
+  recurseUntrackedDirs?: boolean
+  /** Detect renames between the HEAD tree and the index. Defaults to `false`. */
+  renamesHeadToIndex?: boolean
+  /** Detect renames between the index and the working directory. Defaults to `false`. */
+  renamesIndexToWorkdir?: boolean
+  /** Restrict the scan to the given pathspecs. */
+  pathspec?: Array<string>
 }
