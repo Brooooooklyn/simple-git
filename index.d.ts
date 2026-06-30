@@ -844,6 +844,18 @@ export declare class Repository {
   revWalk(): RevWalk
   getFileLatestModifiedDate(filepath: string): number
   getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  /**
+   * Last commit that modified `filepath`, with author/committer identity.
+   * Returns `null` when no commit in history touched the path.
+   */
+  getFileLatestModification(filepath: string): FileModification | null
+  getFileLatestModificationAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
+  /**
+   * Resolve the last commit that modified each of `filepaths` in a single
+   * history walk. Every input path is a key; never-committed paths map to `null`.
+   */
+  getFilesLatestModification(filepaths: Array<string>): Record<string, FileModification | undefined | null>
+  getFilesLatestModificationAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
   getFileCreatedDate(filepath: string): number
   getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }

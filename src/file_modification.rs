@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 /// Last commit that modified a file, with author/committer identity.
