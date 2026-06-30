@@ -114,3 +114,12 @@ test("getFilesLatestModification resolves a root-only file (LICENSE)", (t) => {
   t.deepEqual(result["LICENSE"], repo.getFileLatestModification("LICENSE"));
   t.truthy(result["LICENSE"]);
 });
+
+// Test #5 — async bulk matches sync bulk.
+test("getFilesLatestModificationAsync matches sync bulk result", async (t) => {
+  const { repo } = t.context;
+  const paths = ["build.rs", "Cargo.toml", "bogus-zzz.txt"];
+  const sync = repo.getFilesLatestModification(paths);
+  const bulkAsync = await repo.getFilesLatestModificationAsync(paths);
+  t.deepEqual(bulkAsync, sync);
+});

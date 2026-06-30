@@ -124,6 +124,13 @@ pub struct GitModificationTask {
 
 unsafe impl Send for GitModificationTask {}
 
+pub struct GitBulkModificationTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  filepaths: Vec<String>,
+}
+
+unsafe impl Send for GitBulkModificationTask {}
+
 #[napi]
 impl Task for GitDateTask {
   type Output = i64;
@@ -192,6 +199,28 @@ impl Task for GitModificationTask {
         .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
         .inner,
       &self.filepath,
+    )
+    .convert_without_message()
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitBulkModificationTask {
+  type Output = HashMap<String, Option<FileModification>>;
+  type JsValue = HashMap<String, Option<FileModification>>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    get_files_modification(
+      &self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
+      &self.filepaths,
     )
     .convert_without_message()
   }
@@ -981,6 +1010,22 @@ impl Repository {
     filepaths: Vec<String>,
   ) -> Result<HashMap<String, Option<FileModification>>> {
     get_files_modification(&self.inner, &filepaths).convert_without_message()
+  }
+
+  #[napi]
+  pub fn get_files_latest_modification_async(
+    &self,
+    self_ref: Reference<Repository>,
+    filepaths: Vec<String>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitBulkModificationTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitBulkModificationTask {
+        repo: RwLock::new(self_ref),
+        filepaths,
+      },
+      signal,
+    ))
   }
 
   #[napi]
