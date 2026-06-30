@@ -114,46 +114,95 @@ pub enum RepositoryOpenFlags {
 // main thread still holds (`git2::Repository` is `Send` but NOT `Sync`). The
 // reopened handle is dropped before `compute()` returns. Because every field is
 // `Send`, these read-only tasks are auto-`Send` and need no `unsafe impl Send`.
+//
+// A reopened worker handle starts from the on-disk repository state and does
+// NOT inherit the in-memory, per-handle overrides the JS-visible `Repository`
+// carried (the active `namespace`, which redirects ref/HEAD resolution, and any
+// `workdir` override). Each task therefore captures those two on the JS thread
+// at call time (`namespace`/`workdir` fields) and re-applies them via
+// `restore_worker_handle_state` immediately after reopening — a no-op when
+// neither is set, so default repos are unaffected. Both are `Option<String>`
+// (Send), so the read tasks stay auto-`Send`.
 
 pub struct GitDateTask {
   path: String,
+  namespace: Option<String>,
+  workdir: Option<String>,
   filepath: String,
 }
 
 pub struct GitCreatedDateTask {
   path: String,
+  namespace: Option<String>,
+  workdir: Option<String>,
   filepath: String,
 }
 
 pub struct GitModificationTask {
   path: String,
+  namespace: Option<String>,
+  workdir: Option<String>,
   filepath: String,
 }
 
 pub struct GitBulkModificationTask {
   path: String,
+  namespace: Option<String>,
+  workdir: Option<String>,
   filepaths: Vec<String>,
 }
 
 pub struct GitStatusTask {
   path: String,
+  namespace: Option<String>,
+  workdir: Option<String>,
   options: Option<StatusOptions>,
 }
 
 pub struct GitBlameTask {
   path: String,
+  namespace: Option<String>,
+  workdir: Option<String>,
   filepath: String,
   options: Option<BlameOptions>,
 }
 
 pub struct GitCommitTask {
   path: String,
+  namespace: Option<String>,
+  workdir: Option<String>,
   update_ref: Option<String>,
   author: git2::Signature<'static>,
   committer: git2::Signature<'static>,
   message: String,
   tree_oid: git2::Oid,
   parents: Vec<String>,
+}
+
+/// Re-apply the in-memory, per-handle repository state that the JS-visible
+/// `Repository` carried but a freshly reopened worker handle does not inherit:
+/// the active `namespace` (redirects ref/HEAD resolution to
+/// `refs/namespaces/<ns>/…`) and any `workdir` override. Both are captured on
+/// the JS thread at call time and threaded into the task. `update_gitlink` is
+/// `false`: we only restore the in-memory override, never rewrite the gitlink.
+/// A no-op when neither is set (the common case), so default repos behave
+/// exactly as a freshly reopened handle.
+fn restore_worker_handle_state(
+  repo: &git2::Repository,
+  namespace: Option<&str>,
+  workdir: Option<&str>,
+) -> Result<()> {
+  if let Some(ns) = namespace {
+    repo
+      .set_namespace(ns)
+      .convert("Failed to restore repository namespace")?;
+  }
+  if let Some(wd) = workdir {
+    repo
+      .set_workdir(Path::new(wd), false)
+      .convert("Failed to restore repository workdir")?;
+  }
+  Ok(())
 }
 
 // SAFETY: every field is `Send` EXCEPT the two `git2::Signature<'static>`
@@ -186,6 +235,7 @@ impl Task for GitDateTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = git2::Repository::open(&self.path)
       .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_file_modification(&repo, &self.filepath)
       .convert_without_message()
       .and_then(|value| {
@@ -208,6 +258,7 @@ impl Task for GitCreatedDateTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = git2::Repository::open(&self.path)
       .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_file_created_date(&repo, &self.filepath)
       .convert_without_message()
       .and_then(|value| {
@@ -231,6 +282,7 @@ impl Task for GitModificationTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = git2::Repository::open(&self.path)
       .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_file_modification(&repo, &self.filepath).convert_without_message()
   }
 
@@ -247,6 +299,7 @@ impl Task for GitBulkModificationTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = git2::Repository::open(&self.path)
       .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_files_modification(&repo, &self.filepaths).convert_without_message()
   }
 
@@ -263,6 +316,7 @@ impl Task for GitStatusTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = git2::Repository::open(&self.path)
       .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     collect_statuses(&repo, self.options.clone())
   }
 
@@ -279,6 +333,7 @@ impl Task for GitBlameTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = git2::Repository::open(&self.path)
       .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     collect_blame(&repo, &self.filepath, self.options.clone())
   }
 
@@ -295,6 +350,7 @@ impl Task for GitCommitTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = git2::Repository::open(&self.path)
       .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     let tree = repo
       .find_tree(self.tree_oid)
       .convert(format!("Find tree from OID [{}] failed", self.tree_oid))?;
@@ -665,6 +721,7 @@ impl Repository {
     name: String,
   ) -> Option<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
+    let namespace = self.namespace();
     Some(Remote {
       inner: self_ref
         .share_with(env, move |repo| {
@@ -675,6 +732,7 @@ impl Repository {
         })
         .ok()?,
       repo_path,
+      namespace,
     })
   }
 
@@ -689,6 +747,7 @@ impl Repository {
     url: String,
   ) -> Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
+    let namespace = self.namespace();
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -697,6 +756,7 @@ impl Repository {
           .convert(format!("Failed to add remote [{}]", &name))
       })?,
       repo_path,
+      namespace,
     })
   }
 
@@ -712,6 +772,7 @@ impl Repository {
     refspec: String,
   ) -> Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
+    let namespace = self.namespace();
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -720,6 +781,7 @@ impl Repository {
           .convert("Failed to add remote")
       })?,
       repo_path,
+      namespace,
     })
   }
 
@@ -736,6 +798,7 @@ impl Repository {
     url: String,
   ) -> Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
+    let namespace = self.namespace();
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -744,6 +807,7 @@ impl Repository {
           .convert("Failed to create anonymous remote")
       })?,
       repo_path,
+      namespace,
     })
   }
 
@@ -1386,6 +1450,11 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitCommitTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: self
+          .inner
+          .workdir()
+          .map(|p| p.to_string_lossy().into_owned()),
         update_ref,
         author: author.as_ref().to_owned(),
         committer: committer.as_ref().to_owned(),
@@ -1458,6 +1527,11 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitDateTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: self
+          .inner
+          .workdir()
+          .map(|p| p.to_string_lossy().into_owned()),
         filepath,
       },
       signal,
@@ -1480,6 +1554,11 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitModificationTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: self
+          .inner
+          .workdir()
+          .map(|p| p.to_string_lossy().into_owned()),
         filepath,
       },
       signal,
@@ -1505,6 +1584,11 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitBulkModificationTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: self
+          .inner
+          .workdir()
+          .map(|p| p.to_string_lossy().into_owned()),
         filepaths,
       },
       signal,
@@ -1544,6 +1628,11 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitStatusTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: self
+          .inner
+          .workdir()
+          .map(|p| p.to_string_lossy().into_owned()),
         options,
       },
       signal,
@@ -1584,6 +1673,11 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitBlameTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: self
+          .inner
+          .workdir()
+          .map(|p| p.to_string_lossy().into_owned()),
         filepath: path,
         options,
       },
@@ -1609,6 +1703,11 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitCreatedDateTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: self
+          .inner
+          .workdir()
+          .map(|p| p.to_string_lossy().into_owned()),
         filepath,
       },
       signal,

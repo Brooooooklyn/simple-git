@@ -1,7 +1,13 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import test from "ava";
 
@@ -169,6 +175,129 @@ test("FetchOptions.customHeaders rejects an interior NUL byte instead of crashin
   t.regex(err.message, /NUL byte/);
   // Valid headers still flow through, and the setter chains (returns `this`).
   t.is(options.customHeaders(["X-Ok: 1"]), options);
+});
+
+// libgit2 stores namespaced refs under `<gitdir>/refs/namespaces/<ns>/…`
+// (including a per-namespace `HEAD`). Git's own `GIT_NAMESPACE` is
+// transport-oriented and does NOT resolve that layout for local plumbing, so
+// the helper seeds the on-disk files directly and reads them back by their full
+// ref path. `ref` is relative to the namespace root (e.g. `refs/heads/main`).
+const nsRefPath = (work, ns, ref) =>
+  join(work, ".git", "refs", "namespaces", ns, ref);
+const writeNsRef = (work, ns, ref, content) => {
+  const p = nsRefPath(work, ns, ref);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, content);
+};
+
+// REGRESSION GUARD: an async worker reopens a fresh git2 handle that does NOT
+// inherit the JS handle's in-memory namespace. Before the fix, commitAsync
+// wrote the NON-namespaced ref; sync commit() respects the namespace. With an
+// active namespace, commitAsync must write under refs/namespaces/<ns>/…
+// (FAILS pre-fix, PASSES post-fix).
+test("commitAsync respects an active namespace", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-commit-async-ns-"));
+  const work = join(root, "work");
+  try {
+    execSync(`git init -q -b main "${work}"`);
+    const run = (args) => execSync(`git ${args}`, { cwd: work });
+    run("config user.name tester");
+    run("config user.email tester@example.com");
+    run("config commit.gpgsign false");
+    run("config core.autocrlf false");
+    writeFileSync(join(work, "file.txt"), "hello\n");
+    run("add file.txt");
+    run('commit -q -m "initial commit"');
+    const base = workRev(work, "HEAD");
+
+    // Give the namespace its own HEAD + branch so libgit2 can resolve HEAD when
+    // committing inside it (a commit always resolves HEAD for its reflog).
+    writeNsRef(work, "tenant", "HEAD", "ref: refs/heads/main\n");
+    writeNsRef(work, "tenant", "refs/heads/main", `${base}\n`);
+
+    const repo = new Repository(work);
+    repo.setNamespace("tenant");
+
+    const author = sig();
+    writeFileSync(join(work, "b.txt"), "beta\n");
+    const index = repo.index();
+    index.addAll();
+    index.write();
+    const tree = repo.findTree(index.writeTree());
+
+    const oid = await repo.commitAsync(
+      "refs/heads/feature",
+      author,
+      author,
+      "namespaced async commit",
+      tree,
+      [base],
+    );
+
+    // The ref landed inside the namespace, resolving to the new commit...
+    t.is(
+      workRev(work, "refs/namespaces/tenant/refs/heads/feature"),
+      oid,
+    );
+    // ...and NOT at the non-namespaced path (the pre-fix behaviour).
+    t.false(existsSync(join(work, ".git/refs/heads/feature")));
+    t.throws(() =>
+      execSync('git rev-parse --verify --quiet "refs/heads/feature"', {
+        cwd: work,
+      }),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// REGRESSION GUARD (Remote path): pushAsync reopens a worker handle that must
+// re-apply the parent repo's namespace, so the refspec SOURCE resolves through
+// the namespace just like sync push. Here the namespaced `refs/heads/main` and
+// the non-namespaced one point at DIFFERENT commits; pushing must send the
+// namespaced commit. Before the fix the worker dropped the namespace and pushed
+// the non-namespaced commit instead.
+test("pushAsync resolves the refspec source through an active namespace", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-ns-"));
+  try {
+    const bare = join(root, "remote.git");
+    const work = join(root, "work");
+    execSync(`git init -q --bare -b main "${bare}"`);
+    execSync(`git init -q -b main "${work}"`);
+    const run = (args) => execSync(`git ${args}`, { cwd: work });
+    run("config user.name tester");
+    run("config user.email tester@example.com");
+    run("config commit.gpgsign false");
+    run("config core.autocrlf false");
+
+    // First commit C1 on the non-namespaced main.
+    writeFileSync(join(work, "file.txt"), "hello\n");
+    run("add file.txt");
+    run('commit -q -m "first"');
+    const c1 = workRev(work, "HEAD");
+
+    // Second commit C2 on top, then rewind non-namespaced main back to C1 so the
+    // two ref spaces diverge: plain main = C1, namespaced main = C2.
+    writeFileSync(join(work, "file.txt"), "hello again\n");
+    run("add file.txt");
+    run('commit -q -m "second"');
+    const c2 = workRev(work, "HEAD");
+    run(`update-ref refs/heads/main ${c1}`);
+    run(`update-ref refs/namespaces/tenant/refs/heads/main ${c2}`);
+
+    run(`remote add origin "${bare}"`);
+
+    const repo = new Repository(work);
+    repo.setNamespace("tenant");
+    const remote = repo.findRemote("origin");
+    await remote.pushAsync(["refs/heads/main:refs/heads/main"], null);
+
+    // The remote received the NAMESPACED source commit, not the plain one.
+    t.is(bareRev(bare, "refs/heads/main"), c2);
+    t.not(c1, c2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // fetchAsync updates a remote-tracking ref, like the sync fetch.

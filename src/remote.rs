@@ -155,6 +155,19 @@ pub struct Remote {
   /// the remote there instead of moving the JS-visible handle off-thread. Not a
   /// `#[napi]` field, so it is invisible to the JS surface.
   pub(crate) repo_path: String,
+  /// The owning repository's active namespace (`Repository::namespace()`),
+  /// captured at remote-CREATION time on the JS thread. The namespace is
+  /// in-memory per-handle state on the parent `Repository`, and a worker that
+  /// reopens the repo from `repo_path` would otherwise resolve/write the
+  /// NON-namespaced refs. The async `fetch`/`push` workers re-apply this before
+  /// resolving the remote so ref updates land in `refs/namespaces/<ns>/…`.
+  /// CAVEAT: it is captured when this `Remote` is constructed; the (rare) case
+  /// of `setNamespace` changing between `findRemote()` and the async call uses
+  /// the creation-time namespace. The common case (namespace set before/at
+  /// remote creation) is exact. This is acceptable because there is no live
+  /// parent-repo handle available inside the `Remote` at async-call time. Not a
+  /// `#[napi]` field, so it is invisible to the JS surface.
+  pub(crate) namespace: Option<String>,
 }
 
 #[napi]
@@ -329,6 +342,7 @@ impl Remote {
     Ok(AsyncTask::with_optional_signal(
       RemoteFetchTask {
         repo_path: self.repo_path.clone(),
+        namespace: self.namespace.clone(),
         remote_name: self.inner.name().ok().flatten().map(|s| s.to_owned()),
         remote_url: self.inner.url().ok().map(|s| s.to_owned()),
         refspecs,
@@ -380,6 +394,7 @@ impl Remote {
     Ok(AsyncTask::with_optional_signal(
       RemotePushTask {
         repo_path: self.repo_path.clone(),
+        namespace: self.namespace.clone(),
         remote_name: self.inner.name().ok().flatten().map(|s| s.to_owned()),
         remote_url: self.inner.url().ok().map(|s| s.to_owned()),
         refspecs,
@@ -416,6 +431,10 @@ impl Remote {
 
 pub struct RemoteFetchTask {
   repo_path: String,
+  /// Active namespace of the owning repo, captured at remote-creation time (see
+  /// `Remote::namespace`). Re-applied to the reopened worker handle before the
+  /// remote is resolved so fetched refs land in `refs/namespaces/<ns>/…`.
+  namespace: Option<String>,
   remote_name: Option<String>,
   remote_url: Option<String>,
   refspecs: Vec<String>,
@@ -443,6 +462,14 @@ impl Task for RemoteFetchTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = git2::Repository::open(&self.repo_path)
       .convert(format!("Failed to open git repo: [{}]", self.repo_path))?;
+    // Restore the parent repo's namespace before resolving the remote so the
+    // reopened worker handle resolves/updates the namespaced refs, matching
+    // sync `fetch`.
+    if let Some(ns) = &self.namespace {
+      repo
+        .set_namespace(ns)
+        .convert("Failed to restore repository namespace")?;
+    }
     let mut remote = match &self.remote_name {
       Some(name) => repo.find_remote(name),
       None => repo.remote_anonymous(self.remote_url.as_deref().unwrap_or_default()),
@@ -461,6 +488,10 @@ impl Task for RemoteFetchTask {
 
 pub struct RemotePushTask {
   repo_path: String,
+  /// Active namespace of the owning repo, captured at remote-creation time (see
+  /// `Remote::namespace`). Re-applied to the reopened worker handle before the
+  /// remote is resolved so pushed refs resolve under `refs/namespaces/<ns>/…`.
+  namespace: Option<String>,
   remote_name: Option<String>,
   remote_url: Option<String>,
   refspecs: Vec<String>,
@@ -485,6 +516,13 @@ impl Task for RemotePushTask {
   fn compute(&mut self) -> napi::Result<Self::Output> {
     let repo = git2::Repository::open(&self.repo_path)
       .convert(format!("Failed to open git repo: [{}]", self.repo_path))?;
+    // Restore the parent repo's namespace before resolving the remote so the
+    // reopened worker handle resolves the namespaced refs, matching sync `push`.
+    if let Some(ns) = &self.namespace {
+      repo
+        .set_namespace(ns)
+        .convert("Failed to restore repository namespace")?;
+    }
     let mut remote = match &self.remote_name {
       Some(name) => repo.find_remote(name),
       None => repo.remote_anonymous(self.remote_url.as_deref().unwrap_or_default()),
