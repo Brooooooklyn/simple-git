@@ -424,7 +424,11 @@ export declare class FetchOptions {
    * (`/info/refs`), but not subsequent requests.
    */
   followRedirects(opt: RemoteRedirect): this
-  /** Set extra headers for this fetch operation. */
+  /**
+   * Set extra headers for this fetch operation.
+   *
+   * Throws if any header contains an interior NUL byte.
+   */
   customHeaders(headers: Array<string>): this
 }
 

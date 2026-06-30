@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "ava";
 
 import {
+  FetchOptions,
   PushOptions,
   RemoteCallbacks,
   Repository,
@@ -156,6 +157,18 @@ test("pushAsync rejects PushOptions carrying RemoteCallbacks", (t) => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// A fetch custom header containing an interior NUL byte must surface as a
+// thrown JS error, NOT a panic: git2 builds a CString from each header with an
+// internal unwrap that would otherwise abort the whole Node process (this crate
+// does not opt into catch_unwind). Mirrors PushOptions.customHeaders.
+test("FetchOptions.customHeaders rejects an interior NUL byte instead of crashing", (t) => {
+  const options = new FetchOptions();
+  const err = t.throws(() => options.customHeaders(["X-Ok: 1", "X-Bad: a\0b"]));
+  t.regex(err.message, /NUL byte/);
+  // Valid headers still flow through, and the setter chains (returns `this`).
+  t.is(options.customHeaders(["X-Ok: 1"]), options);
 });
 
 // fetchAsync updates a remote-tracking ref, like the sync fetch.

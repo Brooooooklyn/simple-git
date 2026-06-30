@@ -748,11 +748,14 @@ impl FetchOptions {
 
   #[napi]
   /// Set extra headers for this fetch operation.
-  pub fn custom_headers(&mut self, headers: Vec<String>) -> &Self {
+  ///
+  /// Throws if any header contains an interior NUL byte.
+  pub fn custom_headers(&mut self, headers: Vec<String>) -> Result<&Self> {
+    reject_interior_nul(&headers, "custom header")?;
     self
       .inner
       .custom_headers(&headers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-    self
+    Ok(self)
   }
 }
 
