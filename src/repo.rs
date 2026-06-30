@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 use crate::commit::{Commit, CommitInner};
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
+use crate::file_modification::get_file_modification;
 use crate::object::{GitObject, ObjectParent};
 use crate::reference;
 use crate::remote::Remote;
@@ -121,7 +122,7 @@ impl Task for GitDateTask {
   type JsValue = i64;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_modified_date(
+    get_file_modification(
       &self
         .repo
         .read()
@@ -131,7 +132,9 @@ impl Task for GitDateTask {
     )
     .convert_without_message()
     .and_then(|value| {
-      value.expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
+      value
+        .map(|m| m.timestamp)
+        .expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
     })
   }
 
@@ -889,9 +892,13 @@ impl Repository {
 
   #[napi]
   pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<i64> {
-    get_file_modified_date(&self.inner, &filepath)
+    get_file_modification(&self.inner, &filepath)
       .convert_without_message()
-      .and_then(|value| value.expect_not_null(format!("Failed to get commit for [{filepath}]")))
+      .and_then(|value| {
+        value
+          .map(|m| m.timestamp)
+          .expect_not_null(format!("Failed to get commit for [{filepath}]"))
+      })
   }
 
   #[napi]
@@ -934,52 +941,6 @@ impl Repository {
       signal,
     ))
   }
-}
-
-fn get_file_modified_date(
-  repo: &git2::Repository,
-  filepath: &str,
-) -> std::result::Result<Option<i64>, git2::Error> {
-  let mut diff_options = git2::DiffOptions::new();
-  diff_options.disable_pathspec_match(false);
-  diff_options.pathspec(filepath);
-  let mut rev_walk = repo.revwalk()?;
-  rev_walk.push_head()?;
-  rev_walk.set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)?;
-  let path = PathBuf::from(filepath);
-  Ok(
-    rev_walk
-      .by_ref()
-      .filter_map(|oid| oid.ok())
-      .find_map(|oid| {
-        let commit = repo.find_commit(oid).ok()?;
-        match commit.parent_count() {
-          // commit with parent
-          1 => {
-            let tree = commit.tree().ok()?;
-            if let Ok(parent) = commit.parent(0) {
-              let parent_tree = parent.tree().ok()?;
-              if let Ok(diff) =
-                repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))
-                && diff.deltas().len() > 0
-              {
-                return Some(commit.time().seconds() * 1000);
-              }
-            }
-          }
-          // root commit
-          0 => {
-            let tree = commit.tree().ok()?;
-            if tree.get_path(&path).is_ok() {
-              return Some(commit.time().seconds() * 1000);
-            }
-          }
-          // ignore merge commits
-          _ => {}
-        };
-        None
-      }),
-  )
 }
 
 fn get_file_created_date(
