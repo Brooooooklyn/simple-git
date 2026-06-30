@@ -372,7 +372,7 @@ impl Repository {
   /// If there is no namespace, or the namespace is not a valid utf8 string,
   /// `None` is returned.
   pub fn namespace(&self) -> Option<String> {
-    self.inner.namespace().map(|n| n.to_owned())
+    self.inner.namespace().ok().flatten().map(|n| n.to_owned())
   }
 
   #[napi]
@@ -420,8 +420,7 @@ impl Repository {
       .map(|remotes| {
         remotes
           .into_iter()
-          .flatten()
-          .map(|name| name.to_owned())
+          .filter_map(|name| name.ok().flatten().map(|name| name.to_owned()))
           .collect()
       })
       .convert("Fetch remotes failed")
@@ -531,8 +530,7 @@ impl Repository {
         .remote_rename(&name, &new_name)
         .convert(format!("Failed to rename remote [{}]", &name))?
         .into_iter()
-        .flatten()
-        .map(|s| s.to_owned())
+        .filter_map(|s| s.ok().flatten().map(|s| s.to_owned()))
         .collect::<Vec<_>>(),
     )
   }
@@ -754,7 +752,7 @@ impl Repository {
       .map(|tags| {
         tags
           .into_iter()
-          .filter_map(|s| s.map(|s| s.to_owned()))
+          .filter_map(|s| s.ok().flatten().map(|s| s.to_owned()))
           .collect()
       })
   }

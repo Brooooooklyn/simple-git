@@ -85,7 +85,7 @@ impl Reference {
   ///
   /// Returns `None` if the name is not valid utf-8.
   pub fn name(&self) -> Option<String> {
-    self.inner.name().map(|s| s.to_string())
+    self.inner.name().ok().map(|s| s.to_string())
   }
 
   #[napi]
@@ -96,7 +96,7 @@ impl Reference {
   ///
   /// Returns `None` if the shorthand is not valid utf-8.
   pub fn shorthand(&self) -> Option<String> {
-    self.inner.shorthand().map(|s| s.to_string())
+    self.inner.shorthand().ok().map(|s| s.to_string())
   }
 
   #[napi]
@@ -140,7 +140,12 @@ impl Reference {
   /// May return `None` if the reference is either not symbolic or not a
   /// valid utf-8 string.
   pub fn symbolic_target(&self) -> Option<String> {
-    self.inner.symbolic_target().map(|s| s.to_owned())
+    self
+      .inner
+      .symbolic_target()
+      .ok()
+      .flatten()
+      .map(|s| s.to_owned())
   }
 
   #[napi]

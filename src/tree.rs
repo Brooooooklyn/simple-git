@@ -193,6 +193,7 @@ impl TreeEntry {
     self
       .inner
       .name()
+      .ok()
       .ok_or_else(|| Error::from_reason("Invalid utf-8"))
   }
 

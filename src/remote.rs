@@ -200,7 +200,7 @@ impl Remote {
   /// Returns `None` if this remote has not yet been named or if the name is
   /// not valid utf-8
   pub fn name(&self) -> Option<&str> {
-    self.inner.name()
+    self.inner.name().ok().flatten()
   }
 
   #[napi]
@@ -208,7 +208,7 @@ impl Remote {
   ///
   /// Returns `None` if the url is not valid utf-8
   pub fn url(&self) -> Option<&str> {
-    self.inner.url()
+    self.inner.url().ok()
   }
 
   #[napi]
@@ -216,7 +216,7 @@ impl Remote {
   ///
   /// Returns `None` if the pushurl is not valid utf-8
   pub fn pushurl(&self) -> Option<&str> {
-    self.inner.pushurl()
+    self.inner.pushurl().ok().flatten()
   }
 
   #[napi]
@@ -232,7 +232,7 @@ impl Remote {
       .default_branch()
       .convert("Get the default branch of Remote failed")
       .and_then(|b| {
-        b.as_str().map(|name| name.to_owned()).ok_or_else(|| {
+        b.as_str().ok().map(|name| name.to_owned()).ok_or_else(|| {
           Error::new(
             Status::GenericFailure,
             "Default branch name contains non-utf-8 characters".to_string(),

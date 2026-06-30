@@ -29,7 +29,7 @@ impl Tag {
   ///
   /// Returns None if there is no message or if it is not valid utf8
   pub fn message(&self) -> Option<String> {
-    self.inner.message().map(|s| s.to_string())
+    self.inner.message().ok().flatten().map(|s| s.to_string())
   }
 
   #[napi]
@@ -45,7 +45,7 @@ impl Tag {
   ///
   /// Returns None if it is not valid utf8
   pub fn name(&self) -> Option<String> {
-    self.inner.name().map(|s| s.to_string())
+    self.inner.name().ok().map(|s| s.to_string())
   }
 
   #[napi]
