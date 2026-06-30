@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -8,7 +9,7 @@ use once_cell::sync::Lazy;
 use crate::commit::{Commit, CommitInner};
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
-use crate::file_modification::{FileModification, get_file_modification};
+use crate::file_modification::{FileModification, get_file_modification, get_files_modification};
 use crate::object::{GitObject, ObjectParent};
 use crate::reference;
 use crate::remote::Remote;
@@ -970,6 +971,16 @@ impl Repository {
       },
       signal,
     ))
+  }
+
+  #[napi]
+  /// Resolve the last commit that modified each of `filepaths` in a single
+  /// history walk. Every input path is a key; never-committed paths map to `null`.
+  pub fn get_files_latest_modification(
+    &self,
+    filepaths: Vec<String>,
+  ) -> Result<HashMap<String, Option<FileModification>>> {
+    get_files_modification(&self.inner, &filepaths).convert_without_message()
   }
 
   #[napi]

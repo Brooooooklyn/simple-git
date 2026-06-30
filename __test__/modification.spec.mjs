@@ -74,3 +74,43 @@ test("getFileLatestModification resolves a file whose only commit is the root", 
   t.regex(mod.commitId, /^[0-9a-f]{40}$/);
   t.is(mod.timestamp, repo.getFileLatestModifiedDate("LICENSE"));
 });
+
+// Test #4 — bulk resolves many paths in one pass; cross-validate vs single-file.
+test("getFilesLatestModification resolves many paths in one pass", (t) => {
+  const { repo } = t.context;
+  const result = repo.getFilesLatestModification([
+    "build.rs",
+    "Cargo.toml",
+    "bogus-zzz.txt",
+  ]);
+  t.deepEqual(
+    Object.keys(result).sort(),
+    ["Cargo.toml", "bogus-zzz.txt", "build.rs"],
+  );
+  t.deepEqual(result["build.rs"], repo.getFileLatestModification("build.rs"));
+  t.deepEqual(result["Cargo.toml"], repo.getFileLatestModification("Cargo.toml"));
+  t.is(result["bogus-zzz.txt"], null);
+});
+
+// Empty input -> {} (exercises the early-return branch + empty-Record serialization).
+test("getFilesLatestModification returns {} for empty input", (t) => {
+  const { repo } = t.context;
+  t.deepEqual(repo.getFilesLatestModification([]), {});
+});
+
+// Nested forward-slash path: exact-string match against git's forward-slash delta path.
+// Use a literal "src/lib.rs" (NOT path.join, which yields backslashes on Windows).
+test("getFilesLatestModification matches a nested forward-slash path", (t) => {
+  const { repo } = t.context;
+  const result = repo.getFilesLatestModification(["src/lib.rs"]);
+  t.deepEqual(result["src/lib.rs"], repo.getFileLatestModification("src/lib.rs"));
+  t.truthy(result["src/lib.rs"]);
+});
+
+// Root-commit branch in the bulk walk, cross-validated vs single-file.
+test("getFilesLatestModification resolves a root-only file (LICENSE)", (t) => {
+  const { repo } = t.context;
+  const result = repo.getFilesLatestModification(["LICENSE"]);
+  t.deepEqual(result["LICENSE"], repo.getFileLatestModification("LICENSE"));
+  t.truthy(result["LICENSE"]);
+});
