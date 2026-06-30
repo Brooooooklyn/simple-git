@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use crate::commit::{Commit, CommitInner};
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
-use crate::file_modification::get_file_modification;
+use crate::file_modification::{FileModification, get_file_modification};
 use crate::object::{GitObject, ObjectParent};
 use crate::reference;
 use crate::remote::Remote;
@@ -915,6 +915,16 @@ impl Repository {
       },
       signal,
     ))
+  }
+
+  #[napi]
+  /// Last commit that modified `filepath`, with author/committer identity.
+  /// Returns `null` when no commit in history touched the path.
+  pub fn get_file_latest_modification(
+    &self,
+    filepath: String,
+  ) -> Result<Option<FileModification>> {
+    get_file_modification(&self.inner, &filepath).convert_without_message()
   }
 
   #[napi]
