@@ -905,12 +905,12 @@ export declare class Repository {
   /** Remove the active namespace for this repository. */
   removeNamespace(): void
   /**
-   * Retrieves the Git merge message.
+   * Retrieves the Git merge message (the contents of `.git/MERGE_MSG`).
    * Remember to remove the message when finished.
    */
-  message(): string
-  /** Remove the Git merge message. */
-  removeMessage(): void
+  mergeMessage(): string
+  /** Remove the Git merge message (`.git/MERGE_MSG`). */
+  removeMergeMessage(): void
   /** List all remotes for a given repository */
   remotes(): Array<string>
   /** Get the information for a particular remote */
@@ -924,7 +924,7 @@ export declare class Repository {
    * Add a remote with the provided fetch refspec to the repository's
    * configuration.
    */
-  remoteWithFetch(name: string, url: string, refspect: string): Remote
+  remoteWithFetch(name: string, url: string, refspec: string): Remote
   /**
    * Create an anonymous remote
    *
@@ -1089,7 +1089,7 @@ export declare class Repository {
    * '~', '^', ':', ' \ ', '?', '[', and '*', and the sequences ".." and " @
    * {" which have special meaning to revparse.
    */
-  tagAnnotationCreate(name: string, target: GitObject, tagger: Signature, message: string): string
+  tagAnnotation(name: string, target: GitObject, tagger: Signature, message: string): string
   /**
    * Create a new lightweight tag pointing at a target object
    *
@@ -1098,10 +1098,18 @@ export declare class Repository {
    * it'll be replaced.
    */
   tagLightweight(name: string, target: GitObject, force: boolean): string
-  /** Lookup a tag object from the repository. */
-  findTag(oid: string): Tag
-  /** Lookup a tag object by prefix hash from the repository. */
-  findTagByPrefix(prefixHash: string): Tag
+  /**
+   * Lookup a tag object from the repository.
+   *
+   * Returns `null` when no tag object with that OID exists.
+   */
+  findTag(oid: string): Tag | null
+  /**
+   * Lookup a tag object by prefix hash from the repository.
+   *
+   * Returns `null` when no tag object matches the prefix.
+   */
+  findTagByPrefix(prefixHash: string): Tag | null
   /**
    * Delete an existing tag reference.
    *
@@ -1150,7 +1158,6 @@ export declare class Repository {
    * single diff that includes staged deleted, etc.
    */
   diffTreeToWorkdirWithIndex(oldTree?: Tree | undefined | null): Diff
-  treeEntryToObject(treeEntry: TreeEntry): GitObject
   /**
    * Create new commit in the repository
    *

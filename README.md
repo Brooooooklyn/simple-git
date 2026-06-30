@@ -161,6 +161,20 @@ export class Repository {
   blameLine(path: string, lineNo: number, options?: BlameOptions | undefined | null): BlameHunk | null
   /** Asynchronous variant of `blameFile`, computed off the main thread. */
   blameFileAsync(path: string, options?: BlameOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<BlameHunk>>
+  /** Create an annotated tag (and its ref); returns the new tag object's OID. */
+  tag(name: string, target: GitObject, tagger: Signature, message: string, force: boolean): string
+  /** Create an annotated tag object WITHOUT a ref; returns its OID. */
+  tagAnnotation(name: string, target: GitObject, tagger: Signature, message: string): string
+  /** Lookup a tag object by OID; `null` when it does not exist. */
+  findTag(oid: string): Tag | null
+  /** Lookup a tag object by hash prefix; `null` when no tag matches. */
+  findTagByPrefix(prefixHash: string): Tag | null
+  /** Read libgit2's merge message (`.git/MERGE_MSG`). */
+  mergeMessage(): string
+  /** Remove the merge message (`.git/MERGE_MSG`). */
+  removeMergeMessage(): void
+  /** Add a remote with the provided fetch refspec to the configuration. */
+  remoteWithFetch(name: string, url: string, refspec: string): Remote
 }
 
 /**

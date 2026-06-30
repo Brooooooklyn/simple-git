@@ -18,14 +18,14 @@ use crate::file_modification::{
   FileModification, get_file_modification, get_files_modification, time_to_date,
 };
 use crate::index::Index;
-use crate::object::{GitObject, ObjectParent};
+use crate::object::GitObject;
 use crate::reference;
 use crate::remote::Remote;
 use crate::rev_walk::RevWalk;
 use crate::signature::Signature;
 use crate::status::{FileStatus, StatusOptions, build_status_opts, status_from_bits};
 use crate::tag::Tag;
-use crate::tree::{Tree, TreeEntry, TreeParent};
+use crate::tree::{Tree, TreeParent};
 use crate::util::path_to_javascript_string;
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
@@ -541,9 +541,9 @@ impl Repository {
   }
 
   #[napi]
-  /// Retrieves the Git merge message.
+  /// Retrieves the Git merge message (the contents of `.git/MERGE_MSG`).
   /// Remember to remove the message when finished.
-  pub fn message(&self) -> Result<String> {
+  pub fn merge_message(&self) -> Result<String> {
     self
       .inner
       .message()
@@ -551,8 +551,8 @@ impl Repository {
   }
 
   #[napi]
-  /// Remove the Git merge message.
-  pub fn remove_message(&self) -> Result<()> {
+  /// Remove the Git merge message (`.git/MERGE_MSG`).
+  pub fn remove_merge_message(&self) -> Result<()> {
     self
       .inner
       .remove_message()
@@ -623,13 +623,13 @@ impl Repository {
     this: Reference<Repository>,
     name: String,
     url: String,
-    refspect: String,
+    refspec: String,
   ) -> Result<Remote> {
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
           .inner
-          .remote_with_fetch(&name, &url, &refspect)
+          .remote_with_fetch(&name, &url, &refspec)
           .convert("Failed to add remote")
       })?,
     })
@@ -1031,7 +1031,7 @@ impl Repository {
   /// The tag name will be checked for validity. You must avoid the characters
   /// '~', '^', ':', ' \ ', '?', '[', and '*', and the sequences ".." and " @
   /// {" which have special meaning to revparse.
-  pub fn tag_annotation_create(
+  pub fn tag_annotation(
     &self,
     name: String,
     target: &GitObject,
@@ -1061,33 +1061,57 @@ impl Repository {
 
   #[napi]
   /// Lookup a tag object from the repository.
-  pub fn find_tag(&self, env: Env, this: Reference<Repository>, oid: String) -> Result<Tag> {
-    Ok(Tag {
-      inner: this.share_with(env, |repo| {
-        repo
-          .inner
-          .find_tag(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?)
-          .convert(format!("Find tag from OID [{oid}] failed"))
-      })?,
-    })
+  ///
+  /// Returns `null` when no tag object with that OID exists.
+  pub fn find_tag(
+    &self,
+    env: Env,
+    this: Reference<Repository>,
+    oid: String,
+  ) -> Result<Option<Tag>> {
+    let oid = git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?;
+    // Probe first so a genuine "not found" maps to `None` while other errors
+    // surface, and the `SharedReference` is only built when the tag exists.
+    if let Err(err) = self.inner.find_tag(oid) {
+      if err.code() == git2::ErrorCode::NotFound {
+        return Ok(None);
+      }
+      return Err(err).convert(format!("Find tag from OID [{oid}] failed"));
+    }
+    let inner = this.share_with(env, move |repo| {
+      repo
+        .inner
+        .find_tag(oid)
+        .convert(format!("Find tag from OID [{oid}] failed"))
+    })?;
+    Ok(Some(Tag { inner }))
   }
 
   #[napi]
   /// Lookup a tag object by prefix hash from the repository.
+  ///
+  /// Returns `null` when no tag object matches the prefix.
   pub fn find_tag_by_prefix(
     &self,
     env: Env,
     this: Reference<Repository>,
     prefix_hash: String,
-  ) -> Result<Tag> {
-    Ok(Tag {
-      inner: this.share_with(env, |repo| {
-        repo
-          .inner
-          .find_tag_by_prefix(&prefix_hash)
-          .convert(format!("Find tag from OID [{prefix_hash}] failed"))
-      })?,
-    })
+  ) -> Result<Option<Tag>> {
+    // Probe first so a genuine "not found" maps to `None` while other errors
+    // surface, and the `SharedReference` is only built when the tag exists.
+    if let Err(err) = self.inner.find_tag_by_prefix(&prefix_hash) {
+      if err.code() == git2::ErrorCode::NotFound {
+        return Ok(None);
+      }
+      return Err(err).convert(format!("Find tag from OID [{prefix_hash}] failed"));
+    }
+    let inner = this.share_with(env, move |repo| {
+      repo
+        .inner
+        .find_tag_by_prefix(&prefix_hash)
+        .convert(format!("Find tag from OID [{prefix_hash}] failed"))
+    })?;
+    Ok(Some(Tag { inner }))
   }
 
   #[napi]
@@ -1188,23 +1212,6 @@ impl Repository {
           .diff_tree_to_workdir_with_index(old_tree.map(|t| t.inner()), Some(&mut diff_options))
           .convert_without_message()
       })?,
-    })
-  }
-
-  #[napi]
-  pub fn tree_entry_to_object(
-    &self,
-    tree_entry: &TreeEntry,
-    this_ref: Reference<Repository>,
-    env: Env,
-  ) -> Result<GitObject> {
-    Ok(GitObject {
-      inner: ObjectParent::Repository(this_ref.share_with(env, |repo| {
-        tree_entry
-          .inner
-          .to_object(&repo.inner)
-          .convert_without_message()
-      })?),
     })
   }
 
