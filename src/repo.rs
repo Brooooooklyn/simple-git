@@ -979,10 +979,7 @@ impl Repository {
   #[napi]
   /// Last commit that modified `filepath`, with author/committer identity.
   /// Returns `null` when no commit in history touched the path.
-  pub fn get_file_latest_modification(
-    &self,
-    filepath: String,
-  ) -> Result<Option<FileModification>> {
+  pub fn get_file_latest_modification(&self, filepath: String) -> Result<Option<FileModification>> {
     get_file_modification(&self.inner, &filepath).convert_without_message()
   }
 
