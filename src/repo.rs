@@ -1061,7 +1061,10 @@ fn get_file_created_date(
   // TODO: Add rename detection support using git2::DiffFindOptions for full `git log --follow` semantics
   let mut rev_walk = repo.revwalk()?;
   rev_walk.push_head()?;
-  rev_walk.set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)?;
+  // Sort::TIME | Sort::TOPOLOGICAL (newest-first): the walk overwrites the
+  // recorded time for each commit that still contains the file, so the last
+  // one visited -- the oldest containing commit -- is the creation commit.
+  rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
   let path = PathBuf::from(filepath);
 
   let mut earliest_commit_time: Option<i64> = None;

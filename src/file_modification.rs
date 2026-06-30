@@ -45,9 +45,11 @@ pub(crate) fn build_modification(commit: &git2::Commit) -> FileModification {
   }
 }
 
-/// Single-file walk. Mirrors the legacy repo.rs get_file_modified_date EXACTLY
-/// (same revwalk, sort flag, pathspec, diff direction, merge-skip, root-commit
-/// handling); only the returned value differs (struct instead of i64).
+/// Single-file walk: find the most recent commit that modified `filepath`.
+/// Walks history from HEAD in time-topological order (newest first), diffing
+/// each commit against its parent under a pathspec, and returns the first hit.
+/// (Refactored from the legacy repo.rs get_file_modified_date; only the
+/// returned value differs -- a struct instead of the bare i64.)
 pub(crate) fn get_file_modification(
   repo: &git2::Repository,
   filepath: &str,
@@ -57,7 +59,9 @@ pub(crate) fn get_file_modification(
   diff_options.pathspec(filepath);
   let mut rev_walk = repo.revwalk()?;
   rev_walk.push_head()?;
-  rev_walk.set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)?;
+  // Sort::TIME | Sort::TOPOLOGICAL: newest commits first (git-log order), so the
+  // first commit whose diff touches the path is its latest modification.
+  rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
   let path = PathBuf::from(filepath);
   Ok(
     rev_walk
@@ -98,10 +102,9 @@ pub(crate) fn get_file_modification(
 /// SINGLE history walk. Inputs must be repo-root-relative FILE paths (not
 /// directories): matching is exact-string against an `unresolved` set, NOT
 /// glob/pathspec semantics. Every input path is a key; never-committed paths
-/// map to `None`. First hit in revwalk order wins; "last modified" correctness
-/// rests on parity with the legacy single-file walk (guarded by the git-CLI
-/// parity tests), NOT on an explicit time sort -- see the `set_sorting` note
-/// below. Early-exit when `unresolved` empties.
+/// map to `None`. Walks newest-first (time-topological), so the first commit
+/// whose diff touches a path is that path's latest modification; early-exit
+/// once `unresolved` empties.
 pub(crate) fn get_files_modification(
   repo: &git2::Repository,
   filepaths: &[String],
@@ -122,12 +125,8 @@ pub(crate) fn get_files_modification(
 
   let mut rev_walk = repo.revwalk()?;
   rev_walk.push_head()?;
-  // NOTE: `Sort::TIME & Sort::TOPOLOGICAL` is a bitwise-AND of disjoint flags
-  // (TIME=2, TOPOLOGICAL=1) and so equals `Sort::NONE` -- libgit2's default
-  // order, NOT a time sort. Preserved verbatim from the legacy single-file
-  // walk so both resolve a path identically; "newest-wins" holds empirically
-  // via HEAD-first parent traversal and is guarded by the git-CLI parity tests.
-  rev_walk.set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)?;
+  // Same newest-first (time-topological) order as the single-file walk.
+  rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
 
   for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
     if unresolved.is_empty() {
