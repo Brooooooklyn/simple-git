@@ -21,6 +21,23 @@ console.log(timestamp) // 2022-03-13T12:47:47.920Z
 const timestampFromAsync = new Date(await repo.getFileLatestModifiedDateAsync('build.rs')) // Async version of `getFileLatestModifiedDate`
 
 console.log(timestamp) // 2022-03-13T12:47:47.920Z
+
+// Enriched metadata for the last commit that touched a file.
+// Returns `null` (does **not** throw) when the path has no commit history.
+const mod = repo.getFileLatestModification('build.rs')
+if (mod) {
+  console.log(mod.authorName, mod.authorEmail) // 'LongYinan' 'github@lyn.one'
+  console.log(new Date(mod.timestamp)) // `timestamp` === `committerTime`, ms since epoch
+  console.log(mod.commitId, mod.summary)
+}
+
+// Bulk: resolve many files in a single history walk (early-exits once all are found).
+// Every input path is present as a key; a never-committed path maps to `null`.
+const mods = repo.getFilesLatestModification(['build.rs', 'Cargo.toml'])
+console.log(mods['build.rs']?.committerName)
+console.log(mods['Cargo.toml']?.timestamp)
+// Empty input returns `{}`:
+console.log(repo.getFilesLatestModification([])) // {}
 ```
 
 ### API
@@ -32,7 +49,44 @@ export class Repository {
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
   getFileLatestModifiedDate(filepath: string): number
-  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<unknown>
+  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  /**
+   * Last commit that modified `filepath`, with author/committer identity.
+   * Returns `null` when no commit in history touched the path.
+   */
+  getFileLatestModification(filepath: string): FileModification | null
+  getFileLatestModificationAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
+  /**
+   * Resolve the last commit that modified each of `filepaths` in a single
+   * history walk. Every input path is a key; never-committed paths map to `null`.
+   */
+  getFilesLatestModification(filepaths: Array<string>): Record<string, FileModification | undefined | null>
+  getFilesLatestModificationAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
+}
+
+/**
+ * Last commit that modified a file, with author/committer identity.
+ * All times are ms since epoch (UTC; timezone offset ignored).
+ */
+export interface FileModification {
+  /** Committer time, ms since epoch. Identical to `getFileLatestModifiedDate`. Equals `committerTime`. */
+  timestamp: number
+  /** 40-char lowercase hex OID of the last commit that modified the file. */
+  commitId: string
+  /** Commit summary (first line). Undefined if absent or not valid UTF-8. */
+  summary?: string
+  /** Author name. Undefined if not valid UTF-8. */
+  authorName?: string
+  /** Author email. Undefined if not valid UTF-8. */
+  authorEmail?: string
+  /** Author time, ms since epoch. */
+  authorTime: number
+  /** Committer name. Undefined if not valid UTF-8. */
+  committerName?: string
+  /** Committer email. Undefined if not valid UTF-8. */
+  committerEmail?: string
+  /** Committer time, ms since epoch. Equals `timestamp`. */
+  committerTime: number
 }
 ```
 
