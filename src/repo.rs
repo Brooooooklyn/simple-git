@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -8,6 +9,7 @@ use once_cell::sync::Lazy;
 use crate::commit::{Commit, CommitInner};
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
+use crate::file_modification::{FileModification, get_file_modification, get_files_modification};
 use crate::object::{GitObject, ObjectParent};
 use crate::reference;
 use crate::remote::Remote;
@@ -115,13 +117,27 @@ pub struct GitCreatedDateTask {
 
 unsafe impl Send for GitCreatedDateTask {}
 
+pub struct GitModificationTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  filepath: String,
+}
+
+unsafe impl Send for GitModificationTask {}
+
+pub struct GitBulkModificationTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  filepaths: Vec<String>,
+}
+
+unsafe impl Send for GitBulkModificationTask {}
+
 #[napi]
 impl Task for GitDateTask {
   type Output = i64;
   type JsValue = i64;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_modified_date(
+    get_file_modification(
       &self
         .repo
         .read()
@@ -131,7 +147,9 @@ impl Task for GitDateTask {
     )
     .convert_without_message()
     .and_then(|value| {
-      value.expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
+      value
+        .map(|m| m.timestamp)
+        .expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
     })
   }
 
@@ -161,6 +179,50 @@ impl Task for GitCreatedDateTask {
         &self.filepath
       ))
     })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitModificationTask {
+  type Output = Option<FileModification>;
+  type JsValue = Option<FileModification>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    get_file_modification(
+      &self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
+      &self.filepath,
+    )
+    .convert_without_message()
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitBulkModificationTask {
+  type Output = HashMap<String, Option<FileModification>>;
+  type JsValue = HashMap<String, Option<FileModification>>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    get_files_modification(
+      &self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
+      &self.filepaths,
+    )
+    .convert_without_message()
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -889,9 +951,13 @@ impl Repository {
 
   #[napi]
   pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<i64> {
-    get_file_modified_date(&self.inner, &filepath)
+    get_file_modification(&self.inner, &filepath)
       .convert_without_message()
-      .and_then(|value| value.expect_not_null(format!("Failed to get commit for [{filepath}]")))
+      .and_then(|value| {
+        value
+          .map(|m| m.timestamp)
+          .expect_not_null(format!("Failed to get commit for [{filepath}]"))
+      })
   }
 
   #[napi]
@@ -905,6 +971,55 @@ impl Repository {
       GitDateTask {
         repo: RwLock::new(self_ref),
         filepath,
+      },
+      signal,
+    ))
+  }
+
+  #[napi]
+  /// Last commit that modified `filepath`, with author/committer identity.
+  /// Returns `null` when no commit in history touched the path.
+  pub fn get_file_latest_modification(&self, filepath: String) -> Result<Option<FileModification>> {
+    get_file_modification(&self.inner, &filepath).convert_without_message()
+  }
+
+  #[napi]
+  pub fn get_file_latest_modification_async(
+    &self,
+    self_ref: Reference<Repository>,
+    filepath: String,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitModificationTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitModificationTask {
+        repo: RwLock::new(self_ref),
+        filepath,
+      },
+      signal,
+    ))
+  }
+
+  #[napi]
+  /// Resolve the last commit that modified each of `filepaths` in a single
+  /// history walk. Every input path is a key; never-committed paths map to `null`.
+  pub fn get_files_latest_modification(
+    &self,
+    filepaths: Vec<String>,
+  ) -> Result<HashMap<String, Option<FileModification>>> {
+    get_files_modification(&self.inner, &filepaths).convert_without_message()
+  }
+
+  #[napi]
+  pub fn get_files_latest_modification_async(
+    &self,
+    self_ref: Reference<Repository>,
+    filepaths: Vec<String>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitBulkModificationTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitBulkModificationTask {
+        repo: RwLock::new(self_ref),
+        filepaths,
       },
       signal,
     ))
@@ -936,52 +1051,6 @@ impl Repository {
   }
 }
 
-fn get_file_modified_date(
-  repo: &git2::Repository,
-  filepath: &str,
-) -> std::result::Result<Option<i64>, git2::Error> {
-  let mut diff_options = git2::DiffOptions::new();
-  diff_options.disable_pathspec_match(false);
-  diff_options.pathspec(filepath);
-  let mut rev_walk = repo.revwalk()?;
-  rev_walk.push_head()?;
-  rev_walk.set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)?;
-  let path = PathBuf::from(filepath);
-  Ok(
-    rev_walk
-      .by_ref()
-      .filter_map(|oid| oid.ok())
-      .find_map(|oid| {
-        let commit = repo.find_commit(oid).ok()?;
-        match commit.parent_count() {
-          // commit with parent
-          1 => {
-            let tree = commit.tree().ok()?;
-            if let Ok(parent) = commit.parent(0) {
-              let parent_tree = parent.tree().ok()?;
-              if let Ok(diff) =
-                repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))
-                && diff.deltas().len() > 0
-              {
-                return Some(commit.time().seconds() * 1000);
-              }
-            }
-          }
-          // root commit
-          0 => {
-            let tree = commit.tree().ok()?;
-            if tree.get_path(&path).is_ok() {
-              return Some(commit.time().seconds() * 1000);
-            }
-          }
-          // ignore merge commits
-          _ => {}
-        };
-        None
-      }),
-  )
-}
-
 fn get_file_created_date(
   repo: &git2::Repository,
   filepath: &str,
@@ -989,7 +1058,10 @@ fn get_file_created_date(
   // TODO: Add rename detection support using git2::DiffFindOptions for full `git log --follow` semantics
   let mut rev_walk = repo.revwalk()?;
   rev_walk.push_head()?;
-  rev_walk.set_sorting(git2::Sort::TIME & git2::Sort::TOPOLOGICAL)?;
+  // Sort::TIME | Sort::TOPOLOGICAL (newest-first): the walk overwrites the
+  // recorded time for each commit that still contains the file, so the last
+  // one visited -- the oldest containing commit -- is the creation commit.
+  rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
   let path = PathBuf::from(filepath);
 
   let mut earliest_commit_time: Option<i64> = None;

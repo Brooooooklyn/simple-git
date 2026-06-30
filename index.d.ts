@@ -844,6 +844,18 @@ export declare class Repository {
   revWalk(): RevWalk
   getFileLatestModifiedDate(filepath: string): number
   getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  /**
+   * Last commit that modified `filepath`, with author/committer identity.
+   * Returns `null` when no commit in history touched the path.
+   */
+  getFileLatestModification(filepath: string): FileModification | null
+  getFileLatestModificationAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
+  /**
+   * Resolve the last commit that modified each of `filepaths` in a single
+   * history walk. Every input path is a key; never-committed paths map to `null`.
+   */
+  getFilesLatestModification(filepaths: Array<string>): Record<string, FileModification | undefined | null>
+  getFilesLatestModificationAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
   getFileCreatedDate(filepath: string): number
   getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }
@@ -1209,6 +1221,31 @@ export declare const enum FileMode {
   Link = 5,
   /** Commit */
   Commit = 6
+}
+
+/**
+ * Last commit that modified a file, with author/committer identity.
+ * All times are ms since epoch (UTC; timezone offset ignored).
+ */
+export interface FileModification {
+  /** Committer time, ms since epoch. Identical to `getFileLatestModifiedDate`. Equals `committerTime`. */
+  timestamp: number
+  /** 40-char lowercase hex OID of the last commit that modified the file. */
+  commitId: string
+  /** Commit summary (first line). Undefined if absent or not valid UTF-8. */
+  summary?: string
+  /** Author name. Undefined if not valid UTF-8. */
+  authorName?: string
+  /** Author email. Undefined if not valid UTF-8. */
+  authorEmail?: string
+  /** Author time, ms since epoch. */
+  authorTime: number
+  /** Committer name. Undefined if not valid UTF-8. */
+  committerName?: string
+  /** Committer email. Undefined if not valid UTF-8. */
+  committerEmail?: string
+  /** Committer time, ms since epoch. Equals `timestamp`. */
+  committerTime: number
 }
 
 export declare const enum ObjectType {
