@@ -692,8 +692,13 @@ export declare class Remote {
    * rejections, set a `pushUpdateReference` callback on the `RemoteCallbacks`.
    */
   push(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null): void
-  /** Update the tips to the new state */
-  updateTips(updateFetchhead: RemoteUpdateFlags, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
+  /**
+   * Update the tips to the new state
+   *
+   * `update_fetchhead` is a raw bitset of `RemoteUpdateFlags` OR-ed together
+   * (e.g. `RemoteUpdateFlags.UpdateFetchHead`). Unknown bits are ignored.
+   */
+  updateTips(updateFetchhead: number, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
 }
 
 export declare class RemoteCallbacks {
@@ -802,7 +807,7 @@ export declare class Repository {
    * directories will stop before entering.  Use the functions in std::env
    * to construct or manipulate such a path list.
    */
-  static openExt(path: string, flags: RepositoryOpenFlags, ceilingDirs: Array<string>): Repository
+  static openExt(path: string, flags: number, ceilingDirs: Array<string>): Repository
   /**
    * Attempt to open an already-existing repository at or above `path`
    *
@@ -1239,8 +1244,13 @@ export declare class RevWalk extends Iterator<string, void, void> {
    * completes.
    */
   reset(): this
-  /** Set the sorting mode for a revwalk. */
-  setSorting(sorting: Sort): this
+  /**
+   * Set the sorting mode for a revwalk.
+   *
+   * `sorting` is a raw bitset of `Sort` flags OR-ed together (e.g.
+   * `Sort.Time | Sort.Reverse`). Unknown bits are ignored.
+   */
+  setSorting(sorting: number): this
   /**
    * Simplify the history by first-parent
    *
@@ -1855,22 +1865,45 @@ export declare const enum RemoteRedirect {
   All = 2
 }
 
+/**
+ * OR-able flags for `Remote.updateTips`. Each discriminant is the real libgit2
+ * `GIT_REMOTE_UPDATE_*` bit, so they can be combined with `|`.
+ */
 export declare const enum RemoteUpdateFlags {
   UpdateFetchHead = 1,
   ReportUnchanged = 2
 }
 
+/**
+ * OR-able flags for `Repository.openExt`. Each discriminant is the real
+ * libgit2 `GIT_REPOSITORY_OPEN_*` bit, so they can be combined with `|`.
+ */
 export declare const enum RepositoryOpenFlags {
-  /** Only open the specified path; don't walk upward searching. */
-  NoSearch = 0,
-  /** Search across filesystem boundaries. */
-  CrossFS = 1,
-  /** Force opening as bare repository, and defer loading its config. */
-  Bare = 2,
-  /** Don't try appending `/.git` to the specified repository path. */
-  NoDotGit = 3,
-  /** Respect environment variables like `$GIT_DIR`. */
-  FromEnv = 4
+  /**
+   * Only open the specified path; don't walk upward searching.
+   * 1 << 0
+   */
+  NoSearch = 1,
+  /**
+   * Search across filesystem boundaries.
+   * 1 << 1
+   */
+  CrossFS = 2,
+  /**
+   * Force opening as bare repository, and defer loading its config.
+   * 1 << 2
+   */
+  Bare = 4,
+  /**
+   * Don't try appending `/.git` to the specified repository path.
+   * 1 << 3
+   */
+  NoDotGit = 8,
+  /**
+   * Respect environment variables like `$GIT_DIR`.
+   * 1 << 4
+   */
+  FromEnv = 16
 }
 
 export declare const enum RepositoryState {

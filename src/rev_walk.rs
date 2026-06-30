@@ -33,17 +33,6 @@ pub enum Sort {
   Reverse = 4,
 }
 
-impl From<Sort> for git2::Sort {
-  fn from(value: Sort) -> Self {
-    match value {
-      Sort::None => git2::Sort::NONE,
-      Sort::Topological => git2::Sort::TOPOLOGICAL,
-      Sort::Time => git2::Sort::TIME,
-      Sort::Reverse => git2::Sort::REVERSE,
-    }
-  }
-}
-
 #[napi(iterator)]
 pub struct RevWalk {
   pub(crate) inner: SharedReference<Repository, git2::Revwalk<'static>>,
@@ -77,10 +66,13 @@ impl RevWalk {
 
   #[napi]
   /// Set the sorting mode for a revwalk.
-  pub fn set_sorting(&mut self, sorting: Sort) -> Result<&Self> {
+  ///
+  /// `sorting` is a raw bitset of `Sort` flags OR-ed together (e.g.
+  /// `Sort.Time | Sort.Reverse`). Unknown bits are ignored.
+  pub fn set_sorting(&mut self, sorting: u32) -> Result<&Self> {
     self
       .inner
-      .set_sorting(sorting.into())
+      .set_sorting(git2::Sort::from_bits_truncate(sorting))
       .convert_without_message()?;
     Ok(self)
   }

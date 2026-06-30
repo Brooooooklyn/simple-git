@@ -84,29 +84,25 @@ impl From<git2::RepositoryState> for RepositoryState {
 }
 
 #[napi]
+#[repr(u32)]
+/// OR-able flags for `Repository.openExt`. Each discriminant is the real
+/// libgit2 `GIT_REPOSITORY_OPEN_*` bit, so they can be combined with `|`.
 pub enum RepositoryOpenFlags {
   /// Only open the specified path; don't walk upward searching.
-  NoSearch,
+  /// 1 << 0
+  NoSearch = 1,
   /// Search across filesystem boundaries.
-  CrossFS,
+  /// 1 << 1
+  CrossFS = 2,
   /// Force opening as bare repository, and defer loading its config.
-  Bare,
+  /// 1 << 2
+  Bare = 4,
   /// Don't try appending `/.git` to the specified repository path.
-  NoDotGit,
+  /// 1 << 3
+  NoDotGit = 8,
   /// Respect environment variables like `$GIT_DIR`.
-  FromEnv,
-}
-
-impl From<RepositoryOpenFlags> for git2::RepositoryOpenFlags {
-  fn from(val: RepositoryOpenFlags) -> Self {
-    match val {
-      RepositoryOpenFlags::NoSearch => git2::RepositoryOpenFlags::NO_SEARCH,
-      RepositoryOpenFlags::CrossFS => git2::RepositoryOpenFlags::CROSS_FS,
-      RepositoryOpenFlags::Bare => git2::RepositoryOpenFlags::BARE,
-      RepositoryOpenFlags::NoDotGit => git2::RepositoryOpenFlags::NO_DOTGIT,
-      RepositoryOpenFlags::FromEnv => git2::RepositoryOpenFlags::FROM_ENV,
-    }
-  }
+  /// 1 << 4
+  FromEnv = 16,
 }
 
 pub struct GitDateTask {
@@ -343,17 +339,17 @@ impl Repository {
   /// ceiling_dirs specifies a list of paths that the search through parent
   /// directories will stop before entering.  Use the functions in std::env
   /// to construct or manipulate such a path list.
-  pub fn open_ext(
-    path: String,
-    flags: RepositoryOpenFlags,
-    ceiling_dirs: Vec<String>,
-  ) -> Result<Repository> {
+  pub fn open_ext(path: String, flags: u32, ceiling_dirs: Vec<String>) -> Result<Repository> {
     INIT_GIT_CONFIG
       .as_ref()
       .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
-      inner: git2::Repository::open_ext(path, flags.into(), ceiling_dirs)
-        .convert("Failed to open git repo")?,
+      inner: git2::Repository::open_ext(
+        path,
+        git2::RepositoryOpenFlags::from_bits_truncate(flags),
+        ceiling_dirs,
+      )
+      .convert("Failed to open git repo")?,
     })
   }
 

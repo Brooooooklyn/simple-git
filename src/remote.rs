@@ -139,18 +139,11 @@ pub struct CredInfo {
 
 #[napi]
 #[repr(u32)]
+/// OR-able flags for `Remote.updateTips`. Each discriminant is the real libgit2
+/// `GIT_REMOTE_UPDATE_*` bit, so they can be combined with `|`.
 pub enum RemoteUpdateFlags {
   UpdateFetchHead = 1,
   ReportUnchanged = 2,
-}
-
-impl From<RemoteUpdateFlags> for git2::RemoteUpdateFlags {
-  fn from(value: RemoteUpdateFlags) -> Self {
-    match value {
-      RemoteUpdateFlags::UpdateFetchHead => git2::RemoteUpdateFlags::UPDATE_FETCHHEAD,
-      RemoteUpdateFlags::ReportUnchanged => git2::RemoteUpdateFlags::REPORT_UNCHANGED,
-    }
-  }
 }
 
 #[napi]
@@ -298,9 +291,12 @@ impl Remote {
 
   #[napi]
   /// Update the tips to the new state
+  ///
+  /// `update_fetchhead` is a raw bitset of `RemoteUpdateFlags` OR-ed together
+  /// (e.g. `RemoteUpdateFlags.UpdateFetchHead`). Unknown bits are ignored.
   pub fn update_tips(
     &mut self,
-    update_fetchhead: RemoteUpdateFlags,
+    update_fetchhead: u32,
     download_tags: AutotagOption,
     mut callbacks: Option<&mut RemoteCallbacks>,
     msg: Option<String>,
@@ -310,7 +306,7 @@ impl Remote {
       .inner
       .update_tips(
         callbacks,
-        update_fetchhead.into(),
+        git2::RemoteUpdateFlags::from_bits_truncate(update_fetchhead),
         download_tags.into(),
         msg.as_deref(),
       )
