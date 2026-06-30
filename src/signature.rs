@@ -69,7 +69,7 @@ impl Signature {
   ///
   /// Returns `None` if the name is not valid utf-8
   pub fn name(&self) -> Option<&str> {
-    self.inner.name()
+    self.inner.name().ok()
   }
 
   #[napi]
@@ -77,7 +77,7 @@ impl Signature {
   ///
   /// Returns `None` if the email is not valid utf-8
   pub fn email(&self) -> Option<&str> {
-    self.inner.email()
+    self.inner.email().ok()
   }
 
   #[napi]

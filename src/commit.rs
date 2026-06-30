@@ -69,7 +69,7 @@ impl Commit {
   ///
   /// `None` will be returned if the message is not valid utf-8
   pub fn message(&self) -> Option<&str> {
-    self.inner.message()
+    self.inner.message().ok()
   }
 
   #[napi]
@@ -87,7 +87,7 @@ impl Commit {
   ///
   /// `None` will be returned if the encoding is not known
   pub fn message_encoding(&self) -> Option<&str> {
-    self.inner.message_encoding()
+    self.inner.message_encoding().ok().flatten()
   }
 
   #[napi]
@@ -95,7 +95,7 @@ impl Commit {
   ///
   /// `None` will be returned if the message is not valid utf-8
   pub fn message_raw(&self) -> Option<&str> {
-    self.inner.message_raw()
+    self.inner.message_raw().ok()
   }
 
   #[napi]
@@ -109,7 +109,7 @@ impl Commit {
   ///
   /// `None` will be returned if the message is not valid utf-8
   pub fn raw_header(&self) -> Option<&str> {
-    self.inner.raw_header()
+    self.inner.raw_header().ok()
   }
 
   #[napi]
@@ -137,7 +137,7 @@ impl Commit {
   /// `None` may be returned if an error occurs or if the summary is not valid
   /// utf-8.
   pub fn summary(&self) -> Option<&str> {
-    self.inner.summary()
+    self.inner.summary().ok().flatten()
   }
 
   #[napi]
@@ -161,7 +161,7 @@ impl Commit {
   /// `None` may be returned if an error occurs or if the summary is not valid
   /// utf-8.
   pub fn body(&self) -> Option<&str> {
-    self.inner.body()
+    self.inner.body().ok().flatten()
   }
 
   #[napi]
