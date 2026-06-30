@@ -286,8 +286,13 @@ export declare class Cred {
   static username(username: string): Cred
   /** Check whether a credential object contains username information. */
   hasUsername(): boolean
-  /** Return the type of credentials that this object represents. */
-  credtype(): CredentialType
+  /**
+   * Return the type of credentials that this object represents.
+   *
+   * The value is the raw `CredentialType` bitset (an OR-able `number`); test
+   * individual bits with `credTypeContains` and the `CredentialType` constants.
+   */
+  credtype(): number
 }
 
 /**
@@ -326,9 +331,10 @@ export declare class DiffDelta {
   /**
    * Returns the flags on the delta.
    *
-   * For more information, see `DiffFlags`'s documentation.
+   * The value is the raw `git2::DiffFlags` bitset (an OR-able `number`); test
+   * individual bits with `diffFlagsContains` and the `DiffFlags` constants.
    */
-  flags(): DiffFlags
+  flags(): number
   /** Returns the number of files in this delta. */
   numFiles(): number
   /** Returns the status of this entry */
@@ -1609,13 +1615,24 @@ export declare const enum CredentialType {
 }
 
 export interface CredInfo {
-  credType: CredentialType
+  /**
+   * Raw `CredentialType` bitset of the credential types the server will
+   * accept. OR-able; test bits with `credTypeContains`.
+   */
+  credType: number
   url: string
   username: string
 }
 
-/** Check whether a cred_type contains another credential type. */
-export declare function credTypeContains(credType: CredentialType, another: CredentialType): boolean
+/**
+ * Check whether a raw credential-type bitset contains a given `CredentialType`
+ * bit.
+ *
+ * `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credtype()`);
+ * `another` is one of the `CredentialType` constants. Returns
+ * `(cred_type & another) === another`.
+ */
+export declare function credTypeContains(credType: number, another: CredentialType): boolean
 
 export declare const enum Delta {
   /** No changes */
@@ -1664,6 +1681,14 @@ export declare const enum DiffFlags {
    */
   Exists = 8
 }
+
+/**
+ * Check whether a raw diff-flags bitset contains a given `DiffFlags` bit.
+ *
+ * `flags` is the raw value returned by `DiffDelta.flags()`; `flag` is one of
+ * the `DiffFlags` constants. Returns `(flags & flag) === flag`.
+ */
+export declare function diffFlagsContains(flags: number, flag: DiffFlags): boolean
 
 export interface DiffOptions {
   /**

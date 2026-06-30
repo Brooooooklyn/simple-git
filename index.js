@@ -609,6 +609,7 @@ module.exports.CredentialType = nativeBinding.CredentialType
 module.exports.credTypeContains = nativeBinding.credTypeContains
 module.exports.Delta = nativeBinding.Delta
 module.exports.DiffFlags = nativeBinding.DiffFlags
+module.exports.diffFlagsContains = nativeBinding.diffFlagsContains
 module.exports.Direction = nativeBinding.Direction
 module.exports.FetchPrune = nativeBinding.FetchPrune
 module.exports.FileMode = nativeBinding.FileMode

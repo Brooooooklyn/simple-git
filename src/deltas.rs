@@ -31,16 +31,14 @@ impl From<DiffFlags> for git2::DiffFlags {
   }
 }
 
-impl From<git2::DiffFlags> for DiffFlags {
-  fn from(value: git2::DiffFlags) -> Self {
-    match value {
-      git2::DiffFlags::BINARY => DiffFlags::Binary,
-      git2::DiffFlags::NOT_BINARY => DiffFlags::NotBinary,
-      git2::DiffFlags::VALID_ID => DiffFlags::ValidId,
-      git2::DiffFlags::EXISTS => DiffFlags::Exists,
-      _ => DiffFlags::Binary,
-    }
-  }
+#[napi]
+/// Check whether a raw diff-flags bitset contains a given `DiffFlags` bit.
+///
+/// `flags` is the raw value returned by `DiffDelta.flags()`; `flag` is one of
+/// the `DiffFlags` constants. Returns `(flags & flag) === flag`.
+pub fn diff_flags_contains(flags: u32, flag: DiffFlags) -> bool {
+  let flag_bits = Into::<git2::DiffFlags>::into(flag).bits();
+  (flags & flag_bits) == flag_bits
 }
 
 #[napi]
@@ -103,9 +101,10 @@ impl DiffDelta {
   #[napi]
   /// Returns the flags on the delta.
   ///
-  /// For more information, see `DiffFlags`'s documentation.
-  pub fn flags(&self) -> DiffFlags {
-    self.inner.flags().into()
+  /// The value is the raw `git2::DiffFlags` bitset (an OR-able `number`); test
+  /// individual bits with `diffFlagsContains` and the `DiffFlags` constants.
+  pub fn flags(&self) -> u32 {
+    self.inner.flags().bits()
   }
 
   #[napi]

@@ -114,36 +114,6 @@ pub enum CredentialType {
   Username = 32,
 }
 
-impl From<libgit2_sys::git_credtype_t> for CredentialType {
-  fn from(value: libgit2_sys::git_credtype_t) -> Self {
-    match value {
-      libgit2_sys::GIT_CREDTYPE_USERPASS_PLAINTEXT => CredentialType::UserPassPlaintext,
-      libgit2_sys::GIT_CREDTYPE_SSH_KEY => CredentialType::SshKey,
-      libgit2_sys::GIT_CREDTYPE_SSH_MEMORY => CredentialType::SshMemory,
-      libgit2_sys::GIT_CREDTYPE_SSH_CUSTOM => CredentialType::SshCustom,
-      libgit2_sys::GIT_CREDTYPE_DEFAULT => CredentialType::Default,
-      libgit2_sys::GIT_CREDTYPE_SSH_INTERACTIVE => CredentialType::SshInteractive,
-      libgit2_sys::GIT_CREDTYPE_USERNAME => CredentialType::Username,
-      _ => CredentialType::Default,
-    }
-  }
-}
-
-impl From<git2::CredentialType> for CredentialType {
-  fn from(value: git2::CredentialType) -> Self {
-    match value {
-      git2::CredentialType::USER_PASS_PLAINTEXT => CredentialType::UserPassPlaintext,
-      git2::CredentialType::SSH_KEY => CredentialType::SshKey,
-      git2::CredentialType::SSH_MEMORY => CredentialType::SshMemory,
-      git2::CredentialType::SSH_CUSTOM => CredentialType::SshCustom,
-      git2::CredentialType::DEFAULT => CredentialType::Default,
-      git2::CredentialType::SSH_INTERACTIVE => CredentialType::SshInteractive,
-      git2::CredentialType::USERNAME => CredentialType::Username,
-      _ => CredentialType::Default,
-    }
-  }
-}
-
 impl From<CredentialType> for git2::CredentialType {
   fn from(value: CredentialType) -> Self {
     match value {
@@ -160,7 +130,9 @@ impl From<CredentialType> for git2::CredentialType {
 
 #[napi(object)]
 pub struct CredInfo {
-  pub cred_type: CredentialType,
+  /// Raw `CredentialType` bitset of the credential types the server will
+  /// accept. OR-able; test bits with `credTypeContains`.
+  pub cred_type: u32,
   pub url: String,
   pub username: String,
 }
@@ -403,7 +375,7 @@ impl RemoteCallbacks {
           .borrow_back(&env)
           .and_then(|cb| {
             cb.call(CredInfo {
-              cred_type: cred.into(),
+              cred_type: cred.bits(),
               url: url.to_string(),
               username: username_from_url.unwrap_or("git").to_string(),
             })
@@ -883,13 +855,22 @@ impl Cred {
 
   #[napi]
   /// Return the type of credentials that this object represents.
-  pub fn credtype(&self) -> CredentialType {
-    self.inner.credtype().into()
+  ///
+  /// The value is the raw `CredentialType` bitset (an OR-able `number`); test
+  /// individual bits with `credTypeContains` and the `CredentialType` constants.
+  pub fn credtype(&self) -> u32 {
+    self.inner.credtype()
   }
 }
 
 #[napi]
-/// Check whether a cred_type contains another credential type.
-pub fn cred_type_contains(cred_type: CredentialType, another: CredentialType) -> bool {
-  Into::<git2::CredentialType>::into(cred_type).contains(another.into())
+/// Check whether a raw credential-type bitset contains a given `CredentialType`
+/// bit.
+///
+/// `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credtype()`);
+/// `another` is one of the `CredentialType` constants. Returns
+/// `(cred_type & another) === another`.
+pub fn cred_type_contains(cred_type: u32, another: CredentialType) -> bool {
+  let another_bits = Into::<git2::CredentialType>::into(another).bits();
+  (cred_type & another_bits) == another_bits
 }
