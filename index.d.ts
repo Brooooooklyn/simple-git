@@ -1092,7 +1092,7 @@ export declare class Repository {
    * iterate over all tags calling `cb` on each.
    * the callback is provided the tag id and name
    */
-  tagForeach(cb: (arg0: string, arg1: Buffer) => boolean): void
+  tagForeach(cb: (arg: [string, Buffer]) => boolean): void
   /**
    * Create a diff between a tree and the working directory.
    *
