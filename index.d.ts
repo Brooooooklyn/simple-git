@@ -391,6 +391,55 @@ export declare class GitObject {
   peelToBlob(): Blob
 }
 
+/**
+ * A git index (the staging area).
+ *
+ * Obtain one with `Repository.index()`. Mutating methods change the in-memory
+ * index only; call `write()` to persist it to disk, or `writeTree()` to write
+ * its current state to the object database as a tree (whose OID can then be
+ * used to create a commit).
+ */
+export declare class Index {
+  /**
+   * Add or update an index entry from a file on disk.
+   *
+   * The `path` is relative to the repository's working directory and must be
+   * readable. This forces the file to be added to the index even if it is
+   * ignored.
+   */
+  addPath(path: string): void
+  /**
+   * Add or update index entries matching files in the working directory.
+   *
+   * `pathspecs` defaults to `["*"]` (everything) when omitted. Ignored files
+   * are skipped unless `force` is `true`, which maps to
+   * `IndexAddOption::FORCE`.
+   */
+  addAll(pathspecs?: Array<string> | undefined | null, force?: boolean | undefined | null): void
+  /**
+   * Update all index entries to match the working directory.
+   *
+   * Existing entries are refreshed and entries whose file no longer exists are
+   * removed. `pathspecs` defaults to `["*"]` when omitted. This will fail on a
+   * bare index.
+   */
+  updateAll(pathspecs?: Array<string> | undefined | null): void
+  /** Remove an index entry corresponding to a file on disk. */
+  removePath(path: string): void
+  /** Get the count of entries currently in the index. */
+  count(): number
+  /** Write the in-memory index back to disk using an atomic file lock. */
+  write(): void
+  /**
+   * Write the index as a tree to the object database and return its OID.
+   *
+   * The index must be associated with an existing repository and must not
+   * contain any conflicted entries. The returned OID can be used to create a
+   * commit.
+   */
+  writeTree(): string
+}
+
 export declare class ProxyOptions {
   constructor()
   /**
@@ -967,8 +1016,30 @@ export declare class Repository {
    * current branch and make it point to this commit. If the reference
    * doesn't exist yet, it will be created. If it does exist, the first
    * parent must be the tip of this branch.
+   *
+   * `parents` is an optional list of parent commit OID hex strings. When it
+   * is `None` or empty a parent-less root commit is created; otherwise each
+   * OID is resolved to a commit and used as a parent (the first parent must
+   * be the current tip of `update_ref`).
    */
-  commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree): string
+  commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null): string
+  /**
+   * Get the index (staging area) file for this repository.
+   *
+   * If a custom index has not been set, the default index for the repository
+   * will be returned (the one at `.git/index`).
+   */
+  index(): Index
+  /**
+   * Write an in-memory buffer to the object database as a blob and return its
+   * OID hex string.
+   */
+  blob(data: Uint8Array): string
+  /**
+   * Read a file from the filesystem and write its content to the object
+   * database as a blob, returning its OID hex string.
+   */
+  blobPath(path: string): string
   /** Create a revwalk that can be used to traverse the commit graph. */
   revWalk(): RevWalk
   getFileLatestModifiedDate(filepath: string): number

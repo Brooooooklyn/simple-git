@@ -11,6 +11,7 @@ use crate::config::Config;
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
 use crate::file_modification::{FileModification, get_file_modification, get_files_modification};
+use crate::index::Index;
 use crate::object::{GitObject, ObjectParent};
 use crate::reference;
 use crate::remote::Remote;
@@ -972,6 +973,11 @@ impl Repository {
   /// current branch and make it point to this commit. If the reference
   /// doesn't exist yet, it will be created. If it does exist, the first
   /// parent must be the tip of this branch.
+  ///
+  /// `parents` is an optional list of parent commit OID hex strings. When it
+  /// is `None` or empty a parent-less root commit is created; otherwise each
+  /// OID is resolved to a commit and used as a parent (the first parent must
+  /// be the current tip of `update_ref`).
   pub fn commit(
     &self,
     update_ref: Option<String>,
@@ -979,7 +985,20 @@ impl Repository {
     committer: &Signature,
     message: String,
     tree: &Tree,
+    parents: Option<Vec<String>>,
   ) -> Result<String> {
+    let parent_commits = parents
+      .unwrap_or_default()
+      .into_iter()
+      .map(|oid| {
+        let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
+        self
+          .inner
+          .find_commit(oid)
+          .convert(format!("Find commit from OID [{oid}] failed"))
+      })
+      .collect::<Result<Vec<git2::Commit>>>()?;
+    let parent_refs = parent_commits.iter().collect::<Vec<&git2::Commit>>();
     self
       .inner
       .commit(
@@ -988,10 +1007,43 @@ impl Repository {
         committer.as_ref(),
         message.as_str(),
         tree.as_ref(),
-        &[],
+        &parent_refs,
       )
       .convert_without_message()
       .map(|oid| oid.to_string())
+  }
+
+  #[napi]
+  /// Get the index (staging area) file for this repository.
+  ///
+  /// If a custom index has not been set, the default index for the repository
+  /// will be returned (the one at `.git/index`).
+  pub fn index(&self) -> Result<Index> {
+    Ok(Index {
+      inner: self.inner.index().convert_without_message()?,
+    })
+  }
+
+  #[napi]
+  /// Write an in-memory buffer to the object database as a blob and return its
+  /// OID hex string.
+  pub fn blob(&self, data: Uint8Array) -> Result<String> {
+    self
+      .inner
+      .blob(&data)
+      .map(|oid| oid.to_string())
+      .convert_without_message()
+  }
+
+  #[napi]
+  /// Read a file from the filesystem and write its content to the object
+  /// database as a blob, returning its OID hex string.
+  pub fn blob_path(&self, path: String) -> Result<String> {
+    self
+      .inner
+      .blob_path(Path::new(&path))
+      .map(|oid| oid.to_string())
+      .convert_without_message()
   }
 
   #[napi]

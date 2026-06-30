@@ -7,6 +7,7 @@ pub mod deltas;
 pub mod diff;
 mod error;
 pub mod file_modification;
+pub mod index;
 pub mod object;
 pub mod reference;
 pub mod remote;

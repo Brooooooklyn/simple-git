@@ -518,6 +518,7 @@ module.exports.DiffDelta = nativeBinding.DiffDelta
 module.exports.DiffFile = nativeBinding.DiffFile
 module.exports.FetchOptions = nativeBinding.FetchOptions
 module.exports.GitObject = nativeBinding.GitObject
+module.exports.Index = nativeBinding.Index
 module.exports.ProxyOptions = nativeBinding.ProxyOptions
 module.exports.PushOptions = nativeBinding.PushOptions
 module.exports.Reference = nativeBinding.Reference
