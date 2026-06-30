@@ -985,6 +985,61 @@ export declare class Repository {
    */
   branch(branchName: string, target: Commit, force: boolean): Branch
   /**
+   * Check out the tree pointed to by `treeish` (a commit, tag or tree object),
+   * updating the working directory to match.
+   *
+   * This does NOT update HEAD; pair it with `set_head` to switch branches.
+   * The checkout is **safe** by default — pass `options.force = true` to
+   * overwrite local modifications.
+   */
+  checkoutTree(treeish: GitObject, options?: CheckoutOptions | undefined | null): void
+  /**
+   * Update files in the index and the working tree to match the content of
+   * the tree pointed at by HEAD.
+   *
+   * The checkout is **safe** by default — pass `options.force = true` to
+   * overwrite local modifications.
+   */
+  checkoutHead(options?: CheckoutOptions | undefined | null): void
+  /**
+   * Update files in the working tree to match the content of the repository's
+   * index.
+   *
+   * The checkout is **safe** by default — pass `options.force = true` to
+   * overwrite local modifications.
+   */
+  checkoutIndex(options?: CheckoutOptions | undefined | null): void
+  /**
+   * Make HEAD point to the reference named `refname`.
+   *
+   * If `refname` names an existing branch, HEAD becomes a symbolic reference
+   * to that branch; otherwise it points to a not-yet-existing branch. This
+   * does not touch the working directory — checkout separately.
+   */
+  setHead(refname: string): void
+  /**
+   * Make HEAD point directly at the commit with the given OID, detaching it
+   * from any branch.
+   */
+  setHeadDetached(oid: string): void
+  /**
+   * Create a new direct reference named `name` pointing at the object `oid`.
+   *
+   * If `force` is true and a reference already exists with the given name, it
+   * will be overwritten; otherwise the call fails. `log_message` is recorded
+   * in the reflog.
+   */
+  reference(name: string, oid: string, force: boolean, logMessage: string): Reference
+  /**
+   * Create a new symbolic reference named `name` pointing at the reference
+   * named `target` (e.g. `refs/heads/main`).
+   *
+   * If `force` is true and a reference already exists with the given name, it
+   * will be overwritten; otherwise the call fails. `log_message` is recorded
+   * in the reflog.
+   */
+  referenceSymbolic(name: string, target: string, force: boolean, logMessage: string): Reference
+  /**
    * Create a new tag in the repository from an object
    *
    * A new reference will also be created pointing to this tag object. If
@@ -1443,6 +1498,38 @@ export declare const enum BranchType {
   Local = 0,
   /** A branch for a remote. */
   Remote = 1
+}
+
+/**
+ * Options controlling how a checkout writes files into the working directory.
+ *
+ * The default is a **safe** checkout (matching `git checkout`): files with
+ * local modifications are left untouched. Set `force` to overwrite them, which
+ * can discard uncommitted changes — use it deliberately.
+ */
+export interface CheckoutOptions {
+  /**
+   * Force the checkout, overwriting any local changes in the working tree.
+   * Defaults to a safe checkout when omitted or `false`.
+   */
+  force?: boolean
+  /**
+   * Recreate files that are missing from the working tree even in a safe
+   * checkout.
+   */
+  recreateMissing?: boolean
+  /** Allow the checkout to write files that conflict with the working tree. */
+  allowConflicts?: boolean
+  /**
+   * Restrict the checkout to these pathspecs. When omitted, all paths are
+   * checked out.
+   */
+  paths?: Array<string>
+  /**
+   * Write the checked-out files into this directory instead of the
+   * repository's working directory.
+   */
+  targetDir?: string
 }
 
 export declare const enum CloneLocal {

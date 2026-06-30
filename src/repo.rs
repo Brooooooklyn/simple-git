@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 
 use crate::blame::{BlameHunk, BlameOptions, blame_single_line, collect_blame};
 use crate::branch::{Branch, BranchType};
+use crate::checkout::{CheckoutOptions, build_checkout_builder};
 use crate::commit::{Commit, CommitInner};
 use crate::config::Config;
 use crate::diff::Diff;
@@ -884,6 +885,119 @@ impl Repository {
         .convert(format!("Find branch [{branch_name}] failed"))
     })?;
     Ok(Branch { inner })
+  }
+
+  #[napi]
+  /// Check out the tree pointed to by `treeish` (a commit, tag or tree object),
+  /// updating the working directory to match.
+  ///
+  /// This does NOT update HEAD; pair it with `set_head` to switch branches.
+  /// The checkout is **safe** by default — pass `options.force = true` to
+  /// overwrite local modifications.
+  pub fn checkout_tree(&self, treeish: &GitObject, options: Option<CheckoutOptions>) -> Result<()> {
+    let mut builder = build_checkout_builder(options);
+    self
+      .inner
+      .checkout_tree(&treeish.inner, Some(&mut builder))
+      .convert_without_message()
+  }
+
+  #[napi]
+  /// Update files in the index and the working tree to match the content of
+  /// the tree pointed at by HEAD.
+  ///
+  /// The checkout is **safe** by default — pass `options.force = true` to
+  /// overwrite local modifications.
+  pub fn checkout_head(&self, options: Option<CheckoutOptions>) -> Result<()> {
+    let mut builder = build_checkout_builder(options);
+    self
+      .inner
+      .checkout_head(Some(&mut builder))
+      .convert_without_message()
+  }
+
+  #[napi]
+  /// Update files in the working tree to match the content of the repository's
+  /// index.
+  ///
+  /// The checkout is **safe** by default — pass `options.force = true` to
+  /// overwrite local modifications.
+  pub fn checkout_index(&self, options: Option<CheckoutOptions>) -> Result<()> {
+    let mut builder = build_checkout_builder(options);
+    self
+      .inner
+      .checkout_index(None, Some(&mut builder))
+      .convert_without_message()
+  }
+
+  #[napi]
+  /// Make HEAD point to the reference named `refname`.
+  ///
+  /// If `refname` names an existing branch, HEAD becomes a symbolic reference
+  /// to that branch; otherwise it points to a not-yet-existing branch. This
+  /// does not touch the working directory — checkout separately.
+  pub fn set_head(&self, refname: String) -> Result<()> {
+    self.inner.set_head(&refname).convert_without_message()
+  }
+
+  #[napi]
+  /// Make HEAD point directly at the commit with the given OID, detaching it
+  /// from any branch.
+  pub fn set_head_detached(&self, oid: String) -> Result<()> {
+    let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
+    self.inner.set_head_detached(oid).convert_without_message()
+  }
+
+  #[napi]
+  /// Create a new direct reference named `name` pointing at the object `oid`.
+  ///
+  /// If `force` is true and a reference already exists with the given name, it
+  /// will be overwritten; otherwise the call fails. `log_message` is recorded
+  /// in the reflog.
+  pub fn reference(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    name: String,
+    oid: String,
+    force: bool,
+    log_message: String,
+  ) -> Result<reference::Reference> {
+    Ok(reference::Reference {
+      inner: this_ref.share_with(env, move |repo| {
+        let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
+        repo
+          .inner
+          .reference(&name, oid, force, &log_message)
+          .convert(format!("Failed to create reference [{name}]"))
+      })?,
+    })
+  }
+
+  #[napi]
+  /// Create a new symbolic reference named `name` pointing at the reference
+  /// named `target` (e.g. `refs/heads/main`).
+  ///
+  /// If `force` is true and a reference already exists with the given name, it
+  /// will be overwritten; otherwise the call fails. `log_message` is recorded
+  /// in the reflog.
+  pub fn reference_symbolic(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    name: String,
+    target: String,
+    force: bool,
+    log_message: String,
+  ) -> Result<reference::Reference> {
+    Ok(reference::Reference {
+      inner: this_ref.share_with(env, move |repo| {
+        repo
+          .inner
+          .reference_symbolic(&name, &target, force, &log_message)
+          .convert(format!("Failed to create symbolic reference [{name}]"))
+      })?,
+    })
   }
 
   #[napi]
