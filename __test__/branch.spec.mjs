@@ -124,3 +124,19 @@ test("branch() creates a branch and delete() removes it", (t) => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// A branch with no tracking config has no upstream: upstream() returns null.
+// This pins the "not found => null" path after the error-handling fix, which
+// now only collapses the genuine NotFound case to null and propagates real
+// libgit2 errors (corrupt refs, unreadable config) as thrown errors instead.
+test("upstream returns null when the branch has no configured upstream", (t) => {
+  const { root, work, repo } = makeRepo();
+  try {
+    seedCommit(repo, work);
+    const main = repo.findBranch("main", BranchType.Local);
+    t.truthy(main, "the seeded main branch is found");
+    t.is(main.upstream(), null, "no tracking branch => null, not a throw");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

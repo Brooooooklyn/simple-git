@@ -84,14 +84,21 @@ impl Branch {
   ///
   /// Returns `None` when the branch has no configured upstream.
   pub fn upstream(&self, env: Env) -> Result<Option<Branch>> {
-    match self
-      .inner
-      .clone(env)?
-      .share_with(env, |branch| branch.upstream().convert_without_message())
-    {
-      Ok(inner) => Ok(Some(Branch { inner })),
-      Err(_) => Ok(None),
+    // Probe on the borrowed branch first so we can inspect the real libgit2
+    // error code while it is still intact: only a genuine "no upstream
+    // configured" (NotFound) collapses to None — every other failure (corrupt
+    // refs, unreadable config, I/O) propagates instead of being buried as None.
+    // Mirrors the find_branch probe-then-build convention in src/repo.rs.
+    if let Err(err) = self.inner.upstream() {
+      if err.code() == git2::ErrorCode::NotFound {
+        return Ok(None);
+      }
+      return Err(err).convert("Get upstream branch failed");
     }
+    let inner = self.inner.clone(env)?.share_with(env, |branch| {
+      branch.upstream().convert("Get upstream branch failed")
+    })?;
+    Ok(Some(Branch { inner }))
   }
 
   #[napi]

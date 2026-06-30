@@ -676,21 +676,43 @@ impl PushOptions {
 
   #[napi]
   /// Set extra headers for this push operation.
-  pub fn custom_headers(&mut self, headers: Vec<String>) -> &Self {
+  ///
+  /// Throws if any header contains an interior NUL byte.
+  pub fn custom_headers(&mut self, headers: Vec<String>) -> Result<&Self> {
+    reject_interior_nul(&headers, "custom header")?;
     self
       .inner
       .custom_headers(&headers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-    self
+    Ok(self)
   }
 
   #[napi]
   /// Set "push options" to deliver to the remote.
-  pub fn remote_push_options(&mut self, options: Vec<String>) -> &Self {
+  ///
+  /// Throws if any push option contains an interior NUL byte.
+  pub fn remote_push_options(&mut self, options: Vec<String>) -> Result<&Self> {
+    reject_interior_nul(&options, "remote push option")?;
     self
       .inner
       .remote_push_options(&options.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-    self
+    Ok(self)
   }
+}
+
+/// git2 builds a `CString` from each of these strings with an internal
+/// `unwrap`, so an interior NUL byte would panic — and because this crate does
+/// not opt into `catch_unwind`, that panic aborts the whole Node process.
+/// Reject NULs up front so a bad value surfaces as an ordinary JS error.
+fn reject_interior_nul(values: &[String], what: &str) -> Result<()> {
+  for value in values {
+    if value.contains('\0') {
+      return Err(Error::new(
+        Status::InvalidArg,
+        format!("{what} contains an interior NUL byte"),
+      ));
+    }
+  }
+  Ok(())
 }
 
 #[napi(object)]

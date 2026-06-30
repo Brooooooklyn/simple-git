@@ -61,6 +61,25 @@ test("push accepts a PushOptions instance", (t) => {
   }
 });
 
+// A push option / header containing an interior NUL byte must surface as a
+// thrown JS error, NOT a panic: git2 builds a CString from each string with an
+// internal unwrap that would otherwise abort the whole Node process (this crate
+// does not opt into catch_unwind).
+test("remotePushOptions rejects an interior NUL byte instead of crashing", (t) => {
+  const options = new PushOptions();
+  const err = t.throws(() => options.remotePushOptions(["ok", "bad\0opt"]));
+  t.regex(err.message, /NUL byte/);
+  // Valid options still flow through, and the setter chains (returns `this`).
+  t.is(options.remotePushOptions(["ci.skip"]), options);
+});
+
+test("customHeaders rejects an interior NUL byte instead of crashing", (t) => {
+  const options = new PushOptions();
+  const err = t.throws(() => options.customHeaders(["X-Ok: 1", "X-Bad: a\0b"]));
+  t.regex(err.message, /NUL byte/);
+  t.is(options.customHeaders(["X-Ok: 1"]), options);
+});
+
 // Callback path: pushUpdateReference fires once per ref with a null status on
 // a successful (non-rejected) push.
 test("pushUpdateReference fires with null status on success", (t) => {

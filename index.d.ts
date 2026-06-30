@@ -519,9 +519,17 @@ export declare class PushOptions {
    * (`/info/refs`), but not subsequent requests.
    */
   followRedirects(opt: RemoteRedirect): this
-  /** Set extra headers for this push operation. */
+  /**
+   * Set extra headers for this push operation.
+   *
+   * Throws if any header contains an interior NUL byte.
+   */
   customHeaders(headers: Array<string>): this
-  /** Set "push options" to deliver to the remote. */
+  /**
+   * Set "push options" to deliver to the remote.
+   *
+   * Throws if any push option contains an interior NUL byte.
+   */
   remotePushOptions(options: Array<string>): this
 }
 
