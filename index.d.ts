@@ -11,6 +11,46 @@ export declare class Blob {
   size(): bigint
 }
 
+/**
+ * A git branch.
+ *
+ * A branch is a thin wrapper around an underlying reference; the full
+ * reference name is available via `reference_name`.
+ */
+export declare class Branch {
+  /**
+   * Return the name of the given local or remote branch.
+   *
+   * Returns `None` if the name is not valid utf-8.
+   */
+  name(): string | null
+  /** Determine if the current local branch is pointed at by HEAD. */
+  isHead(): boolean
+  /**
+   * Get the full name of the reference backing this branch
+   * (e.g. `refs/heads/main`).
+   *
+   * Returns `None` if the reference name is not valid utf-8.
+   */
+  referenceName(): string | null
+  /** Delete an existing branch reference. */
+  delete(): void
+  /**
+   * Return the reference supporting the remote tracking branch, given a local
+   * branch reference.
+   *
+   * Returns `None` when the branch has no configured upstream.
+   */
+  upstream(): Branch | null
+  /**
+   * Return the reference backing this branch as a live `Reference`.
+   *
+   * Branches are direct references, so the resolved direct reference is
+   * returned (e.g. `refs/heads/main`).
+   */
+  get(): Reference
+}
+
 export declare class Commit {
   /** Get the id (SHA1) of a repository object */
   id(): string
@@ -148,6 +188,75 @@ export declare class Commit {
   parentId(i: number): string
   /** Casts this Commit to be usable as an `Object` */
   asObject(): GitObject
+}
+
+/**
+ * A git configuration store.
+ *
+ * Obtain one with `Repository.config()` (a prioritized view of system, global
+ * and repository config) or `Config.openDefault()` (system/global/XDG only).
+ */
+export declare class Config {
+  /**
+   * Open the global, XDG and system configuration files into a single
+   * prioritized config object that can be used when accessing default config
+   * data outside a repository.
+   */
+  static openDefault(): Config
+  /**
+   * Get the value of a string config variable as an owned string.
+   *
+   * All config files are searched in order of their level (highest priority
+   * first) and the first occurrence is returned. Errors if the value is not
+   * valid utf-8 or the key is missing.
+   */
+  getStringValue(name: string): string
+  /** Get the value of a boolean config variable. */
+  getBool(name: string): boolean
+  /** Get the value of an i32 config variable. */
+  getI32(name: string): number
+  /** Get the value of an i64 config variable. */
+  getI64(name: string): number
+  /**
+   * Set the value of a string config variable in the config file with the
+   * highest level (usually the local one).
+   */
+  setStr(name: string, value: string): void
+  /**
+   * Set the value of a boolean config variable in the config file with the
+   * highest level (usually the local one).
+   */
+  setBool(name: string, value: boolean): void
+  /**
+   * Set the value of an i32 config variable in the config file with the
+   * highest level (usually the local one).
+   */
+  setI32(name: string, value: number): void
+  /**
+   * Set the value of an i64 config variable in the config file with the
+   * highest level (usually the local one).
+   */
+  setI64(name: string, value: number): void
+  /**
+   * Delete a config variable from the config file with the highest level
+   * (usually the local one).
+   */
+  removeEntry(name: string): void
+  /**
+   * Create a read-only point-in-time snapshot of this configuration.
+   *
+   * A snapshot gives a consistent view for looking up complex values. Note
+   * that `get_*` on a live (non-snapshot) config re-reads the underlying
+   * files on each call.
+   */
+  snapshot(): Config
+  /**
+   * List configuration entries, optionally filtered by a glob pattern.
+   *
+   * Each borrowed entry is eagerly materialized into an owned `ConfigEntry`.
+   * Entries whose name or value is not valid utf-8 are skipped.
+   */
+  entries(glob?: string | undefined | null): Array<ConfigEntry>
 }
 
 export declare class Cred {
@@ -322,6 +431,55 @@ export declare class GitObject {
   peelToBlob(): Blob
 }
 
+/**
+ * A git index (the staging area).
+ *
+ * Obtain one with `Repository.index()`. Mutating methods change the in-memory
+ * index only; call `write()` to persist it to disk, or `writeTree()` to write
+ * its current state to the object database as a tree (whose OID can then be
+ * used to create a commit).
+ */
+export declare class Index {
+  /**
+   * Add or update an index entry from a file on disk.
+   *
+   * The `path` is relative to the repository's working directory and must be
+   * readable. This forces the file to be added to the index even if it is
+   * ignored.
+   */
+  addPath(path: string): void
+  /**
+   * Add or update index entries matching files in the working directory.
+   *
+   * `pathspecs` defaults to `["*"]` (everything) when omitted. Ignored files
+   * are skipped unless `force` is `true`, which maps to
+   * `IndexAddOption::FORCE`.
+   */
+  addAll(pathspecs?: Array<string> | undefined | null, force?: boolean | undefined | null): void
+  /**
+   * Update all index entries to match the working directory.
+   *
+   * Existing entries are refreshed and entries whose file no longer exists are
+   * removed. `pathspecs` defaults to `["*"]` when omitted. This will fail on a
+   * bare index.
+   */
+  updateAll(pathspecs?: Array<string> | undefined | null): void
+  /** Remove an index entry corresponding to a file on disk. */
+  removePath(path: string): void
+  /** Get the count of entries currently in the index. */
+  count(): number
+  /** Write the in-memory index back to disk using an atomic file lock. */
+  write(): void
+  /**
+   * Write the index as a tree to the object database and return its OID.
+   *
+   * The index must be associated with an existing repository and must not
+   * contain any conflicted entries. The returned OID can be used to create a
+   * commit.
+   */
+  writeTree(): string
+}
+
 export declare class ProxyOptions {
   constructor()
   /**
@@ -336,6 +494,43 @@ export declare class ProxyOptions {
    * Note that this will override `auto` specified before.
    */
   url(url: string): this
+}
+
+export declare class PushOptions {
+  constructor()
+  /** Set the callbacks to use for the push operation. */
+  remoteCallback(callback: RemoteCallbacks): this
+  /** Set the proxy options to use for the push operation. */
+  proxyOptions(options: ProxyOptions): this
+  /**
+   * If the transport being used to push to the remote requires the creation
+   * of a pack file, this controls the number of worker threads used by the
+   * packbuilder when creating that pack file to be sent to the remote.
+   *
+   * If set to 0 the packbuilder will auto-detect the number of threads to
+   * create, and the default value is 1.
+   */
+  packbuilderParallelism(parallel: number): this
+  /**
+   * Set remote redirection settings; whether redirects to another host are
+   * permitted.
+   *
+   * By default, git will follow a redirect on the initial request
+   * (`/info/refs`), but not subsequent requests.
+   */
+  followRedirects(opt: RemoteRedirect): this
+  /**
+   * Set extra headers for this push operation.
+   *
+   * Throws if any header contains an interior NUL byte.
+   */
+  customHeaders(headers: Array<string>): this
+  /**
+   * Set "push options" to deliver to the remote.
+   *
+   * Throws if any push option contains an interior NUL byte.
+   */
+  remotePushOptions(options: Array<string>): this
 }
 
 export declare class Reference {
@@ -483,6 +678,14 @@ export declare class Remote {
    * disconnect and update the remote-tracking branches.
    */
   fetch(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null): void
+  /**
+   * Perform a push.
+   *
+   * If `refspecs` is empty the configured push refspecs are used. Delete a
+   * remote ref by pushing `":refs/heads/branch"`. To detect per-ref server
+   * rejections, set a `pushUpdateReference` callback on the `RemoteCallbacks`.
+   */
+  push(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null): void
   /** Update the tips to the new state */
   updateTips(updateFetchhead: RemoteUpdateFlags, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
 }
@@ -522,6 +725,14 @@ export declare class RemoteCallbacks {
   transferProgress(callback: (arg: Progress) => void): this
   /** The callback through which progress of push transfer is monitored */
   pushTransferProgress(callback: (current: number, total: number, bytes: number) => void): this
+  /**
+   * Set a callback to get invoked for each updated reference on a push.
+   *
+   * The callback is invoked once per reference with the reference name and a
+   * status message sent by the server. `status` is `null` when the reference
+   * was updated successfully; otherwise it is the server's rejection reason.
+   */
+  pushUpdateReference(callback: (refname: string, status: string | null) => void): this
 }
 
 export declare class RepoBuilder {
@@ -621,6 +832,21 @@ export declare class Repository {
   constructor(gitDir: string)
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
+  /**
+   * Get the configuration file for this repository.
+   *
+   * If a configuration file has not been set, the default config set for the
+   * repository will be returned, including global and system configurations.
+   */
+  config(): Config
+  /**
+   * Create a new action signature with default user and now timestamp.
+   *
+   * This looks up the `user.name` and `user.email` from the configuration and
+   * uses the current time as the timestamp. It returns an error if either the
+   * `user.name` or `user.email` are not set.
+   */
+  signature(): Signature
   /** Tests whether this repository is a shallow clone. */
   isShallow(): boolean
   /** Tests whether this repository is empty. */
@@ -745,6 +971,83 @@ export declare class Repository {
   findTree(oid: string): Tree | null
   findCommit(oid: string): Commit | null
   /**
+   * List the branches in the repository.
+   *
+   * Pass `filter` to restrict the listing to local or remote branches; omit it
+   * to list both. Branches whose names are not valid utf-8 are skipped (they
+   * cannot be re-resolved by name).
+   */
+  branches(filter?: BranchType | undefined | null): Array<Branch>
+  /**
+   * Lookup a branch by its name in a repository.
+   *
+   * Returns `null` when no branch with that name and type exists.
+   */
+  findBranch(name: string, branchType: BranchType): Branch | null
+  /**
+   * Create a new branch pointing at a target commit.
+   *
+   * A new direct reference will be created pointing to this target commit. If
+   * `force` is true and a branch already exists with the given name, it will
+   * be replaced.
+   */
+  branch(branchName: string, target: Commit, force: boolean): Branch
+  /**
+   * Check out the tree pointed to by `treeish` (a commit, tag or tree object),
+   * updating the working directory to match.
+   *
+   * This does NOT update HEAD; pair it with `set_head` to switch branches.
+   * The checkout is **safe** by default — pass `options.force = true` to
+   * overwrite local modifications.
+   */
+  checkoutTree(treeish: GitObject, options?: CheckoutOptions | undefined | null): void
+  /**
+   * Update files in the index and the working tree to match the content of
+   * the tree pointed at by HEAD.
+   *
+   * The checkout is **safe** by default — pass `options.force = true` to
+   * overwrite local modifications.
+   */
+  checkoutHead(options?: CheckoutOptions | undefined | null): void
+  /**
+   * Update files in the working tree to match the content of the repository's
+   * index.
+   *
+   * The checkout is **safe** by default — pass `options.force = true` to
+   * overwrite local modifications.
+   */
+  checkoutIndex(options?: CheckoutOptions | undefined | null): void
+  /**
+   * Make HEAD point to the reference named `refname`.
+   *
+   * If `refname` names an existing branch, HEAD becomes a symbolic reference
+   * to that branch; otherwise it points to a not-yet-existing branch. This
+   * does not touch the working directory — checkout separately.
+   */
+  setHead(refname: string): void
+  /**
+   * Make HEAD point directly at the commit with the given OID, detaching it
+   * from any branch.
+   */
+  setHeadDetached(oid: string): void
+  /**
+   * Create a new direct reference named `name` pointing at the object `oid`.
+   *
+   * If `force` is true and a reference already exists with the given name, it
+   * will be overwritten; otherwise the call fails. `log_message` is recorded
+   * in the reflog.
+   */
+  reference(name: string, oid: string, force: boolean, logMessage: string): Reference
+  /**
+   * Create a new symbolic reference named `name` pointing at the reference
+   * named `target` (e.g. `refs/heads/main`).
+   *
+   * If `force` is true and a reference already exists with the given name, it
+   * will be overwritten; otherwise the call fails. `log_message` is recorded
+   * in the reflog.
+   */
+  referenceSymbolic(name: string, target: string, force: boolean, logMessage: string): Reference
+  /**
    * Create a new tag in the repository from an object
    *
    * A new reference will also be created pointing to this tag object. If
@@ -797,7 +1100,7 @@ export declare class Repository {
    * iterate over all tags calling `cb` on each.
    * the callback is provided the tag id and name
    */
-  tagForeach(cb: (arg0: string, arg1: Buffer) => boolean): void
+  tagForeach(cb: (arg: [string, Buffer]) => boolean): void
   /**
    * Create a diff between a tree and the working directory.
    *
@@ -838,8 +1141,30 @@ export declare class Repository {
    * current branch and make it point to this commit. If the reference
    * doesn't exist yet, it will be created. If it does exist, the first
    * parent must be the tip of this branch.
+   *
+   * `parents` is an optional list of parent commit OID hex strings. When it
+   * is `None` or empty a parent-less root commit is created; otherwise each
+   * OID is resolved to a commit and used as a parent (the first parent must
+   * be the current tip of `update_ref`).
    */
-  commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree): string
+  commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null): string
+  /**
+   * Get the index (staging area) file for this repository.
+   *
+   * If a custom index has not been set, the default index for the repository
+   * will be returned (the one at `.git/index`).
+   */
+  index(): Index
+  /**
+   * Write an in-memory buffer to the object database as a blob and return its
+   * OID hex string.
+   */
+  blob(data: Uint8Array): string
+  /**
+   * Read a file from the filesystem and write its content to the object
+   * database as a blob, returning its OID hex string.
+   */
+  blobPath(path: string): string
   /** Create a revwalk that can be used to traverse the commit graph. */
   revWalk(): RevWalk
   getFileLatestModifiedDate(filepath: string): number
@@ -856,6 +1181,39 @@ export declare class Repository {
    */
   getFilesLatestModification(filepaths: Array<string>): Record<string, FileModification | undefined | null>
   getFilesLatestModificationAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
+  /**
+   * List the working-tree and index status of files in the repository.
+   *
+   * Mirrors `git status`. By default untracked files are included and ignored
+   * files are not; pass `options` to tune the scan. Each returned `FileStatus`
+   * decodes the `git2::Status` flags into booleans plus the raw `bits`.
+   */
+  statuses(options?: StatusOptions | undefined | null): Array<FileStatus>
+  /**
+   * Get the status of a single file by its workdir-relative path.
+   *
+   * This is more efficient than scanning the whole tree when only one path is
+   * of interest. Errors (e.g. an ambiguous path) surface as a napi error.
+   */
+  statusFile(path: string): FileStatus
+  /** Asynchronous variant of `statuses`, computed off the main thread. */
+  statusesAsync(options?: StatusOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<FileStatus>>
+  /**
+   * Compute the blame for `path`: who last changed each line, as an ordered
+   * list of hunks (contiguous runs of lines sharing one final commit).
+   *
+   * `path` is workdir-relative. Pass `options` to restrict the line/commit
+   * range or enable copy tracking. Each `BlameHunk` is eagerly materialized
+   * so it outlives the underlying libgit2 blame.
+   */
+  blameFile(path: string, options?: BlameOptions | undefined | null): Array<BlameHunk>
+  /**
+   * Blame `path` and return only the hunk covering `line_no` (1-based), or
+   * `null` when the line is out of range.
+   */
+  blameLine(path: string, lineNo: number, options?: BlameOptions | undefined | null): BlameHunk | null
+  /** Asynchronous variant of `blame_file`, computed off the main thread. */
+  blameFileAsync(path: string, options?: BlameOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<BlameHunk>>
   getFileCreatedDate(filepath: string): number
   getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }
@@ -1086,6 +1444,102 @@ export declare const enum AutotagOption {
   All = 3
 }
 
+/**
+ * A single blame hunk: a contiguous run of lines attributed to one commit.
+ *
+ * All identity fields are copied out of the borrowed `git2::BlameHunk` so the
+ * value can safely outlive the underlying `git2::Blame`.
+ */
+export interface BlameHunk {
+  /** Number of lines covered by this hunk. */
+  linesInHunk: number
+  /** 40-char lowercase hex OID of the commit where these lines were last changed. */
+  finalCommitId: string
+  /** Line number where this hunk begins in the final file (1-based). */
+  finalStartLine: number
+  /** Author name of the final commit. Undefined if absent or not valid UTF-8. */
+  finalAuthorName?: string
+  /** Author email of the final commit. Undefined if absent or not valid UTF-8. */
+  finalAuthorEmail?: string
+  /** Author time of the final commit, ms since epoch. `0` if no signature. */
+  finalTime: number
+  /** 40-char lowercase hex OID of the commit where this hunk was found. */
+  origCommitId: string
+  /** Line number where this hunk begins in the original file (1-based). */
+  origStartLine: number
+  /** Path to the file where this hunk originated. Undefined if not valid UTF-8. */
+  origPath?: string
+  /** Whether this hunk was tracked to a boundary commit (root or `oldest_commit`). */
+  isBoundary: boolean
+}
+
+/**
+ * Options controlling how a blame is computed.
+ *
+ * Every field is optional; omitted fields fall back to libgit2's defaults
+ * (no copy tracking, the whole file, starting from the current HEAD).
+ */
+export interface BlameOptions {
+  /** Track lines that have moved within a file. Defaults to `false`. */
+  trackCopiesSameFile?: boolean
+  /** Track lines that have moved across files in the same commit. Defaults to `false`. */
+  trackCopiesSameCommitMoves?: boolean
+  /** 40-char hex OID of the newest commit to consider (the blame starts here). */
+  newestCommit?: string
+  /** 40-char hex OID of the oldest commit to consider (a boundary). */
+  oldestCommit?: string
+  /** Restrict the search to first-parent history only. Defaults to `false`. */
+  firstParent?: boolean
+  /** Map names/emails through the repository's mailmap. Defaults to `false`. */
+  useMailmap?: boolean
+  /** Ignore whitespace differences. Defaults to `false`. */
+  ignoreWhitespace?: boolean
+  /** The first line in the file to blame (1-based). */
+  minLine?: number
+  /** The last line in the file to blame (1-based). */
+  maxLine?: number
+}
+
+/** An enumeration for the possible types of branches. */
+export declare const enum BranchType {
+  /** A local branch not on a remote. */
+  Local = 0,
+  /** A branch for a remote. */
+  Remote = 1
+}
+
+/**
+ * Options controlling how a checkout writes files into the working directory.
+ *
+ * The default is a **safe** checkout (matching `git checkout`): files with
+ * local modifications are left untouched. Set `force` to overwrite them, which
+ * can discard uncommitted changes — use it deliberately.
+ */
+export interface CheckoutOptions {
+  /**
+   * Force the checkout, overwriting any local changes in the working tree.
+   * Defaults to a safe checkout when omitted or `false`.
+   */
+  force?: boolean
+  /**
+   * Recreate files that are missing from the working tree even in a safe
+   * checkout.
+   */
+  recreateMissing?: boolean
+  /** Allow the checkout to write files that conflict with the working tree. */
+  allowConflicts?: boolean
+  /**
+   * Restrict the checkout to these pathspecs. When omitted, all paths are
+   * checked out.
+   */
+  paths?: Array<string>
+  /**
+   * Write the checked-out files into this directory instead of the
+   * repository's working directory.
+   */
+  targetDir?: string
+}
+
 export declare const enum CloneLocal {
   /**
    * Auto-detect (default)
@@ -1100,6 +1554,40 @@ export declare const enum CloneLocal {
   None = 2,
   /** Bypass the git-aware transport, but don't try to use hardlinks. */
   NoLinks = 3
+}
+
+/**
+ * A single configuration entry: its fully-qualified name, value, and the
+ * level (file) it was read from.
+ */
+export interface ConfigEntry {
+  name: string
+  value: string
+  level: ConfigLevel
+}
+
+/**
+ * The priority level a configuration entry or file applies to. Higher levels
+ * take precedence; `Local` (the repository's own `.git/config`) is where
+ * `set_*`/`remove_entry` write by default.
+ */
+export declare const enum ConfigLevel {
+  /** System-wide on Windows, for compatibility with portable git */
+  ProgramData = 0,
+  /** System-wide configuration file, e.g. /etc/gitconfig */
+  System = 1,
+  /** XDG-compatible configuration file, e.g. ~/.config/git/config */
+  Xdg = 2,
+  /** User-specific configuration, e.g. ~/.gitconfig */
+  Global = 3,
+  /** Repository specific config, e.g. $PWD/.git/config */
+  Local = 4,
+  /** Worktree specific configuration file, e.g. $GIT_DIR/config.worktree */
+  Worktree = 5,
+  /** Application specific configuration file */
+  App = 6,
+  /** Highest level available */
+  Highest = 7
 }
 
 /** Types of credentials that can be requested by a credential callback. */
@@ -1248,6 +1736,43 @@ export interface FileModification {
   committerTime: number
 }
 
+/**
+ * Status of a single file in the working tree and/or index.
+ *
+ * The boolean flags mirror the `git2::Status` bits; `bits` carries the raw
+ * value as a forward-compatible escape hatch for flags not surfaced here.
+ */
+export interface FileStatus {
+  /** Workdir-relative path. `null` if the path is not valid UTF-8. */
+  path?: string
+  /** Raw `git2::Status` bits — forward-compat escape hatch. */
+  bits: number
+  /** Staged: a new file was added to the index. */
+  isIndexNew: boolean
+  /** Staged: a tracked file was modified in the index. */
+  isIndexModified: boolean
+  /** Staged: a tracked file was deleted from the index. */
+  isIndexDeleted: boolean
+  /** Staged: a tracked file was renamed in the index. */
+  isIndexRenamed: boolean
+  /** Staged: a tracked file changed type in the index. */
+  isIndexTypechange: boolean
+  /** Unstaged: an untracked file (new in the working directory). */
+  isWtNew: boolean
+  /** Unstaged: a tracked file was modified in the working directory. */
+  isWtModified: boolean
+  /** Unstaged: a tracked file was deleted from the working directory. */
+  isWtDeleted: boolean
+  /** Unstaged: a tracked file changed type in the working directory. */
+  isWtTypechange: boolean
+  /** Unstaged: a tracked file was renamed in the working directory. */
+  isWtRenamed: boolean
+  /** The file is ignored. */
+  isIgnored: boolean
+  /** The file has merge conflicts. */
+  isConflicted: boolean
+}
+
 export declare const enum ObjectType {
   /** Any kind of git object */
   Any = 0,
@@ -1369,4 +1894,32 @@ export declare const enum Sort {
    * 1 << 2
    */
   Reverse = 4
+}
+
+/**
+ * Options controlling how a working-tree status scan is performed.
+ *
+ * Every field is optional; omitted fields fall back to the git CLI defaults
+ * (`include_untracked` is `true`, everything else `false`).
+ */
+export interface StatusOptions {
+  /** Include untracked files in the status. Defaults to `true`. */
+  includeUntracked?: boolean
+  /** Include ignored files in the status. Defaults to `false`. */
+  includeIgnored?: boolean
+  /** Include unmodified files in the status. Defaults to `false`. */
+  includeUnmodified?: boolean
+  /** Skip submodules. Defaults to `false`. */
+  excludeSubmodules?: boolean
+  /**
+   * Recurse into untracked directories instead of reporting the directory
+   * itself. Defaults to `false`.
+   */
+  recurseUntrackedDirs?: boolean
+  /** Detect renames between the HEAD tree and the index. Defaults to `false`. */
+  renamesHeadToIndex?: boolean
+  /** Detect renames between the index and the working directory. Defaults to `false`. */
+  renamesIndexToWorkdir?: boolean
+  /** Restrict the scan to the given pathspecs. */
+  pathspec?: Array<string>
 }

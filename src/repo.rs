@@ -1,20 +1,26 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use napi::{JsString, bindgen_prelude::*};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 
+use crate::blame::{BlameHunk, BlameOptions, blame_single_line, collect_blame};
+use crate::branch::{Branch, BranchType};
+use crate::checkout::{CheckoutOptions, build_checkout_builder};
 use crate::commit::{Commit, CommitInner};
+use crate::config::Config;
 use crate::diff::Diff;
 use crate::error::{IntoNapiError, NotNullError};
 use crate::file_modification::{FileModification, get_file_modification, get_files_modification};
+use crate::index::Index;
 use crate::object::{GitObject, ObjectParent};
 use crate::reference;
 use crate::remote::Remote;
 use crate::rev_walk::RevWalk;
 use crate::signature::Signature;
+use crate::status::{FileStatus, StatusOptions, build_status_opts, status_from_bits};
 use crate::tag::Tag;
 use crate::tree::{Tree, TreeEntry, TreeParent};
 use crate::util::path_to_javascript_string;
@@ -131,6 +137,21 @@ pub struct GitBulkModificationTask {
 
 unsafe impl Send for GitBulkModificationTask {}
 
+pub struct GitStatusTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  options: Option<StatusOptions>,
+}
+
+unsafe impl Send for GitStatusTask {}
+
+pub struct GitBlameTask {
+  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
+  filepath: String,
+  options: Option<BlameOptions>,
+}
+
+unsafe impl Send for GitBlameTask {}
+
 #[napi]
 impl Task for GitDateTask {
   type Output = i64;
@@ -223,6 +244,49 @@ impl Task for GitBulkModificationTask {
       &self.filepaths,
     )
     .convert_without_message()
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitStatusTask {
+  type Output = Vec<FileStatus>;
+  type JsValue = Vec<FileStatus>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    collect_statuses(
+      &self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
+      self.options.clone(),
+    )
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+impl Task for GitBlameTask {
+  type Output = Vec<BlameHunk>;
+  type JsValue = Vec<BlameHunk>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    collect_blame(
+      &self
+        .repo
+        .read()
+        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
+        .inner,
+      &self.filepath,
+      self.options.clone(),
+    )
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -370,6 +434,29 @@ impl Repository {
           .convert("Get the HEAD of Repository failed")
       })?,
     })
+  }
+
+  #[napi]
+  /// Get the configuration file for this repository.
+  ///
+  /// If a configuration file has not been set, the default config set for the
+  /// repository will be returned, including global and system configurations.
+  pub fn config(&self) -> Result<Config> {
+    Ok(Config {
+      inner: self.inner.config().convert_without_message()?,
+    })
+  }
+
+  #[napi]
+  /// Create a new action signature with default user and now timestamp.
+  ///
+  /// This looks up the `user.name` and `user.email` from the configuration and
+  /// uses the current time as the timestamp. It returns an error if either the
+  /// `user.name` or `user.email` are not set.
+  pub fn signature(&self) -> Result<Signature> {
+    Ok(Signature::from_git2(
+      self.inner.signature().convert_without_message()?,
+    ))
   }
 
   #[napi]
@@ -699,6 +786,218 @@ impl Repository {
   }
 
   #[napi]
+  /// List the branches in the repository.
+  ///
+  /// Pass `filter` to restrict the listing to local or remote branches; omit it
+  /// to list both. Branches whose names are not valid utf-8 are skipped (they
+  /// cannot be re-resolved by name).
+  pub fn branches(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    filter: Option<BranchType>,
+  ) -> Result<Vec<Branch>> {
+    // The `Branches<'repo>` iterator yields branches borrowing the repository,
+    // which cannot escape into a `SharedReference`. Collect each branch's name
+    // and type first, then rebuild owned `Branch`es by re-finding them.
+    let mut specs: Vec<(String, git2::BranchType)> = Vec::new();
+    {
+      let branches = self
+        .inner
+        .branches(filter.map(Into::into))
+        .convert("Failed to list branches")?;
+      for branch in branches {
+        let (branch, branch_type) = branch.convert_without_message()?;
+        if let Some(name) = branch.name().convert_without_message()? {
+          specs.push((name.to_owned(), branch_type));
+        }
+      }
+    }
+    let mut result = Vec::with_capacity(specs.len());
+    for (name, branch_type) in specs {
+      let inner = this_ref.clone(env)?.share_with(env, move |repo| {
+        repo
+          .inner
+          .find_branch(&name, branch_type)
+          .convert(format!("Find branch [{name}] failed"))
+      })?;
+      result.push(Branch { inner });
+    }
+    Ok(result)
+  }
+
+  #[napi]
+  /// Lookup a branch by its name in a repository.
+  ///
+  /// Returns `null` when no branch with that name and type exists.
+  pub fn find_branch(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    name: String,
+    branch_type: BranchType,
+  ) -> Result<Option<Branch>> {
+    let branch_type: git2::BranchType = branch_type.into();
+    // Probe first so a genuine "not found" maps to `None` while other errors
+    // surface, and the `SharedReference` is only built when the branch exists.
+    if let Err(err) = self.inner.find_branch(&name, branch_type) {
+      if err.code() == git2::ErrorCode::NotFound {
+        return Ok(None);
+      }
+      return Err(err).convert(format!("Find branch [{name}] failed"));
+    }
+    let inner = this_ref.share_with(env, move |repo| {
+      repo
+        .inner
+        .find_branch(&name, branch_type)
+        .convert(format!("Find branch [{name}] failed"))
+    })?;
+    Ok(Some(Branch { inner }))
+  }
+
+  #[napi]
+  /// Create a new branch pointing at a target commit.
+  ///
+  /// A new direct reference will be created pointing to this target commit. If
+  /// `force` is true and a branch already exists with the given name, it will
+  /// be replaced.
+  pub fn branch(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    branch_name: String,
+    target: &Commit,
+    force: bool,
+  ) -> Result<Branch> {
+    // Create the branch ref; the returned borrowed branch is dropped, then the
+    // owned `Branch` is rebuilt by re-finding it inside `share_with`.
+    self
+      .inner
+      .branch(&branch_name, &target.inner, force)
+      .convert(format!("Failed to create branch [{branch_name}]"))?;
+    let inner = this_ref.share_with(env, move |repo| {
+      repo
+        .inner
+        .find_branch(&branch_name, git2::BranchType::Local)
+        .convert(format!("Find branch [{branch_name}] failed"))
+    })?;
+    Ok(Branch { inner })
+  }
+
+  #[napi]
+  /// Check out the tree pointed to by `treeish` (a commit, tag or tree object),
+  /// updating the working directory to match.
+  ///
+  /// This does NOT update HEAD; pair it with `set_head` to switch branches.
+  /// The checkout is **safe** by default — pass `options.force = true` to
+  /// overwrite local modifications.
+  pub fn checkout_tree(&self, treeish: &GitObject, options: Option<CheckoutOptions>) -> Result<()> {
+    let mut builder = build_checkout_builder(options);
+    self
+      .inner
+      .checkout_tree(&treeish.inner, Some(&mut builder))
+      .convert_without_message()
+  }
+
+  #[napi]
+  /// Update files in the index and the working tree to match the content of
+  /// the tree pointed at by HEAD.
+  ///
+  /// The checkout is **safe** by default — pass `options.force = true` to
+  /// overwrite local modifications.
+  pub fn checkout_head(&self, options: Option<CheckoutOptions>) -> Result<()> {
+    let mut builder = build_checkout_builder(options);
+    self
+      .inner
+      .checkout_head(Some(&mut builder))
+      .convert_without_message()
+  }
+
+  #[napi]
+  /// Update files in the working tree to match the content of the repository's
+  /// index.
+  ///
+  /// The checkout is **safe** by default — pass `options.force = true` to
+  /// overwrite local modifications.
+  pub fn checkout_index(&self, options: Option<CheckoutOptions>) -> Result<()> {
+    let mut builder = build_checkout_builder(options);
+    self
+      .inner
+      .checkout_index(None, Some(&mut builder))
+      .convert_without_message()
+  }
+
+  #[napi]
+  /// Make HEAD point to the reference named `refname`.
+  ///
+  /// If `refname` names an existing branch, HEAD becomes a symbolic reference
+  /// to that branch; otherwise it points to a not-yet-existing branch. This
+  /// does not touch the working directory — checkout separately.
+  pub fn set_head(&self, refname: String) -> Result<()> {
+    self.inner.set_head(&refname).convert_without_message()
+  }
+
+  #[napi]
+  /// Make HEAD point directly at the commit with the given OID, detaching it
+  /// from any branch.
+  pub fn set_head_detached(&self, oid: String) -> Result<()> {
+    let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
+    self.inner.set_head_detached(oid).convert_without_message()
+  }
+
+  #[napi]
+  /// Create a new direct reference named `name` pointing at the object `oid`.
+  ///
+  /// If `force` is true and a reference already exists with the given name, it
+  /// will be overwritten; otherwise the call fails. `log_message` is recorded
+  /// in the reflog.
+  pub fn reference(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    name: String,
+    oid: String,
+    force: bool,
+    log_message: String,
+  ) -> Result<reference::Reference> {
+    Ok(reference::Reference {
+      inner: this_ref.share_with(env, move |repo| {
+        let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
+        repo
+          .inner
+          .reference(&name, oid, force, &log_message)
+          .convert(format!("Failed to create reference [{name}]"))
+      })?,
+    })
+  }
+
+  #[napi]
+  /// Create a new symbolic reference named `name` pointing at the reference
+  /// named `target` (e.g. `refs/heads/main`).
+  ///
+  /// If `force` is true and a reference already exists with the given name, it
+  /// will be overwritten; otherwise the call fails. `log_message` is recorded
+  /// in the reflog.
+  pub fn reference_symbolic(
+    &self,
+    this_ref: Reference<Repository>,
+    env: Env,
+    name: String,
+    target: String,
+    force: bool,
+    log_message: String,
+  ) -> Result<reference::Reference> {
+    Ok(reference::Reference {
+      inner: this_ref.share_with(env, move |repo| {
+        repo
+          .inner
+          .reference_symbolic(&name, &target, force, &log_message)
+          .convert(format!("Failed to create symbolic reference [{name}]"))
+      })?,
+    })
+  }
+
+  #[napi]
   /// Create a new tag in the repository from an object
   ///
   /// A new reference will also be created pointing to this tag object. If
@@ -919,6 +1218,11 @@ impl Repository {
   /// current branch and make it point to this commit. If the reference
   /// doesn't exist yet, it will be created. If it does exist, the first
   /// parent must be the tip of this branch.
+  ///
+  /// `parents` is an optional list of parent commit OID hex strings. When it
+  /// is `None` or empty a parent-less root commit is created; otherwise each
+  /// OID is resolved to a commit and used as a parent (the first parent must
+  /// be the current tip of `update_ref`).
   pub fn commit(
     &self,
     update_ref: Option<String>,
@@ -926,7 +1230,20 @@ impl Repository {
     committer: &Signature,
     message: String,
     tree: &Tree,
+    parents: Option<Vec<String>>,
   ) -> Result<String> {
+    let parent_commits = parents
+      .unwrap_or_default()
+      .into_iter()
+      .map(|oid| {
+        let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
+        self
+          .inner
+          .find_commit(oid)
+          .convert(format!("Find commit from OID [{oid}] failed"))
+      })
+      .collect::<Result<Vec<git2::Commit>>>()?;
+    let parent_refs = parent_commits.iter().collect::<Vec<&git2::Commit>>();
     self
       .inner
       .commit(
@@ -935,10 +1252,43 @@ impl Repository {
         committer.as_ref(),
         message.as_str(),
         tree.as_ref(),
-        &[],
+        &parent_refs,
       )
       .convert_without_message()
       .map(|oid| oid.to_string())
+  }
+
+  #[napi]
+  /// Get the index (staging area) file for this repository.
+  ///
+  /// If a custom index has not been set, the default index for the repository
+  /// will be returned (the one at `.git/index`).
+  pub fn index(&self) -> Result<Index> {
+    Ok(Index {
+      inner: self.inner.index().convert_without_message()?,
+    })
+  }
+
+  #[napi]
+  /// Write an in-memory buffer to the object database as a blob and return its
+  /// OID hex string.
+  pub fn blob(&self, data: Uint8Array) -> Result<String> {
+    self
+      .inner
+      .blob(&data)
+      .map(|oid| oid.to_string())
+      .convert_without_message()
+  }
+
+  #[napi]
+  /// Read a file from the filesystem and write its content to the object
+  /// database as a blob, returning its OID hex string.
+  pub fn blob_path(&self, path: String) -> Result<String> {
+    self
+      .inner
+      .blob_path(Path::new(&path))
+      .map(|oid| oid.to_string())
+      .convert_without_message()
   }
 
   #[napi]
@@ -1026,6 +1376,88 @@ impl Repository {
   }
 
   #[napi]
+  /// List the working-tree and index status of files in the repository.
+  ///
+  /// Mirrors `git status`. By default untracked files are included and ignored
+  /// files are not; pass `options` to tune the scan. Each returned `FileStatus`
+  /// decodes the `git2::Status` flags into booleans plus the raw `bits`.
+  pub fn statuses(&self, options: Option<StatusOptions>) -> Result<Vec<FileStatus>> {
+    collect_statuses(&self.inner, options)
+  }
+
+  #[napi]
+  /// Get the status of a single file by its workdir-relative path.
+  ///
+  /// This is more efficient than scanning the whole tree when only one path is
+  /// of interest. Errors (e.g. an ambiguous path) surface as a napi error.
+  pub fn status_file(&self, path: String) -> Result<FileStatus> {
+    let status = self
+      .inner
+      .status_file(Path::new(&path))
+      .convert_without_message()?;
+    Ok(status_from_bits(status, Some(path)))
+  }
+
+  #[napi]
+  /// Asynchronous variant of `statuses`, computed off the main thread.
+  pub fn statuses_async(
+    &self,
+    self_ref: Reference<Repository>,
+    options: Option<StatusOptions>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitStatusTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitStatusTask {
+        repo: RwLock::new(self_ref),
+        options,
+      },
+      signal,
+    ))
+  }
+
+  #[napi]
+  /// Compute the blame for `path`: who last changed each line, as an ordered
+  /// list of hunks (contiguous runs of lines sharing one final commit).
+  ///
+  /// `path` is workdir-relative. Pass `options` to restrict the line/commit
+  /// range or enable copy tracking. Each `BlameHunk` is eagerly materialized
+  /// so it outlives the underlying libgit2 blame.
+  pub fn blame_file(&self, path: String, options: Option<BlameOptions>) -> Result<Vec<BlameHunk>> {
+    collect_blame(&self.inner, &path, options)
+  }
+
+  #[napi]
+  /// Blame `path` and return only the hunk covering `line_no` (1-based), or
+  /// `null` when the line is out of range.
+  pub fn blame_line(
+    &self,
+    path: String,
+    line_no: u32,
+    options: Option<BlameOptions>,
+  ) -> Result<Option<BlameHunk>> {
+    blame_single_line(&self.inner, &path, line_no, options)
+  }
+
+  #[napi]
+  /// Asynchronous variant of `blame_file`, computed off the main thread.
+  pub fn blame_file_async(
+    &self,
+    self_ref: Reference<Repository>,
+    path: String,
+    options: Option<BlameOptions>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitBlameTask>> {
+    Ok(AsyncTask::with_optional_signal(
+      GitBlameTask {
+        repo: RwLock::new(self_ref),
+        filepath: path,
+        options,
+      },
+      signal,
+    ))
+  }
+
+  #[napi]
   pub fn get_file_created_date(&self, filepath: String) -> Result<i64> {
     get_file_created_date(&self.inner, &filepath)
       .convert_without_message()
@@ -1049,6 +1481,25 @@ impl Repository {
       signal,
     ))
   }
+}
+
+/// Run a status scan and eagerly materialize the borrowed `Statuses<'repo>`
+/// into owned `FileStatus` values so nothing referencing the repository escapes.
+fn collect_statuses(
+  repo: &git2::Repository,
+  options: Option<StatusOptions>,
+) -> Result<Vec<FileStatus>> {
+  let mut opts = build_status_opts(options);
+  let statuses = repo.statuses(Some(&mut opts)).convert_without_message()?;
+  Ok(
+    statuses
+      .iter()
+      .map(|entry| {
+        let path = entry.path().ok().map(|p| p.to_owned());
+        status_from_bits(entry.status(), path)
+      })
+      .collect(),
+  )
 }
 
 fn get_file_created_date(
