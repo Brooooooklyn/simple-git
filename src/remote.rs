@@ -854,12 +854,16 @@ impl Cred {
   }
 
   #[napi]
+  #[allow(clippy::unnecessary_cast)] // git_credtype_t is i32 on MSVC, u32 elsewhere
   /// Return the type of credentials that this object represents.
   ///
   /// The value is the raw `CredentialType` bitset (an OR-able `number`); test
   /// individual bits with `credTypeContains` and the `CredentialType` constants.
   pub fn credtype(&self) -> u32 {
-    self.inner.credtype()
+    // Normalize the platform-variant raw `git_credtype_t` to a portable u32. The
+    // values match `git2::CredentialType` (always u32), so callers can mask with
+    // CredentialType.* / credTypeContains.
+    self.inner.credtype() as u32
   }
 }
 
