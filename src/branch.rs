@@ -93,4 +93,16 @@ impl Branch {
       Err(_) => Ok(None),
     }
   }
+
+  #[napi]
+  /// Return the reference backing this branch as a live `Reference`.
+  ///
+  /// Branches are direct references, so the resolved direct reference is
+  /// returned (e.g. `refs/heads/main`).
+  pub fn get(&self, env: Env) -> Result<crate::reference::Reference> {
+    let inner = self.inner.clone(env)?.share_with(env, |branch| {
+      branch.get().resolve().convert_without_message()
+    })?;
+    Ok(crate::reference::Reference { inner })
+  }
 }

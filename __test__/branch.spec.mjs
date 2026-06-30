@@ -81,6 +81,20 @@ test("findBranch finds the current branch and returns null for missing", (t) => 
   t.is(missing, null, "missing branch returns null");
 });
 
+test("get() returns the resolved Reference for the current branch", (t) => {
+  const repo = projectRepo();
+  if (!repo.head().isBranch()) {
+    t.pass("HEAD is detached; skipping get() reference check");
+    return;
+  }
+  const current = repo.head().shorthand();
+  t.truthy(current);
+  const branch = repo.findBranch(current, BranchType.Local);
+  t.truthy(branch, "current branch is found");
+  const ref = branch.get();
+  t.is(ref.shorthand(), repo.head().shorthand());
+});
+
 test("branch() creates a branch and delete() removes it", (t) => {
   const { root, work, repo } = makeRepo();
   try {

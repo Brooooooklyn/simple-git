@@ -42,6 +42,13 @@ export declare class Branch {
    * Returns `None` when the branch has no configured upstream.
    */
   upstream(): Branch | null
+  /**
+   * Return the reference backing this branch as a live `Reference`.
+   *
+   * Branches are direct references, so the resolved direct reference is
+   * returned (e.g. `refs/heads/main`).
+   */
+  get(): Reference
 }
 
 export declare class Commit {
