@@ -15,8 +15,16 @@ use crate::{GitCode, Result};
 #[derive(Clone)]
 pub struct BlameOptions {
   /// Track lines that have moved within a file. Defaults to `false`.
+  ///
+  /// Note: libgit2 1.9.4 does not implement blame copy/move tracking, so
+  /// setting this flag has no effect today (accepted for forward-compat;
+  /// effectively a no-op).
   pub track_copies_same_file: Option<bool>,
   /// Track lines that have moved across files in the same commit. Defaults to `false`.
+  ///
+  /// Note: libgit2 1.9.4 does not implement blame copy/move tracking, so
+  /// setting this flag has no effect today (accepted for forward-compat;
+  /// effectively a no-op).
   pub track_copies_same_commit_moves: Option<bool>,
   /// 40-char hex OID of the newest commit to consider (the blame starts here).
   pub newest_commit: Option<String>,

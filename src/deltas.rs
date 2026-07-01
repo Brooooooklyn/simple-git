@@ -203,8 +203,10 @@ impl DiffFile {
   }
 
   #[napi]
-  /// Returns the path, in bytes, of the entry relative to the working
-  /// directory of the repository.
+  /// Returns the path of the entry relative to the working directory of the
+  /// repository, as a lossily-decoded (UTF-8) string.
+  ///
+  /// Returns `null` when the path is absent or not representable.
   pub fn path<'env>(&'env self, env: &'env Env) -> Option<JsString<'env>> {
     self
       .inner

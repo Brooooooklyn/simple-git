@@ -331,6 +331,13 @@ impl Remote {
   ///
   /// Safety: do not use the same `Remote` from the main thread while this async
   /// operation is pending; the underlying git2 handle is not `Sync`.
+  ///
+  /// Synchronous pre-throw: although the declared return is `Promise<void>`,
+  /// argument/state validation runs synchronously on the calling thread and
+  /// THROWS synchronously (the CALL throws — it does NOT return a rejected
+  /// Promise) when `fetchOptions` has already been consumed by a prior async
+  /// call or carries `RemoteCallbacks`. Wrap the CALL itself
+  /// (`try { await remote.fetchAsync(...) }`), not just the awaited Promise.
   pub fn fetch_async(
     &self,
     env: Env,
@@ -421,6 +428,15 @@ impl Remote {
   ///
   /// Safety: do not use the same `Remote` from the main thread while this async
   /// operation is pending; the underlying git2 handle is not `Sync`.
+  ///
+  /// Synchronous pre-throw: although the declared return is `Promise<void>`,
+  /// argument/state validation runs synchronously on the calling thread and
+  /// THROWS synchronously (the CALL throws — it does NOT return a rejected
+  /// Promise) when `pushOptions` has already been consumed by a prior async
+  /// call or carries `RemoteCallbacks`, or when this remote's push URL is
+  /// unreadable/absent or its configured push refspecs cannot be read. Wrap the
+  /// CALL itself (`try { await remote.pushAsync(...) }`), not just the awaited
+  /// Promise.
   pub fn push_async(
     &self,
     env: Env,

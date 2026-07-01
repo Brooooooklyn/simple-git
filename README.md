@@ -611,6 +611,74 @@ export class Reference {
 }
 ```
 
+## Error handling
+
+Every error thrown by this library — from a synchronous method or from a rejected
+`*Async` promise — is a standard `Error` carrying a `code` string property drawn
+from a fixed union of tokens. The `code` is a runtime property on the thrown
+`Error`; napi has no mechanism to add it to the generated `.d.ts` types, so this
+section is the canonical reference for the union.
+
+The 29 tokens are the 28 libgit2 error classes plus one napi-level token:
+
+| Token | Meaning |
+| --- | --- |
+| `GenericError` | Unclassified catch-all. Any unmapped or future libgit2 code collapses here — treat it as "something went wrong" rather than a specific class. |
+| `NotFound` | A requested object/reference/config entry does not exist. |
+| `Exists` | The object already exists and cannot be overwritten. |
+| `Ambiguous` | A short OID or name matched more than one object. |
+| `BufSize` | An output buffer was too small. |
+| `User` | A user-supplied callback returned an error. |
+| `BareRepo` | The operation is not allowed on a bare repository. |
+| `UnbornBranch` | HEAD points at a branch with no commits yet. |
+| `Unmerged` | The index contains unmerged entries. |
+| `NotFastForward` | A reference update was rejected because it was not fast-forward. |
+| `InvalidSpec` | A refspec/name is not well-formed. |
+| `Conflict` | A checkout/merge conflict prevents the operation. |
+| `Locked` | The resource is locked by another operation. |
+| `Modified` | The reference/object was modified concurrently. |
+| `Auth` | Authentication failed. |
+| `Certificate` | The server TLS certificate was rejected. |
+| `Applied` | The patch/commit was already applied. |
+| `Peel` | An object could not be peeled to the requested type. |
+| `Eof` | Unexpected end of file/stream. |
+| `Invalid` | An invalid operation or input for the current state. |
+| `Uncommitted` | Uncommitted changes prevent the operation. |
+| `Directory` | The operation is not valid on a directory. |
+| `MergeConflict` | A merge produced conflicts. |
+| `HashsumMismatch` | A hash verification failed. |
+| `IndexDirty` | The index has unsaved changes. |
+| `ApplyFail` | A patch failed to apply. |
+| `Owner` | The repository is owned by an unexpected user. |
+| `Timeout` | The operation timed out. |
+| `InvalidArg` | napi-level argument validation / API misuse (e.g. an option object reused across two `*Async` calls, or `RemoteCallbacks` passed to `fetchAsync`/`pushAsync`). Not a libgit2 class. |
+
+Synchronous methods and `*Async` promise rejections expose the same `error.code`
+token set, so you can branch on it either way:
+
+```ts
+// Synchronous
+try {
+  repo.findRemote('does-not-exist')
+} catch (e) {
+  if (e.code === 'NotFound') {
+    // handle the missing remote
+  }
+}
+
+// Asynchronous
+await repo.getFileLatestModifiedDateAsync('build.rs').catch((e) => {
+  if (e.code === 'GenericError') {
+    // unclassified failure
+  }
+})
+```
+
+> **Cancellation is different.** `*Async` methods that accept an `AbortSignal`
+> reject an aborted call with napi's own `AbortError`, whose `.code === "Cancelled"`.
+> That is napi's runtime cancellation code — it is **not** one of the git2/`InvalidArg`
+> tokens above, because cancellation bypasses the task's own reject hook.
+
 ## Performance
 
 Compared with the `exec` function, which gets the file's latest modified date by spawning a child process. Getting the latest modified date from the file 1000 times:

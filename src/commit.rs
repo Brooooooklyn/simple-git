@@ -67,7 +67,7 @@ impl Commit {
   }
 
   #[napi]
-  // Get the full message of a commit.
+  /// Get the full message of a commit.
   ///
   /// The returned message will be slightly prettified by removing any
   /// potential leading newlines.
@@ -184,9 +184,8 @@ impl Commit {
   #[napi]
   /// Get the commit time (i.e. committer time) of a commit.
   ///
-  /// The first element of the tuple is the time, in seconds, since the epoch.
-  /// The second element is the offset, in minutes, of the time zone of the
-  /// committer's preferred time zone.
+  /// Returns the committer time as a UTC `Date`; the committer's timezone
+  /// offset is not preserved (the value is normalized to UTC).
   pub fn time(&self) -> Result<DateTime<Utc>> {
     let committer_time = self.inner.time();
 
