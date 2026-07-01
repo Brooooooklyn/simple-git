@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { execSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -76,18 +78,48 @@ test("Created date async should work", async (t) => {
   }
 });
 
-test("Created date should throw for non-existent file", (t) => {
+// A path that no commit ever touched is "no matching commit", NOT an error:
+// the accessors now resolve to `null` instead of throwing.
+test("Created date returns null for non-existent file", (t) => {
   const { repo } = t.context;
-  t.throws(() => repo.getFileCreatedDate("non-existent-file.txt"), {
-    message: /Failed to get created date for/
-  });
+  t.is(repo.getFileCreatedDate("non-existent-file.txt"), null);
 });
 
-test("Created date async should throw for non-existent file", async (t) => {
+test("Created date async returns null for non-existent file", async (t) => {
   const { repo } = t.context;
-  await t.throwsAsync(() => repo.getFileCreatedDateAsync("non-existent-file.txt"), {
-    message: /Failed to get created date for/
-  });
+  t.is(await repo.getFileCreatedDateAsync("non-existent-file.txt"), null);
+});
+
+test("Latest modified date returns null for non-existent file", (t) => {
+  const { repo } = t.context;
+  t.is(repo.getFileLatestModifiedDate("does-not-exist-xyz.txt"), null);
+});
+
+test("Latest modified date async returns null for non-existent file", async (t) => {
+  const { repo } = t.context;
+  t.is(await repo.getFileLatestModifiedDateAsync("does-not-exist-xyz.txt"), null);
+});
+
+// Guard the null-vs-throw boundary: a fresh repo with an unborn HEAD (no commit)
+// cannot walk history at all. That is a real error and MUST still throw -- it must
+// NOT be swallowed into `null` like the "no matching commit" case above.
+test("File-date accessors THROW on an unborn HEAD (no commit), not null", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-unborn-"));
+  const work = join(root, "work");
+  execSync(`git init -q -b main "${work}"`);
+  const run = (args) => execSync(`git ${args}`, { cwd: work });
+  run("config user.name tester");
+  run("config user.email tester@example.com");
+  run("config commit.gpgsign false");
+  run("config core.autocrlf false");
+  try {
+    const repo = new Repository(work);
+    t.throws(() => repo.getFileCreatedDate("anything.txt"));
+    t.throws(() => repo.getFileLatestModifiedDate("anything.txt"));
+    await t.throwsAsync(() => repo.getFileCreatedDateAsync("anything.txt"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("Should be able to resolve head", (t) => {

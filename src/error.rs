@@ -30,21 +30,6 @@ impl<T> IntoNapiError for Result<T, git2::Error> {
   }
 }
 
-pub trait NotNullError {
-  type Associate;
-
-  fn expect_not_null(self, msg: String) -> crate::Result<Self::Associate>;
-}
-
-impl<T> NotNullError for Option<T> {
-  type Associate = T;
-
-  #[inline]
-  fn expect_not_null(self, msg: String) -> crate::Result<T> {
-    self.ok_or_else(|| napi::Error::new(crate::GitCode::NotFound, msg))
-  }
-}
-
 /// Coded-error primitives.
 ///
 /// These live in a nested module on purpose. `error.rs` above uses the 2-arg

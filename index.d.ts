@@ -1319,8 +1319,8 @@ export declare class Repository {
   blobPath(path: string): string
   /** Create a revwalk that can be used to traverse the commit graph. */
   revWalk(): RevWalk
-  getFileLatestModifiedDate(filepath: string): Date
-  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date>
+  getFileLatestModifiedDate(filepath: string): Date | null
+  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
   /**
    * Last commit that modified `filepath`, with author/committer identity.
    * Returns `null` when no commit in history touched the path.
@@ -1366,8 +1366,8 @@ export declare class Repository {
   blameLine(path: string, lineNo: number, options?: BlameOptions | undefined | null): BlameHunk | null
   /** Asynchronous variant of `blame_file`, computed off the main thread. */
   blameFileAsync(path: string, options?: BlameOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<BlameHunk>>
-  getFileCreatedDate(filepath: string): Date
-  getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date>
+  getFileCreatedDate(filepath: string): Date | null
+  getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
 }
 
 /**

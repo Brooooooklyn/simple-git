@@ -12,7 +12,7 @@ use crate::checkout::{CheckoutOptions, build_checkout_builder};
 use crate::commit::{Commit, CommitInner};
 use crate::config::Config;
 use crate::diff::{Diff, DiffOptions};
-use crate::error::{IntoNapiError, NotNullError};
+use crate::error::IntoNapiError;
 use crate::file_modification::{
   FileModification, get_file_modification, get_files_modification, time_to_date,
 };
@@ -262,23 +262,19 @@ pub struct GitCloneTask {
 // completes before `resolve()` runs) is only ever owned by one thread at a time.
 
 impl GitDateTask {
-  fn run(&mut self) -> Result<DateTime<Utc>> {
+  fn run(&mut self) -> Result<Option<DateTime<Utc>>> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_file_modification(&repo, &self.filepath)
       .convert_without_message()
-      .and_then(|value| {
-        value
-          .map(|m| m.committer_time)
-          .expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
-      })
+      .map(|value| value.map(|m| m.committer_time))
   }
 }
 
 #[napi]
 impl Task for GitDateTask {
-  type Output = DateTime<Utc>;
-  type JsValue = DateTime<Utc>;
+  type Output = Option<DateTime<Utc>>;
+  type JsValue = Option<DateTime<Utc>>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
     self.run().map_err(|mut e| {
@@ -301,24 +297,17 @@ impl Task for GitDateTask {
 }
 
 impl GitCreatedDateTask {
-  fn run(&mut self) -> Result<DateTime<Utc>> {
+  fn run(&mut self) -> Result<Option<DateTime<Utc>>> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    get_file_created_date(&repo, &self.filepath)
-      .convert_without_message()
-      .and_then(|value| {
-        value.expect_not_null(format!(
-          "Failed to get created date for [{}]",
-          &self.filepath
-        ))
-      })
+    get_file_created_date(&repo, &self.filepath).convert_without_message()
   }
 }
 
 #[napi]
 impl Task for GitCreatedDateTask {
-  type Output = DateTime<Utc>;
-  type JsValue = DateTime<Utc>;
+  type Output = Option<DateTime<Utc>>;
+  type JsValue = Option<DateTime<Utc>>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
     self.run().map_err(|mut e| {
@@ -1843,14 +1832,10 @@ impl Repository {
   }
 
   #[napi]
-  pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<DateTime<Utc>> {
+  pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
     get_file_modification(self.inner()?, &filepath)
       .convert_without_message()
-      .and_then(|value| {
-        value
-          .map(|m| m.committer_time)
-          .expect_not_null(format!("Failed to get commit for [{filepath}]"))
-      })
+      .map(|value| value.map(|m| m.committer_time))
   }
 
   #[napi]
@@ -2021,12 +2006,8 @@ impl Repository {
   }
 
   #[napi]
-  pub fn get_file_created_date(&self, filepath: String) -> Result<DateTime<Utc>> {
-    get_file_created_date(self.inner()?, &filepath)
-      .convert_without_message()
-      .and_then(|value| {
-        value.expect_not_null(format!("Failed to get created date for [{filepath}]"))
-      })
+  pub fn get_file_created_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
+    get_file_created_date(self.inner()?, &filepath).convert_without_message()
   }
 
   #[napi]
