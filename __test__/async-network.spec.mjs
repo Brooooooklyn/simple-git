@@ -470,17 +470,28 @@ test("fetchAsync observes a remoteSetUrl made after the Remote was loaded (docum
 // unless the remote's SOLE url is already the pushurl-resolved value —
 // verified by reproducing the same silent-wrong-destination failure through
 // the synchronous `push()` method (`find_remote` + `.push()`) directly.
-// `origin`'s fetch `url` here is deliberately bogus/nonexistent; a separate
-// `pushurl` points at the real bare repo. pushAsync must use the effective
-// push target (pushurl), not the (unrelated) fetch url. If `push_async` is
-// ever "simplified" to match `fetch_async`'s `find_remote(name)` design,
-// this test must catch the resulting silent push to the wrong destination.
+// `origin`'s fetch `url` here points at a SECOND real (but unrelated, unseeded)
+// bare repo; a separate `pushurl` points at the real target bare repo. Using a
+// real-but-wrong bare repo for the fetch url (rather than a nonexistent path)
+// matters: pushAsync must land on the effective push target (pushurl) and
+// must NOT silently write to the bogus fetch-url repo. A nonexistent path
+// would only prove "an error was thrown", not "the wrong destination was
+// avoided" — the bogus repo lets us assert the latter directly. If
+// `push_async` is ever "simplified" to match `fetch_async`'s
+// `find_remote(name)` design, this test must catch the resulting silent push
+// to the wrong (bogus) destination.
 test("pushAsync uses the remote's configured pushurl, not its fetch url", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-pushurl-"));
   try {
     const bare = join(root, "remote.git");
+    // Second, real bare repo standing in for the (wrong) fetch url. Left
+    // unseeded/empty so `refs/heads/main` never exists on it — a silent
+    // regression to `find_remote(name)`-based push resolution would create
+    // it there instead of on `bare`.
+    const bogusBare = join(root, "bogus-remote.git");
     const work = join(root, "work");
     execSync(`git init -q --bare -b main "${bare}"`);
+    execSync(`git init -q --bare -b main "${bogusBare}"`);
     execSync(`git init -q -b main "${work}"`);
     const run = (args) => execSync(`git ${args}`, { cwd: work });
     run("config user.name tester");
@@ -492,9 +503,8 @@ test("pushAsync uses the remote's configured pushurl, not its fetch url", async 
     run('commit -q -m "initial commit"');
     const head = workRev(work, "HEAD");
 
-    // Fetch url is deliberately wrong/nonexistent; pushurl is the real bare
-    // repo.
-    execSync(`git remote add origin "file:///nonexistent-should-not-be-used"`, {
+    // Fetch url is a real-but-wrong bare repo; pushurl is the real target.
+    execSync(`git remote add origin "${bogusBare}"`, {
       cwd: work,
     });
     execSync(`git remote set-url --push origin "${bare}"`, { cwd: work });
@@ -502,7 +512,10 @@ test("pushAsync uses the remote's configured pushurl, not its fetch url", async 
     const remote = new Repository(work).findRemote("origin");
     await remote.pushAsync(["refs/heads/main:refs/heads/main"], null);
 
+    // The target (pushurl) bare repo received the push...
     t.is(bareRev(bare, "refs/heads/main"), head);
+    // ...and the bogus (fetch-url) bare repo was never touched.
+    t.false(existsSync(join(bogusBare, "refs/heads/main")));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

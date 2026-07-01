@@ -753,7 +753,15 @@ export declare class Remote {
    * later `remoteSetUrl`/`remoteSetPushurl`/`remoteAddPush` on the same name
    * after this `Remote` was loaded is NOT observed by an already-scheduled
    * `pushAsync`, matching the synchronous `push()` contract ("no loaded
-   * remote instances will be affected").
+   * remote instances will be affected"). Also note: pushurl + refspecs are
+   * the config properties this snapshot captures, not the complete set that
+   * can diverge between named and anonymous remote resolution — libgit2's
+   * HTTP proxy auto-detection also consults `remote.<name>.proxy`, so
+   * `pushAsync(...)` combined with `PushOptions.proxyOptions(new
+   * ProxyOptions().auto())` will not pick up that per-remote proxy config
+   * the way the synchronous, named-remote `push()` does. This is a known,
+   * accepted gap (see the `remote_url` field doc on `RemotePushTask`), not
+   * chased further here.
    *
    * Safety: do not use the same `Remote` from the main thread while this async
    * operation is pending; the underlying git2 handle is not `Sync`.

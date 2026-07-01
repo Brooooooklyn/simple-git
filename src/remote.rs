@@ -395,7 +395,15 @@ impl Remote {
   /// later `remoteSetUrl`/`remoteSetPushurl`/`remoteAddPush` on the same name
   /// after this `Remote` was loaded is NOT observed by an already-scheduled
   /// `pushAsync`, matching the synchronous `push()` contract ("no loaded
-  /// remote instances will be affected").
+  /// remote instances will be affected"). Also note: pushurl + refspecs are
+  /// the config properties this snapshot captures, not the complete set that
+  /// can diverge between named and anonymous remote resolution — libgit2's
+  /// HTTP proxy auto-detection also consults `remote.<name>.proxy`, so
+  /// `pushAsync(...)` combined with `PushOptions.proxyOptions(new
+  /// ProxyOptions().auto())` will not pick up that per-remote proxy config
+  /// the way the synchronous, named-remote `push()` does. This is a known,
+  /// accepted gap (see the `remote_url` field doc on `RemotePushTask`), not
+  /// chased further here.
   ///
   /// Safety: do not use the same `Remote` from the main thread while this async
   /// operation is pending; the underlying git2 handle is not `Sync`.
@@ -577,6 +585,21 @@ pub struct RemotePushTask {
   /// `push()` method directly. Capturing and using the pre-resolved effective
   /// push URL on an anonymous remote is the only way to make `pushurl` work
   /// for local-transport pushes at all, so this snapshot mechanism stays.
+  ///
+  /// Caveat: pushurl + refspecs are the config properties this investigation
+  /// found and captured to make local-transport pushes safe — they are NOT
+  /// the complete set of config that diverges between named and anonymous
+  /// remote resolution. libgit2's HTTP proxy auto-detection also consults
+  /// `remote.<name>.proxy` (`remote.c`'s `http_proxy_config`, gated on
+  /// `remote->name && remote->name[0]`), so `pushAsync(...)` combined with
+  /// `PushOptions.proxyOptions(new ProxyOptions().auto())` silently skips
+  /// that per-remote proxy config and falls through to generic
+  /// `http.*.proxy`/env vars instead, unlike the synchronous `push()` (which
+  /// resolves a named remote). This is a deliberate, accepted scope
+  /// boundary, not an oversight: it does not change the decision above, and
+  /// is not worth capturing/injecting given the far worse alternative
+  /// (reverting to `find_remote`) reintroduces the silent-wrong-destination
+  /// pushurl bug this snapshot mechanism exists to avoid.
   remote_url: String,
   refspecs: Vec<String>,
   options: Option<git2::PushOptions<'static>>,
@@ -592,8 +615,11 @@ pub struct RemotePushTask {
 // snapshot via `remote_anonymous` (never re-resolved by name against on-disk
 // config — see the `remote_url` field doc for why push, unlike fetch, keeps
 // this snapshot mechanism: `find_remote` + `push()` hits a real libgit2
-// local-transport bug that silently drops a configured `pushurl`), all on a
-// single worker thread — never aliasing or concurrently accessing the
+// local-transport bug that silently drops a configured `pushurl`; pushurl +
+// refspecs are the config properties that investigation found and captured,
+// not an exhaustively verified complete set — proxy auto-detection is a
+// known additional gap, documented on that field, not chased further), all
+// on a single worker thread — never aliasing or concurrently accessing the
 // JS-visible handle.
 unsafe impl Send for RemotePushTask {}
 
