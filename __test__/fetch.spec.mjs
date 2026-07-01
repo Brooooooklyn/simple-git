@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import test from "ava";
 
-import { FetchOptions, Repository } from "../index.js";
+import { AutotagOption, FetchOptions, RemoteCallbacks, Repository } from "../index.js";
 
 // Build a local bare "remote" repo seeded with a commit, and a fresh empty
 // work repo wired to it via `git remote add origin`. Fully local: the remote
@@ -101,6 +101,53 @@ test("FetchOptions can only be used once", (t) => {
       remote.fetch(["refs/heads/main:refs/remotes/origin/main"], options),
     );
     t.regex(err.message, /FetchOptions can only be used once/);
+    repo.dispose();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// REJECT GUARD: updateTips borrows a RemoteCallbacks; handing it one whose
+// `used` flag is already set must throw instead of silently running with a
+// drained (empty) callback set. `used` is not JS-readable, so we flip it the
+// only way JS can: feed the callbacks to a FetchOptions, which consumes it
+// (mem::swap) and marks it used. This MUST NOT throw before the guard lands
+// (updateTips would just run with the emptied callbacks) and MUST throw after.
+test("updateTips rejects an already-used RemoteCallbacks", (t) => {
+  const { root, work } = makeFetchSetup();
+  try {
+    const cbs = new RemoteCallbacks();
+    // Consuming the callbacks into a FetchOptions flips its `used` flag.
+    new FetchOptions().remoteCallback(cbs);
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
+    t.throws(
+      () => remote.updateTips(0, AutotagOption.Unspecified, cbs, null),
+      { message: /already been used/ },
+    );
+    repo.dispose();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// CHECK-ONLY GUARD: the reject guard must READ `used` without SETTING it,
+// because updateTips borrows the callbacks (no consume). A FRESH callbacks
+// object must therefore survive being passed to updateTips more than once.
+// Both calls succeeding proves updateTips never marks the callbacks used.
+test("updateTips does not consume a fresh RemoteCallbacks", (t) => {
+  const { root, work } = makeFetchSetup();
+  try {
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
+    remote.fetch(["refs/heads/main:refs/remotes/origin/main"], null);
+    const cbs = new RemoteCallbacks();
+    t.notThrows(() =>
+      remote.updateTips(0, AutotagOption.Unspecified, cbs, null),
+    );
+    t.notThrows(() =>
+      remote.updateTips(0, AutotagOption.Unspecified, cbs, null),
+    );
     repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });

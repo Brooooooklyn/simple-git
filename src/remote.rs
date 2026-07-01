@@ -504,6 +504,16 @@ impl Remote {
     mut callbacks: Option<&mut RemoteCallbacks>,
     msg: Option<String>,
   ) -> Result<()> {
+    // CHECK-ONLY: reject callbacks whose `used` flag is already set, but do
+    // NOT set it here. `update_tips` borrows `&mut o.inner` (no consuming
+    // `mem::swap`), so a fresh callbacks object may legitimately be reused
+    // across several `update_tips` calls; flipping `used` would break that.
+    if callbacks.as_deref().is_some_and(|cb| cb.used) {
+      return Err(napi::Error::new(
+        GitCode::InvalidArg,
+        "RemoteCallbacks has already been used".to_string(),
+      ));
+    }
     let callbacks = callbacks.as_mut().map(|o| &mut o.inner);
     self
       .inner
