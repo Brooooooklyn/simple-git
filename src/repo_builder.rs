@@ -143,10 +143,12 @@ impl RepoBuilder {
   #[napi]
   pub fn clone(&mut self, url: String, path: String) -> Result<Repository> {
     Ok(Repository {
-      inner: self
-        .builder
-        .clone(&url, Path::new(&path))
-        .convert("Clone failed")?,
+      inner: Some(
+        self
+          .builder
+          .clone(&url, Path::new(&path))
+          .convert("Clone failed")?,
+      ),
       open_flags: None,
     })
   }

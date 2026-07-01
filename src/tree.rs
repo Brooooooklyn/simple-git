@@ -221,7 +221,7 @@ impl TreeEntry {
     let object = repo.share_with(env, |repo| {
       self
         .inner
-        .to_object(&repo.inner)
+        .to_object(repo.inner().code_into(env)?)
         .convert_without_message()
         .code_into(env)
     })?;
