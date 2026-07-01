@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Utc};
 use napi::{JsString, bindgen_prelude::*};
@@ -26,7 +28,7 @@ use crate::status::{FileStatus, StatusOptions, build_status_opts, status_from_bi
 use crate::tag::Tag;
 use crate::tree::{Tree, TreeParent};
 use crate::util::path_to_javascript_string;
-use crate::{CodeInto, GitCode, Result, coded_error};
+use crate::{CodeInto, GitCode, Result, coded_error, disposed_error};
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
   // Handle the `failed to stat '/root/.gitconfig'; class=Config (7)` Error
@@ -545,6 +547,7 @@ impl Task for GitCloneTask {
       .map(|inner| Repository {
         inner: Some(inner),
         open_flags: None,
+        alive: Arc::new(AtomicBool::new(true)),
       })
       .ok_or_else(|| {
         coded_error(
@@ -578,19 +581,25 @@ pub struct Repository {
   /// worker-local reopen so async methods (`statusesAsync`/`blameFileAsync`/
   /// etc.) behave like their sync counterparts — see `reopen_worker_repo`.
   pub(crate) open_flags: Option<u32>,
+  /// Shared liveness flag. `true` while this repository is live; flipped to
+  /// `false` by `dispose()`/`free()`. Every derived handle (Remote, Tree,
+  /// Commit, …) holds a `clone` of this same `Arc`, so once the repository is
+  /// disposed each guarded derived-handle method observes the flip and throws
+  /// `"Repository has been disposed"` instead of dereferencing a freed git2
+  /// object (use-after-free). `AtomicBool` (not `Cell`) purely so the handles
+  /// can share it via `Arc`; it is only ever touched on the single JS thread —
+  /// see `ensure_alive` for the `Relaxed`-ordering rationale.
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 impl Repository {
   /// Guarded access to the underlying git2 handle. Returns an error once the
   /// repository has been disposed via `dispose()`/`free()`, routing every
-  /// internal access through a single disposed-state check.
+  /// internal access through a single disposed-state check. Reuses the shared
+  /// `disposed_error()` so this and every derived-handle guard throw an
+  /// IDENTICAL error.
   pub(crate) fn inner(&self) -> Result<&git2::Repository> {
-    self.inner.as_ref().ok_or_else(|| {
-      napi::Error::new(
-        GitCode::GenericError,
-        "Repository has been disposed".to_string(),
-      )
-    })
+    self.inner.as_ref().ok_or_else(disposed_error)
   }
 }
 
@@ -622,6 +631,12 @@ impl Repository {
   #[napi]
   pub fn dispose(&mut self) {
     self.inner = None;
+    // Flip the shared flag so every derived handle's `ensure_alive` guard now
+    // throws instead of dereferencing the freed git2 object. `Relaxed` is
+    // sufficient — repo and handles share the single JS thread (see
+    // `ensure_alive`). Idempotent: a second `dispose()`/`free()` just re-stores
+    // `false`.
+    self.alive.store(false, Ordering::Relaxed);
   }
 
   /// Alias for `dispose()`. Eagerly releases the underlying git2 repository
@@ -639,6 +654,7 @@ impl Repository {
     Ok(Self {
       inner: Some(git2::Repository::init(&p).convert("Failed to init git repo")?),
       open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -683,6 +699,7 @@ impl Repository {
         .convert("Failed to open git repo")?,
       ),
       open_flags: Some(flags),
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -701,6 +718,7 @@ impl Repository {
           .convert(format!("Discover git repo from [{path}] failed"))?,
       ),
       open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -712,6 +730,7 @@ impl Repository {
     Ok(Self {
       inner: Some(git2::Repository::init_bare(path).convert("Failed to init bare repo")?),
       open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -724,6 +743,7 @@ impl Repository {
     Ok(Self {
       inner: Some(git2::Repository::clone(&url, path).convert("Failed to clone repo")?),
       open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -762,6 +782,7 @@ impl Repository {
         git2::Repository::clone_recurse(&url, path).convert("Failed to clone repo recursively")?,
       ),
       open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -776,6 +797,7 @@ impl Repository {
     Ok(Self {
       inner: Some(git2::Repository::open(&git_dir).convert("Failed to open git repo")?),
       open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -795,6 +817,7 @@ impl Repository {
           .convert("Get the HEAD of Repository failed")
           .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -967,6 +990,7 @@ impl Repository {
         .ok()?,
       repo_path,
       open_flags,
+      alive: self.alive.clone(),
     })
   }
 
@@ -998,6 +1022,7 @@ impl Repository {
       })?,
       repo_path,
       open_flags,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1030,6 +1055,7 @@ impl Repository {
       })?,
       repo_path,
       open_flags,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1063,6 +1089,7 @@ impl Repository {
       })?,
       repo_path,
       open_flags,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1196,6 +1223,7 @@ impl Repository {
           })
           .ok()?,
       ),
+      alive: self.alive.clone(),
     })
   }
 
@@ -1218,6 +1246,7 @@ impl Repository {
       .ok()?;
     Some(Commit {
       inner: CommitInner::Repository(commit),
+      alive: self.alive.clone(),
     })
   }
 
@@ -1261,7 +1290,10 @@ impl Repository {
           .convert(format!("Find branch [{name}] failed"))
           .code_into(env)
       })?;
-      result.push(Branch { inner });
+      result.push(Branch {
+        inner,
+        alive: self.alive.clone(),
+      });
     }
     Ok(result)
   }
@@ -1296,7 +1328,10 @@ impl Repository {
         .convert(format!("Find branch [{name}] failed"))
         .code_into(env)
     })?;
-    Ok(Some(Branch { inner }))
+    Ok(Some(Branch {
+      inner,
+      alive: self.alive.clone(),
+    }))
   }
 
   #[napi]
@@ -1329,7 +1364,10 @@ impl Repository {
         .convert(format!("Find branch [{branch_name}] failed"))
         .code_into(env)
     })?;
-    Ok(Branch { inner })
+    Ok(Branch {
+      inner,
+      alive: self.alive.clone(),
+    })
   }
 
   #[napi]
@@ -1423,6 +1461,7 @@ impl Repository {
           .convert(format!("Failed to create reference [{name}]"))
           .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1451,6 +1490,7 @@ impl Repository {
           .convert(format!("Failed to create symbolic reference [{name}]"))
           .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1548,7 +1588,10 @@ impl Repository {
         .convert(format!("Find tag from OID [{oid}] failed"))
         .code_into(env)
     })?;
-    Ok(Some(Tag { inner }))
+    Ok(Some(Tag {
+      inner,
+      alive: self.alive.clone(),
+    }))
   }
 
   #[napi]
@@ -1583,7 +1626,10 @@ impl Repository {
         .convert(format!("Find tag from OID [{prefix_hash}] failed"))
         .code_into(env)
     })?;
-    Ok(Some(Tag { inner }))
+    Ok(Some(Tag {
+      inner,
+      alive: self.alive.clone(),
+    }))
   }
 
   #[napi]
@@ -1668,6 +1714,7 @@ impl Repository {
           .convert_without_message()
           .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1695,6 +1742,7 @@ impl Repository {
           .convert_without_message()
           .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1831,6 +1879,7 @@ impl Repository {
           .convert_without_message()
           .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 

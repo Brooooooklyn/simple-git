@@ -176,6 +176,34 @@ pub(crate) mod codes {
     .unwrap_or_else(|_| napi::Error::new(Status::GenericFailure, message))
   }
 
+  use std::sync::atomic::{AtomicBool, Ordering};
+
+  /// The exact error surfaced when a disposed `Repository` — or any handle
+  /// derived from it — is accessed after `dispose()`/`free()`. Kept byte-for-byte
+  /// identical to the message `Repository::inner()` throws (see repo.rs) so a
+  /// disposed repository and every derived handle surface an IDENTICAL error.
+  pub(crate) fn disposed_error() -> napi::Error<GitCode> {
+    napi::Error::new(
+      GitCode::GenericError,
+      "Repository has been disposed".to_string(),
+    )
+  }
+
+  /// Guard used by every derived-handle method that would otherwise deref a
+  /// `git2` object borrowed from a now-freed repository. Returns `Ok(())` while
+  /// the owning repository is live, else `disposed_error()`.
+  ///
+  /// `Ordering::Relaxed` is sufficient: the repository and every handle derived
+  /// from it live on the single JS main thread, so this flag synchronizes
+  /// nothing but its own value — it publishes no cross-thread data.
+  pub(crate) fn ensure_alive(alive: &AtomicBool) -> Result<()> {
+    if alive.load(Ordering::Relaxed) {
+      Ok(())
+    } else {
+      Err(disposed_error())
+    }
+  }
+
   /// Collapse a `Result<T>` (error carries a `GitCode`) into a `napi::Result<T>`
   /// whose error still surfaces `.code`. This lets `share_with` closures and the
   /// async outer-converts turn an `Error<GitCode>` into a coded `Error<Status>`.

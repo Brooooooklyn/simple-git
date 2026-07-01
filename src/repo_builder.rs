@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::{mem, path::Path};
 
 use napi::bindgen_prelude::*;
@@ -150,6 +152,7 @@ impl RepoBuilder {
           .convert("Clone failed")?,
       ),
       open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 }

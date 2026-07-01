@@ -1,8 +1,11 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
-use crate::{CodeInto, Result};
+use crate::{CodeInto, Result, ensure_alive};
 
 #[napi]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -40,6 +43,9 @@ impl From<git2::BranchType> for BranchType {
 pub struct Branch {
   pub(crate) inner:
     napi::bindgen_prelude::SharedReference<crate::repo::Repository, git2::Branch<'static>>,
+  /// Liveness flag shared with the owning `Repository` (see `Repository::alive`).
+  /// Guards every method that derefs the underlying `git2::Branch`.
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -49,6 +55,7 @@ impl Branch {
   ///
   /// Returns `None` if the name is not valid utf-8.
   pub fn name(&self) -> Result<Option<String>> {
+    ensure_alive(&self.alive)?;
     Ok(
       self
         .inner
@@ -60,8 +67,9 @@ impl Branch {
 
   #[napi]
   /// Determine if the current local branch is pointed at by HEAD.
-  pub fn is_head(&self) -> bool {
-    self.inner.is_head()
+  pub fn is_head(&self) -> Result<bool> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.is_head())
   }
 
   #[napi]
@@ -69,13 +77,15 @@ impl Branch {
   /// (e.g. `refs/heads/main`).
   ///
   /// Returns `None` if the reference name is not valid utf-8.
-  pub fn reference_name(&self) -> Option<String> {
-    self.inner.get().name().ok().map(|name| name.to_owned())
+  pub fn reference_name(&self) -> Result<Option<String>> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.get().name().ok().map(|name| name.to_owned()))
   }
 
   #[napi]
   /// Delete an existing branch reference.
   pub fn delete(&mut self) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self.inner.delete().convert_without_message()
   }
 
@@ -85,6 +95,7 @@ impl Branch {
   ///
   /// Returns `None` when the branch has no configured upstream.
   pub fn upstream(&self, env: Env) -> napi::Result<Option<Branch>> {
+    ensure_alive(&self.alive).code_into(env)?;
     // Probe on the borrowed branch first so we can inspect the real libgit2
     // error code while it is still intact: only a genuine "no upstream
     // configured" (NotFound) collapses to None — every other failure (corrupt
@@ -104,7 +115,10 @@ impl Branch {
         .convert("Get upstream branch failed")
         .code_into(env)
     })?;
-    Ok(Some(Branch { inner }))
+    Ok(Some(Branch {
+      inner,
+      alive: self.alive.clone(),
+    }))
   }
 
   #[napi]
@@ -113,6 +127,7 @@ impl Branch {
   /// Branches are direct references, so the resolved direct reference is
   /// returned (e.g. `refs/heads/main`).
   pub fn get(&self, env: Env) -> napi::Result<crate::reference::Reference> {
+    ensure_alive(&self.alive).code_into(env)?;
     let inner = self.inner.clone(env)?.share_with(env, |branch| {
       branch
         .get()
@@ -120,6 +135,9 @@ impl Branch {
         .convert_without_message()
         .code_into(env)
     })?;
-    Ok(crate::reference::Reference { inner })
+    Ok(crate::reference::Reference {
+      inner,
+      alive: self.alive.clone(),
+    })
   }
 }

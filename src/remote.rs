@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::{mem, path::Path};
 
 use git2::{ErrorClass, ErrorCode};
@@ -6,7 +8,7 @@ use napi_derive::napi;
 
 use crate::error::IntoNapiError;
 use crate::repo::reopen_worker_repo;
-use crate::{CodeInto, GitCode, Result, coded_error};
+use crate::{CodeInto, GitCode, Result, coded_error, ensure_alive};
 
 #[napi]
 /// An enumeration of the possible directions for a remote.
@@ -163,6 +165,10 @@ pub struct Remote {
   /// same `Bare`/`FromEnv` behavior as the JS-visible handle this `Remote` was
   /// derived from.
   pub(crate) open_flags: Option<u32>,
+  /// Liveness flag shared with the owning `Repository` (see `Repository::alive`).
+  /// Flipped to `false` on `dispose()`; every method that touches the underlying
+  /// `git2::Remote` (which borrows the now-freed repo) guards on it first.
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -178,24 +184,27 @@ impl Remote {
   ///
   /// Returns `None` if this remote has not yet been named or if the name is
   /// not valid utf-8
-  pub fn name(&self) -> Option<&str> {
-    self.inner.name().ok().flatten()
+  pub fn name(&self) -> Result<Option<&str>> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.name().ok().flatten())
   }
 
   #[napi]
   /// Get the remote's url.
   ///
   /// Returns `None` if the url is not valid utf-8
-  pub fn url(&self) -> Option<&str> {
-    self.inner.url().ok()
+  pub fn url(&self) -> Result<Option<&str>> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.url().ok())
   }
 
   #[napi]
   /// Get the remote's pushurl.
   ///
   /// Returns `None` if the pushurl is not valid utf-8
-  pub fn pushurl(&self) -> Option<&str> {
-    self.inner.pushurl().ok().flatten()
+  pub fn pushurl(&self) -> Result<Option<&str>> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.pushurl().ok().flatten())
   }
 
   #[napi]
@@ -206,6 +215,7 @@ impl Remote {
   /// connection to the remote is initiated and it remains available after
   /// disconnecting.
   pub fn default_branch(&self) -> Result<String> {
+    ensure_alive(&self.alive)?;
     self
       .inner
       .default_branch()
@@ -223,18 +233,21 @@ impl Remote {
   #[napi]
   /// Open a connection to a remote.
   pub fn connect(&mut self, dir: Direction) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self.inner.connect(dir.into()).convert_without_message()
   }
 
   #[napi]
   /// Check whether the remote is connected
-  pub fn connected(&mut self) -> bool {
-    self.inner.connected()
+  pub fn connected(&mut self) -> Result<bool> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.connected())
   }
 
   #[napi]
   /// Disconnect from the remote
   pub fn disconnect(&mut self) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self.inner.disconnect().convert_without_message()
   }
 
@@ -244,6 +257,7 @@ impl Remote {
   /// At certain points in its operation, the network code checks whether the
   /// operation has been cancelled and if so stops the operation.
   pub fn stop(&mut self) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self.inner.stop().convert_without_message()
   }
 
@@ -258,6 +272,7 @@ impl Remote {
     refspecs: Vec<String>,
     fetch_options: Option<&mut FetchOptions>,
   ) -> Result<()> {
+    ensure_alive(&self.alive)?;
     let mut default_fetch_options = git2::FetchOptions::default();
     let mut options = match fetch_options {
       Some(o) => {
@@ -290,6 +305,7 @@ impl Remote {
     refspecs: Vec<String>,
     push_options: Option<&mut PushOptions>,
   ) -> Result<()> {
+    ensure_alive(&self.alive)?;
     let mut default_push_options = git2::PushOptions::default();
     let mut options = match push_options {
       Some(o) => {
@@ -345,6 +361,10 @@ impl Remote {
     fetch_options: Option<&mut FetchOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<RemoteFetchTask>> {
+    // Synchronous pre-throw: the underlying `git2::Remote` borrows the owning
+    // repository, so guard on the JS thread before spawning the worker — matches
+    // the method's other synchronous validation (see the doc comment).
+    ensure_alive(&self.alive)?;
     let namespace = self
       .inner
       .clone_owner(env)
@@ -444,6 +464,9 @@ impl Remote {
     push_options: Option<&mut PushOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<RemotePushTask>> {
+    // Synchronous pre-throw: guard on the JS thread before spawning the worker,
+    // consistent with this method's other synchronous validation (see doc).
+    ensure_alive(&self.alive)?;
     let namespace = self
       .inner
       .clone_owner(env)
@@ -520,6 +543,7 @@ impl Remote {
     mut callbacks: Option<&mut RemoteCallbacks>,
     msg: Option<String>,
   ) -> Result<()> {
+    ensure_alive(&self.alive)?;
     // CHECK-ONLY: reject callbacks whose `used` flag is already set, but do
     // NOT set it here. `update_tips` borrows `&mut o.inner` (no consuming
     // `mem::swap`), so a fresh callbacks object may legitimately be reused

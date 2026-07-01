@@ -1,6 +1,10 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use napi::{JsString, bindgen_prelude::*};
 use napi_derive::napi;
 
+use crate::ensure_alive;
 use crate::util::path_to_javascript_string;
 
 #[napi]
@@ -78,6 +82,8 @@ impl From<git2::FileMode> for FileMode {
 /// An iterator over the diffs in a delta
 pub struct Deltas {
   pub(crate) inner: SharedReference<crate::diff::Diff, git2::Deltas<'static>>,
+  /// Liveness flag shared with the owning `Repository` (see `Repository::alive`).
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -87,13 +93,27 @@ impl Generator for Deltas {
   type Return = ();
 
   fn next(&mut self, _value: Option<()>) -> Option<Self::Yield> {
-    self.inner.next().map(|delta| DiffDelta { inner: delta })
+    // `Generator::next` returns `Option`, not `Result`, so it cannot throw. On
+    // disposal the iterator borrows a freed repo, so returning `None` (a safe
+    // iteration end) is the correct memory-safe substitute for a throw — it
+    // prevents the use-after-free deref below.
+    if !self.alive.load(Ordering::Relaxed) {
+      return None;
+    }
+    let alive = self.alive.clone();
+    self.inner.next().map(|delta| DiffDelta {
+      inner: delta,
+      alive,
+    })
   }
 }
 
 #[napi]
 pub struct DiffDelta {
   pub(crate) inner: git2::DiffDelta<'static>,
+  /// Liveness flag shared with the owning `Repository` (see `Repository::alive`).
+  /// The owned `git2::DiffDelta` still points into the repo's diff data.
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -103,20 +123,23 @@ impl DiffDelta {
   ///
   /// The value is the raw `git2::DiffFlags` bitset (an OR-able `number`); test
   /// individual bits with `diffFlagsContains` and the `DiffFlags` constants.
-  pub fn flags(&self) -> u32 {
-    self.inner.flags().bits()
+  pub fn flags(&self) -> crate::Result<u32> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.flags().bits())
   }
 
   #[napi]
   /// Returns the number of files in this delta.
-  pub fn num_files(&self) -> u32 {
-    self.inner.nfiles() as u32
+  pub fn num_files(&self) -> crate::Result<u32> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.nfiles() as u32)
   }
 
   #[napi]
   /// Returns the status of this entry
-  pub fn status(&self) -> Delta {
-    self.inner.status().into()
+  pub fn status(&self) -> crate::Result<Delta> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.status().into())
   }
 
   #[napi]
@@ -124,10 +147,12 @@ impl DiffDelta {
   ///
   /// What side this means depends on the function that was used to generate
   /// the diff and will be documented on the function itself.
-  pub fn old_file(&self) -> DiffFile {
-    DiffFile {
+  pub fn old_file(&self) -> crate::Result<DiffFile> {
+    ensure_alive(&self.alive)?;
+    Ok(DiffFile {
       inner: self.inner.old_file(),
-    }
+      alive: self.alive.clone(),
+    })
   }
 
   #[napi]
@@ -135,10 +160,12 @@ impl DiffDelta {
   ///
   /// What side this means depends on the function that was used to generate
   /// the diff and will be documented on the function itself.
-  pub fn new_file(&self) -> DiffFile {
-    DiffFile {
+  pub fn new_file(&self) -> crate::Result<DiffFile> {
+    ensure_alive(&self.alive)?;
+    Ok(DiffFile {
       inner: self.inner.new_file(),
-    }
+      alive: self.alive.clone(),
+    })
   }
 }
 
@@ -189,6 +216,9 @@ impl From<git2::Delta> for Delta {
 #[napi]
 pub struct DiffFile {
   pub(crate) inner: git2::DiffFile<'static>,
+  /// Liveness flag shared with the owning `Repository` (see `Repository::alive`).
+  /// The owned `git2::DiffFile` still points into the repo's diff data.
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -198,8 +228,9 @@ impl DiffFile {
   ///
   /// If this entry represents an absent side of a diff (e.g. the `old_file`
   /// of a `Added` delta), then the oid returned will be zeroes.
-  pub fn id(&self) -> String {
-    self.inner.id().to_string()
+  pub fn id(&self) -> crate::Result<String> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.id().to_string())
   }
 
   #[napi]
@@ -207,46 +238,55 @@ impl DiffFile {
   /// repository, as a lossily-decoded (UTF-8) string.
   ///
   /// Returns `null` when the path is absent or not representable.
-  pub fn path<'env>(&'env self, env: &'env Env) -> Option<JsString<'env>> {
-    self
-      .inner
-      .path()
-      .and_then(|p| path_to_javascript_string(env, p).ok())
+  pub fn path<'env>(&'env self, env: &'env Env) -> crate::Result<Option<JsString<'env>>> {
+    ensure_alive(&self.alive)?;
+    Ok(
+      self
+        .inner
+        .path()
+        .and_then(|p| path_to_javascript_string(env, p).ok()),
+    )
   }
 
   #[napi]
   /// Returns the size of this entry, in bytes
-  pub fn size(&self) -> i64 {
-    self.inner.size() as i64
+  pub fn size(&self) -> crate::Result<i64> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.size() as i64)
   }
 
   #[napi]
   /// Returns `true` if file(s) are treated as binary data.
-  pub fn is_binary(&self) -> bool {
-    self.inner.is_binary()
+  pub fn is_binary(&self) -> crate::Result<bool> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.is_binary())
   }
 
   #[napi]
   /// Returns `true` if file(s) are treated as text data.
-  pub fn is_not_binary(&self) -> bool {
-    self.inner.is_not_binary()
+  pub fn is_not_binary(&self) -> crate::Result<bool> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.is_not_binary())
   }
 
   #[napi]
   /// Returns `true` if `id` value is known correct.
-  pub fn is_valid_id(&self) -> bool {
-    self.inner.is_valid_id()
+  pub fn is_valid_id(&self) -> crate::Result<bool> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.is_valid_id())
   }
 
   #[napi]
   /// Returns `true` if file exists at this side of the delta.
-  pub fn exists(&self) -> bool {
-    self.inner.exists()
+  pub fn exists(&self) -> crate::Result<bool> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.exists())
   }
 
   #[napi]
   /// Returns file mode.
-  pub fn mode(&self) -> FileMode {
-    self.inner.mode().into()
+  pub fn mode(&self) -> crate::Result<FileMode> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.mode().into())
   }
 }
