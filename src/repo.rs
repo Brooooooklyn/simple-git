@@ -604,8 +604,9 @@ impl Repository {
   /// afterwards) is a no-op.
   ///
   /// After disposal, every throwing method throws
-  /// `"Repository has been disposed"`; the null-returning `workdir()`,
-  /// `namespace()`, and `findRemote()` return `null` instead. Any handle
+  /// `"Repository has been disposed"`; the `Option`-returning methods
+  /// (`workdir()`, `namespace()`, `findRemote()`, `findTree()`,
+  /// `findCommit()`) return `null` instead. Any handle
   /// previously derived from this repository — `Remote`, `Reference`, `Tree`,
   /// `TreeEntry`, `Commit`, `Tag`, `Branch`, `GitObject`, `Diff`, `RevWalk` and
   /// their descendants — is also INVALID and must not be used. This is a
