@@ -155,19 +155,6 @@ pub struct Remote {
   /// the remote there instead of moving the JS-visible handle off-thread. Not a
   /// `#[napi]` field, so it is invisible to the JS surface.
   pub(crate) repo_path: String,
-  /// The owning repository's active namespace (`Repository::namespace()`),
-  /// captured at remote-CREATION time on the JS thread. The namespace is
-  /// in-memory per-handle state on the parent `Repository`, and a worker that
-  /// reopens the repo from `repo_path` would otherwise resolve/write the
-  /// NON-namespaced refs. The async `fetch`/`push` workers re-apply this before
-  /// resolving the remote so ref updates land in `refs/namespaces/<ns>/…`.
-  /// CAVEAT: it is captured when this `Remote` is constructed; the (rare) case
-  /// of `setNamespace` changing between `findRemote()` and the async call uses
-  /// the creation-time namespace. The common case (namespace set before/at
-  /// remote creation) is exact. This is acceptable because there is no live
-  /// parent-repo handle available inside the `Remote` at async-call time. Not a
-  /// `#[napi]` field, so it is invisible to the JS surface.
-  pub(crate) namespace: Option<String>,
 }
 
 #[napi]
@@ -324,20 +311,26 @@ impl Remote {
   /// callbacks bound to the main JS thread and cannot be invoked safely from a
   /// worker thread. If callbacks are required, use the synchronous `fetch`.
   ///
-  /// Resolves against a URL/refspec snapshot captured from this loaded
-  /// `Remote` at call time, not live on-disk config — a later
-  /// `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
-  /// affect an already-scheduled fetch, matching the synchronous `fetch()`
-  /// contract ("no loaded remote instances will be affected").
+  /// Resolves the remote by name against the repository's CURRENT on-disk
+  /// configuration at the moment this async operation actually runs, not
+  /// against a snapshot of the `Remote` object's state when it was loaded.
+  /// If `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` mutate this remote's
+  /// config after it was loaded but before this call completes, the
+  /// mutation IS observed here — unlike the synchronous `fetch()`, which
+  /// operates on the already-loaded snapshot and is documented as
+  /// unaffected by later config changes. Use the synchronous `fetch()`
+  /// when strict snapshot isolation from concurrent config changes matters.
   ///
   /// Safety: do not use the same `Remote` from the main thread while this async
   /// operation is pending; the underlying git2 handle is not `Sync`.
   pub fn fetch_async(
     &self,
+    env: Env,
     refspecs: Vec<String>,
     fetch_options: Option<&mut FetchOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<RemoteFetchTask>> {
+    let namespace = self.inner.clone_owner(env)?.namespace();
     let options = match fetch_options {
       Some(o) => {
         if o.used {
@@ -360,27 +353,13 @@ impl Remote {
       }
       None => None,
     };
-    let remote_url = self.inner.url().map(|s| s.to_owned()).map_err(|_| {
-      Error::new(
-        Status::GenericFailure,
-        "Remote has no valid UTF-8 fetch URL".to_string(),
-      )
-    })?;
-    let refspecs = if refspecs.is_empty() {
-      self
-        .inner
-        .fetch_refspecs()
-        .convert("Failed to read remote fetch refspecs")?
-        .iter()
-        .filter_map(|r| r.ok().flatten().map(|s| s.to_owned()))
-        .collect()
-    } else {
-      refspecs
-    };
+    let remote_name = self.inner.name().ok().flatten().map(|s| s.to_owned());
+    let remote_url = self.inner.url().ok().map(|s| s.to_owned());
     Ok(AsyncTask::with_optional_signal(
       RemoteFetchTask {
         repo_path: self.repo_path.clone(),
-        namespace: self.namespace.clone(),
+        namespace,
+        remote_name,
         remote_url,
         refspecs,
         options,
@@ -400,19 +379,34 @@ impl Remote {
   ///
   /// Resolves against a URL/refspec snapshot captured from this loaded
   /// `Remote` at call time (using the configured `pushurl` when set, else
-  /// `url`), not live on-disk config — a later
-  /// `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
-  /// affect an already-scheduled push, matching the synchronous `push()`
-  /// contract ("no loaded remote instances will be affected").
+  /// `url`), rather than re-resolving the remote by name against live
+  /// on-disk config the way `fetchAsync` does. This asymmetry with
+  /// `fetchAsync` is intentional and is not merely a config-drift
+  /// optimization: libgit2's local transport ignores a configured `pushurl`
+  /// for the actual push — it re-derives the destination directly from the
+  /// remote's fetch `url` (see `transports/local.c`'s `local_push()`,
+  /// `push->remote->url`), even though `pushurl` is correctly used during
+  /// the connection handshake (`remote.c`'s `git_remote__urlfordirection`).
+  /// Re-resolving by name here, like `fetchAsync` does, would silently push
+  /// to the wrong destination for any local/file-path remote with a
+  /// configured `pushurl`. Capturing the effective push URL up front and
+  /// handing it to an anonymous remote sidesteps the bug, because that
+  /// remote's SOLE url is already the pushurl-resolved value. Trade-off: a
+  /// later `remoteSetUrl`/`remoteSetPushurl`/`remoteAddPush` on the same name
+  /// after this `Remote` was loaded is NOT observed by an already-scheduled
+  /// `pushAsync`, matching the synchronous `push()` contract ("no loaded
+  /// remote instances will be affected").
   ///
   /// Safety: do not use the same `Remote` from the main thread while this async
   /// operation is pending; the underlying git2 handle is not `Sync`.
   pub fn push_async(
     &self,
+    env: Env,
     refspecs: Vec<String>,
     push_options: Option<&mut PushOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<RemotePushTask>> {
+    let namespace = self.inner.clone_owner(env)?.namespace();
     let options = match push_options {
       Some(o) => {
         if o.used {
@@ -461,7 +455,7 @@ impl Remote {
     Ok(AsyncTask::with_optional_signal(
       RemotePushTask {
         repo_path: self.repo_path.clone(),
-        namespace: self.namespace.clone(),
+        namespace,
         remote_url,
         refspecs,
         options,
@@ -497,17 +491,13 @@ impl Remote {
 
 pub struct RemoteFetchTask {
   repo_path: String,
-  /// Active namespace of the owning repo, captured at remote-creation time (see
-  /// `Remote::namespace`). Re-applied to the reopened worker handle before the
-  /// remote is resolved so fetched refs land in `refs/namespaces/<ns>/…`.
+  /// Active namespace of the owning repo, queried live at `fetchAsync`
+  /// call time (see Fix A). Re-applied to the reopened worker handle
+  /// before the remote is resolved so fetched refs land in
+  /// `refs/namespaces/<ns>/…`.
   namespace: Option<String>,
-  /// The remote's fetch URL, captured from the loaded `Remote` at
-  /// `fetchAsync` call time. The worker reconstructs an anonymous remote from
-  /// this URL rather than re-resolving by name against on-disk config, so a
-  /// concurrent `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same
-  /// name does not affect an in-flight fetch — matching the snapshot
-  /// semantics of the synchronous `fetch()`.
-  remote_url: String,
+  remote_name: Option<String>,
+  remote_url: Option<String>,
   refspecs: Vec<String>,
   options: Option<git2::FetchOptions<'static>>,
 }
@@ -520,11 +510,9 @@ pub struct RemoteFetchTask {
 // `has_remote_callbacks` in `fetch_async`), so it holds only plain owned data
 // (depth/prune/proxy url/headers) with no JS `Env` or threadsafe function
 // captured — nothing unsound to use off the JS thread. The repository handle is
-// REOPENED from the owned `repo_path` inside `compute()`, and the remote is
-// reconstructed there from the captured URL snapshot via `remote_anonymous`
-// (never re-resolved by name against on-disk config), so the task never
-// aliases the JS-visible handle. No aliasing, no concurrent access: the move
-// is sound.
+// REOPENED from the owned `repo_path` inside `compute()` and the remote is
+// re-resolved there, so the task never aliases the JS-visible handle. No
+// aliasing, no concurrent access: the move is sound.
 unsafe impl Send for RemoteFetchTask {}
 
 #[napi]
@@ -543,9 +531,11 @@ impl Task for RemoteFetchTask {
         .set_namespace(ns)
         .convert("Failed to restore repository namespace")?;
     }
-    let mut remote = repo
-      .remote_anonymous(&self.remote_url)
-      .convert("Failed to resolve remote")?;
+    let mut remote = match &self.remote_name {
+      Some(name) => repo.find_remote(name),
+      None => repo.remote_anonymous(self.remote_url.as_deref().unwrap_or_default()),
+    }
+    .convert("Failed to resolve remote")?;
     let mut options = self.options.take().unwrap_or_default();
     remote
       .fetch(self.refspecs.as_slice(), Some(&mut options), None)
@@ -559,9 +549,10 @@ impl Task for RemoteFetchTask {
 
 pub struct RemotePushTask {
   repo_path: String,
-  /// Active namespace of the owning repo, captured at remote-creation time (see
-  /// `Remote::namespace`). Re-applied to the reopened worker handle before the
-  /// remote is resolved so pushed refs resolve under `refs/namespaces/<ns>/…`.
+  /// Active namespace of the owning repo, queried live at `pushAsync`
+  /// call time (see Fix A). Re-applied to the reopened worker handle
+  /// before the remote is resolved so pushed refs resolve under
+  /// `refs/namespaces/<ns>/…`.
   namespace: Option<String>,
   /// The remote's effective push URL (configured `pushurl` if set, else
   /// `url`), captured from the loaded `Remote` at `pushAsync` call time. The
@@ -573,6 +564,19 @@ pub struct RemotePushTask {
   /// reproduces the push target exactly: an anonymous remote never has an
   /// in-memory pushurl override, so libgit2 falls back to its single `url` —
   /// which is already the effective target we captured.
+  ///
+  /// Unlike `RemoteFetchTask`, this is NOT reverted to name-based resolution:
+  /// libgit2's local transport ignores a configured `pushurl` for the actual
+  /// push and re-derives the destination from the remote's fetch `url`
+  /// instead (`transports/local.c`'s `local_push()`, `push->remote->url`),
+  /// even though `pushurl` is correctly used during the connection handshake
+  /// (`remote.c`'s `git_remote__urlfordirection`). Resolving via
+  /// `find_remote(name)` here, like fetch does, would silently push to the
+  /// wrong destination for any local/file-path remote with a configured
+  /// `pushurl` — confirmed by reproducing the bug through the synchronous
+  /// `push()` method directly. Capturing and using the pre-resolved effective
+  /// push URL on an anonymous remote is the only way to make `pushurl` work
+  /// for local-transport pushes at all, so this snapshot mechanism stays.
   remote_url: String,
   refspecs: Vec<String>,
   options: Option<git2::PushOptions<'static>>,
@@ -586,8 +590,11 @@ pub struct RemotePushTask {
 // function. The repository is REOPENED from the owned `repo_path` inside
 // `compute()`, and the remote is reconstructed there from the captured URL
 // snapshot via `remote_anonymous` (never re-resolved by name against on-disk
-// config), all on a single worker thread — never aliasing or concurrently
-// accessing the JS-visible handle.
+// config — see the `remote_url` field doc for why push, unlike fetch, keeps
+// this snapshot mechanism: `find_remote` + `push()` hits a real libgit2
+// local-transport bug that silently drops a configured `pushurl`), all on a
+// single worker thread — never aliasing or concurrently accessing the
+// JS-visible handle.
 unsafe impl Send for RemotePushTask {}
 
 #[napi]

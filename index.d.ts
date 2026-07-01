@@ -712,11 +712,15 @@ export declare class Remote {
    * callbacks bound to the main JS thread and cannot be invoked safely from a
    * worker thread. If callbacks are required, use the synchronous `fetch`.
    *
-   * Resolves against a URL/refspec snapshot captured from this loaded
-   * `Remote` at call time, not live on-disk config — a later
-   * `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
-   * affect an already-scheduled fetch, matching the synchronous `fetch()`
-   * contract ("no loaded remote instances will be affected").
+   * Resolves the remote by name against the repository's CURRENT on-disk
+   * configuration at the moment this async operation actually runs, not
+   * against a snapshot of the `Remote` object's state when it was loaded.
+   * If `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` mutate this remote's
+   * config after it was loaded but before this call completes, the
+   * mutation IS observed here — unlike the synchronous `fetch()`, which
+   * operates on the already-loaded snapshot and is documented as
+   * unaffected by later config changes. Use the synchronous `fetch()`
+   * when strict snapshot isolation from concurrent config changes matters.
    *
    * Safety: do not use the same `Remote` from the main thread while this async
    * operation is pending; the underlying git2 handle is not `Sync`.
@@ -733,10 +737,23 @@ export declare class Remote {
    *
    * Resolves against a URL/refspec snapshot captured from this loaded
    * `Remote` at call time (using the configured `pushurl` when set, else
-   * `url`), not live on-disk config — a later
-   * `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
-   * affect an already-scheduled push, matching the synchronous `push()`
-   * contract ("no loaded remote instances will be affected").
+   * `url`), rather than re-resolving the remote by name against live
+   * on-disk config the way `fetchAsync` does. This asymmetry with
+   * `fetchAsync` is intentional and is not merely a config-drift
+   * optimization: libgit2's local transport ignores a configured `pushurl`
+   * for the actual push — it re-derives the destination directly from the
+   * remote's fetch `url` (see `transports/local.c`'s `local_push()`,
+   * `push->remote->url`), even though `pushurl` is correctly used during
+   * the connection handshake (`remote.c`'s `git_remote__urlfordirection`).
+   * Re-resolving by name here, like `fetchAsync` does, would silently push
+   * to the wrong destination for any local/file-path remote with a
+   * configured `pushurl`. Capturing the effective push URL up front and
+   * handing it to an anonymous remote sidesteps the bug, because that
+   * remote's SOLE url is already the pushurl-resolved value. Trade-off: a
+   * later `remoteSetUrl`/`remoteSetPushurl`/`remoteAddPush` on the same name
+   * after this `Remote` was loaded is NOT observed by an already-scheduled
+   * `pushAsync`, matching the synchronous `push()` contract ("no loaded
+   * remote instances will be affected").
    *
    * Safety: do not use the same `Remote` from the main thread while this async
    * operation is pending; the underlying git2 handle is not `Sync`.

@@ -721,7 +721,6 @@ impl Repository {
     name: String,
   ) -> Option<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
-    let namespace = self.namespace();
     Some(Remote {
       inner: self_ref
         .share_with(env, move |repo| {
@@ -732,7 +731,6 @@ impl Repository {
         })
         .ok()?,
       repo_path,
-      namespace,
     })
   }
 
@@ -747,7 +745,6 @@ impl Repository {
     url: String,
   ) -> Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
-    let namespace = self.namespace();
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -756,7 +753,6 @@ impl Repository {
           .convert(format!("Failed to add remote [{}]", &name))
       })?,
       repo_path,
-      namespace,
     })
   }
 
@@ -772,7 +768,6 @@ impl Repository {
     refspec: String,
   ) -> Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
-    let namespace = self.namespace();
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -781,7 +776,6 @@ impl Repository {
           .convert("Failed to add remote")
       })?,
       repo_path,
-      namespace,
     })
   }
 
@@ -798,7 +792,6 @@ impl Repository {
     url: String,
   ) -> Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
-    let namespace = self.namespace();
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -807,7 +800,6 @@ impl Repository {
           .convert("Failed to create anonymous remote")
       })?,
       repo_path,
-      namespace,
     })
   }
 

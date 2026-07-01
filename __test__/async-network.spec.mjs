@@ -304,6 +304,60 @@ test("pushAsync resolves the refspec source through an active namespace", async 
   }
 });
 
+// REGRESSION GUARD (Fix A): `Remote.namespace` must not be frozen at
+// `findRemote()`/construction time — it has to be queried LIVE from the
+// owning `Repository` at `pushAsync` call time. `setNamespace` is called on
+// the SAME `repo` variable AFTER `findRemote()` already loaded `remote`
+// (order matters: `Remote.inner` shares ownership with that exact `repo`
+// object, so this mutates the live state the resulting `Remote` observes —
+// a second `new Repository(work)` would NOT reproduce this). Before Fix A the
+// worker used the stale (pre-`setNamespace`) namespace captured at
+// `findRemote()` time (`None`) and pushed the non-namespaced commit; after
+// Fix A it observes "tenant" live and pushes the namespaced commit.
+test("pushAsync observes a setNamespace call made after findRemote but before pushAsync", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-ns-live-"));
+  try {
+    const bare = join(root, "remote.git");
+    const work = join(root, "work");
+    execSync(`git init -q --bare -b main "${bare}"`);
+    execSync(`git init -q -b main "${work}"`);
+    const run = (args) => execSync(`git ${args}`, { cwd: work });
+    run("config user.name tester");
+    run("config user.email tester@example.com");
+    run("config commit.gpgsign false");
+    run("config core.autocrlf false");
+
+    // First commit C1 on the non-namespaced main.
+    writeFileSync(join(work, "file.txt"), "hello\n");
+    run("add file.txt");
+    run('commit -q -m "first"');
+    const c1 = workRev(work, "HEAD");
+
+    // Second commit C2 on top, then rewind non-namespaced main back to C1 so
+    // the two ref spaces diverge: plain main = C1, namespaced main = C2.
+    writeFileSync(join(work, "file.txt"), "hello again\n");
+    run("add file.txt");
+    run('commit -q -m "second"');
+    const c2 = workRev(work, "HEAD");
+    run(`update-ref refs/heads/main ${c1}`);
+    run(`update-ref refs/namespaces/tenant/refs/heads/main ${c2}`);
+
+    run(`remote add origin "${bare}"`);
+
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin"); // load BEFORE setNamespace
+    repo.setNamespace("tenant"); // flip AFTER remote was loaded, SAME repo
+    await remote.pushAsync(["refs/heads/main:refs/heads/main"], null);
+
+    // The remote received the NAMESPACED source commit (C2), proving the
+    // setNamespace call made after findRemote was observed live.
+    t.is(bareRev(bare, "refs/heads/main"), c2);
+    t.not(c1, c2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // fetchAsync updates a remote-tracking ref, like the sync fetch.
 test("fetchAsync updates a remote-tracking ref", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "simple-git-fetch-async-"));
@@ -356,19 +410,22 @@ test("fetchAsync rejects a reused FetchOptions", async (t) => {
   }
 });
 
-// REGRESSION GUARD: fetchAsync must resolve the remote from the URL snapshot
-// captured when the JS `Remote` was loaded, not by re-resolving the remote's
-// NAME against live on-disk config at compute time. Two distinct bare
-// "remotes" (bareA, bareB) with different HEAD commits; the consumer's
-// `origin` starts out pointing at bareA. `remote` is loaded while that is
-// still true. The on-disk config is then mutated to point `origin` at bareB
-// AFTER `remote` was loaded (without going through `remote` itself). The
-// snapshot semantics documented on the synchronous `fetch()` ("no loaded
-// remote instances will be affected") require the already-loaded `remote` to
-// still fetch from bareA. Before the fix (re-resolving `find_remote("origin")`
-// at compute time) this fetches from bareB instead and the assertion fails.
-test("fetchAsync is unaffected by a remoteSetUrl after the Remote was loaded", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "simple-git-fetch-async-snapshot-"));
+// REGRESSION GUARD (Fix B revert): fetchAsync resolves the remote by NAME
+// against the repository's CURRENT on-disk configuration at compute time
+// (restored `find_remote(name)` resolution — see the round-3 brief), not
+// against a URL snapshot captured when the JS `Remote` was loaded. Two
+// distinct bare "remotes" (bareA, bareB) with different HEAD commits; the
+// consumer's `origin` starts out pointing at bareA. `remote` is loaded while
+// that is still true. The on-disk config is then mutated to point `origin` at
+// bareB AFTER `remote` was loaded (without going through `remote` itself).
+// This is the documented live-config caveat reintroduced by reverting the
+// round-2 `remote_anonymous` snapshot resolution (round 2 traded this for an
+// unbounded set of dropped name-keyed config, e.g. `tagOpt`, that has no safe
+// git2-rs getter to snapshot — see the round-3 brief for the full rationale).
+// Must fail if some future change reintroduces snapshot isolation without
+// updating the docs on `fetchAsync`.
+test("fetchAsync observes a remoteSetUrl made after the Remote was loaded (documented live-config caveat)", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-fetch-async-live-config-"));
   try {
     const { bare: bareA, head: headA } = makeBareWithCommit(
       join(root, "a"),
@@ -394,25 +451,30 @@ test("fetchAsync is unaffected by a remoteSetUrl after the Remote was loaded", a
       null,
     );
 
-    // The snapshot captured at load time (bareA) wins, not the live config
-    // (bareB).
-    t.is(workRev(consumer, "refs/remotes/origin/main"), headA);
-    t.not(workRev(consumer, "refs/remotes/origin/main"), headB);
+    // The LIVE config (bareB) wins, not the snapshot captured at load time
+    // (bareA) — proving the documented behavior on fetchAsync is accurate.
+    t.is(workRev(consumer, "refs/remotes/origin/main"), headB);
+    t.not(workRev(consumer, "refs/remotes/origin/main"), headA);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-// Regression guard against a *future* regression: proves the pushurl-
-// preservation half of the fix has no regression. `origin`'s fetch `url` is
-// deliberately bogus/nonexistent; a separate `pushurl` points at the real
-// bare repo. pushAsync must use the effective push target (pushurl), not the
-// (unrelated) fetch url. This is a guard against a naive
-// `remote_anonymous(self.inner.url())` implementation, which this brief
-// explicitly rejects; it should pass both before and after the fix (before
-// the fix, `find_remote(name)` already respects `pushurl` internally) — its
-// value is catching a future regression if this is ever "simplified" to use
-// `url` instead of the `pushurl`-fallback capture.
+// REGRESSION GUARD for the intentional fetchAsync/pushAsync asymmetry:
+// pushAsync deliberately stays on the round-2 URL-snapshot mechanism
+// (`remote_anonymous` from a captured effective push URL) instead of
+// reverting to `find_remote(name)` the way fetchAsync did (see the round-3
+// brief/report). The reason is a confirmed libgit2 bug, not a style choice:
+// the local transport's `local_push()` re-derives the push destination
+// directly from the remote's fetch `url`, ignoring a configured `pushurl`,
+// unless the remote's SOLE url is already the pushurl-resolved value —
+// verified by reproducing the same silent-wrong-destination failure through
+// the synchronous `push()` method (`find_remote` + `.push()`) directly.
+// `origin`'s fetch `url` here is deliberately bogus/nonexistent; a separate
+// `pushurl` points at the real bare repo. pushAsync must use the effective
+// push target (pushurl), not the (unrelated) fetch url. If `push_async` is
+// ever "simplified" to match `fetch_async`'s `find_remote(name)` design,
+// this test must catch the resulting silent push to the wrong destination.
 test("pushAsync uses the remote's configured pushurl, not its fetch url", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-pushurl-"));
   try {
@@ -446,13 +508,14 @@ test("pushAsync uses the remote's configured pushurl, not its fetch url", async 
   }
 });
 
-// Regression guard on the refspec-fallback branch specifically: with an
-// EMPTY refspecs array, fetchAsync must substitute the remote's configured
-// fetch refspecs (the default `+refs/heads/*:refs/remotes/origin/*` set up
-// automatically by `git remote add`), not just skip the fetch. Before the
-// fix this already worked by coincidence (find_remote(name) loads the real
-// config); this guards the NEW `if refspecs.is_empty() { ... }` code path
-// specifically, proving it wasn't dropped or mis-collected in the refactor.
+// Baseline coverage of `find_remote`'s natural refspec inheritance: with an
+// EMPTY refspecs array, fetchAsync must fall through to the remote's
+// configured fetch refspecs (the default `+refs/heads/*:refs/remotes/origin/*`
+// set up automatically by `git remote add`), not just skip the fetch.
+// `git2::Remote::fetch` supplies this automatically for a `find_remote`-loaded
+// remote given an empty refspec slice — no manual capture/substitution needed
+// (round 2 briefly added one; the round-3 revert deleted it again, see the
+// round-3 brief).
 test("fetchAsync falls back to the remote's configured refspecs when refspecs is empty", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "simple-git-fetch-async-fallback-"));
   try {
