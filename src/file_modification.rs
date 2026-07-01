@@ -72,38 +72,39 @@ pub(crate) fn get_file_modification(
   // first commit whose diff touches the path is its latest modification.
   rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
   let path = PathBuf::from(filepath);
-  for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
-    let Ok(commit) = repo.find_commit(oid) else {
-      continue;
-    };
+  for oid in rev_walk.by_ref() {
+    // Propagate revwalk iterator errors instead of silently skipping them.
+    let oid = oid?;
+    // A real object-read failure is an error, not a "no match" -- propagate it.
+    let commit = repo.find_commit(oid)?;
     match commit.parent_count() {
       // commit with parent
       1 => {
-        let Ok(tree) = commit.tree() else {
-          continue;
-        };
-        if let Ok(parent) = commit.parent(0) {
-          let Ok(parent_tree) = parent.tree() else {
-            continue;
-          };
-          if let Ok(diff) =
-            repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))
-            && diff.deltas().len() > 0
-          {
-            return Ok(Some(build_modification(&commit)?));
-          }
+        let tree = commit.tree()?;
+        // parent_count() == 1 guarantees a parent exists; a read failure here is
+        // a genuine error, so propagate rather than treating it as "no match".
+        let parent = commit.parent(0)?;
+        let parent_tree = parent.tree()?;
+        let diff =
+          repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))?;
+        // A successful diff with no delta means this commit didn't touch the
+        // path -- that is a genuine "no match", so keep walking.
+        if diff.deltas().len() > 0 {
+          return Ok(Some(build_modification(&commit)?));
         }
       }
       // root commit
       0 => {
-        let Ok(tree) = commit.tree() else {
-          continue;
-        };
-        if tree.get_path(&path).is_ok() {
-          return Ok(Some(build_modification(&commit)?));
+        let tree = commit.tree()?;
+        // NotFound == "file absent from this root commit's tree" (no match); any
+        // other lookup error is real and must propagate.
+        match tree.get_path(&path) {
+          Ok(_) => return Ok(Some(build_modification(&commit)?)),
+          Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+          Err(e) => return Err(e),
         }
       }
-      // ignore merge commits
+      // ignore merge commits (documented semantic, not an error)
       _ => {}
     }
   }
@@ -140,57 +141,53 @@ pub(crate) fn get_files_modification(
   // Same newest-first (time-topological) order as the single-file walk.
   rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
 
-  for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
+  for oid in rev_walk.by_ref() {
     if unresolved.is_empty() {
       break; // early-exit: nothing left to resolve
     }
-    let commit = match repo.find_commit(oid) {
-      Ok(c) => c,
-      Err(_) => continue,
-    };
+    // Propagate revwalk iterator errors instead of silently skipping them.
+    let oid = oid?;
+    // A real object-read failure is an error, not a "no match" -- propagate it.
+    let commit = repo.find_commit(oid)?;
     match commit.parent_count() {
       // commit with parent: diff (parent=old, commit=new) so added/modified
       // paths surface as new_file().path(); fall back to old_file() for deletes.
       1 => {
-        let tree = match commit.tree() {
-          Ok(t) => t,
-          Err(_) => continue,
-        };
-        let parent = match commit.parent(0) {
-          Ok(p) => p,
-          Err(_) => continue,
-        };
-        let parent_tree = match parent.tree() {
-          Ok(t) => t,
-          Err(_) => continue,
-        };
-        if let Ok(diff) =
-          repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), Some(&mut diff_options))
-        {
-          for delta in diff.deltas() {
-            let path = delta
-              .new_file()
-              .path()
-              .or_else(|| delta.old_file().path())
-              .and_then(|p| p.to_str());
-            if let Some(p) = path
-              && unresolved.contains(p)
-            {
-              let key = p.to_owned();
-              result.insert(key.clone(), Some(build_modification(&commit)?));
-              unresolved.remove(&key);
-            }
+        let tree = commit.tree()?;
+        // parent_count() == 1 guarantees a parent exists; propagate a real read
+        // failure rather than treating it as "no match".
+        let parent = commit.parent(0)?;
+        let parent_tree = parent.tree()?;
+        let diff =
+          repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), Some(&mut diff_options))?;
+        for delta in diff.deltas() {
+          let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .and_then(|p| p.to_str());
+          if let Some(p) = path
+            && unresolved.contains(p)
+          {
+            let key = p.to_owned();
+            result.insert(key.clone(), Some(build_modification(&commit)?));
+            unresolved.remove(&key);
           }
         }
       }
       // root commit: probe each still-unresolved path in the tree
       0 => {
-        if let Ok(tree) = commit.tree() {
-          for p in unresolved.clone() {
-            if tree.get_path(Path::new(&p)).is_ok() {
+        let tree = commit.tree()?;
+        for p in unresolved.clone() {
+          // NotFound == path absent from this root tree (no match); any other
+          // lookup error is real and must propagate.
+          match tree.get_path(Path::new(&p)) {
+            Ok(_) => {
               result.insert(p.clone(), Some(build_modification(&commit)?));
               unresolved.remove(&p);
             }
+            Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+            Err(e) => return Err(e),
           }
         }
       }

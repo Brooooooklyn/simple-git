@@ -2135,14 +2135,23 @@ fn get_file_created_date(
   let mut earliest_commit_time: Option<DateTime<Utc>> = None;
 
   // Traverse all commits to find the earliest one that contains the file
-  for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
-    if let Ok(commit) = repo.find_commit(oid)
-      && let Ok(tree) = commit.tree()
-    {
-      // Check if the file exists in this commit's tree
-      if tree.get_path(&path).is_ok() {
+  for oid in rev_walk.by_ref() {
+    // Propagate revwalk iterator + object-read failures; only a genuine
+    // "file absent from this commit" (NotFound) is a non-error skip.
+    let oid = oid?;
+    let commit = repo.find_commit(oid)?;
+    let tree = commit.tree()?;
+    // Check if the file exists in this commit's tree.
+    match tree.get_path(&path) {
+      // Present: record its time. Newest-first order means the last write wins,
+      // i.e. the oldest containing commit (the creation commit).
+      Ok(_entry) => {
         earliest_commit_time = Some(time_to_date(commit.time().seconds())?);
       }
+      // Absent from this commit's tree: not an error, keep walking.
+      Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+      // Any other lookup error is real and must propagate.
+      Err(e) => return Err(e),
     }
   }
 
