@@ -264,12 +264,20 @@ impl Remote {
     fetch_options: Option<&mut FetchOptions>,
   ) -> Result<()> {
     let mut default_fetch_options = git2::FetchOptions::default();
-    let mut options = fetch_options
-      .map(|o| {
+    let mut options = match fetch_options {
+      Some(o) => {
+        if o.used {
+          return Err(Error::new(
+            Status::GenericFailure,
+            "FetchOptions can only be used once".to_string(),
+          ));
+        }
         std::mem::swap(&mut o.inner, &mut default_fetch_options);
+        o.used = true;
         default_fetch_options
-      })
-      .unwrap_or_default();
+      }
+      None => git2::FetchOptions::default(),
+    };
     self
       .inner
       .fetch(refspecs.as_slice(), Some(&mut options), None)
@@ -316,6 +324,12 @@ impl Remote {
   /// callbacks bound to the main JS thread and cannot be invoked safely from a
   /// worker thread. If callbacks are required, use the synchronous `fetch`.
   ///
+  /// Resolves against a URL/refspec snapshot captured from this loaded
+  /// `Remote` at call time, not live on-disk config — a later
+  /// `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
+  /// affect an already-scheduled fetch, matching the synchronous `fetch()`
+  /// contract ("no loaded remote instances will be affected").
+  ///
   /// Safety: do not use the same `Remote` from the main thread while this async
   /// operation is pending; the underlying git2 handle is not `Sync`.
   pub fn fetch_async(
@@ -326,6 +340,12 @@ impl Remote {
   ) -> Result<AsyncTask<RemoteFetchTask>> {
     let options = match fetch_options {
       Some(o) => {
+        if o.used {
+          return Err(Error::new(
+            Status::GenericFailure,
+            "FetchOptions can only be used once".to_string(),
+          ));
+        }
         if o.has_remote_callbacks {
           return Err(Error::new(
             Status::GenericFailure,
@@ -335,16 +355,33 @@ impl Remote {
         }
         let mut taken = git2::FetchOptions::default();
         mem::swap(&mut o.inner, &mut taken);
+        o.used = true;
         Some(taken)
       }
       None => None,
+    };
+    let remote_url = self.inner.url().map(|s| s.to_owned()).map_err(|_| {
+      Error::new(
+        Status::GenericFailure,
+        "Remote has no valid UTF-8 fetch URL".to_string(),
+      )
+    })?;
+    let refspecs = if refspecs.is_empty() {
+      self
+        .inner
+        .fetch_refspecs()
+        .convert("Failed to read remote fetch refspecs")?
+        .iter()
+        .filter_map(|r| r.ok().flatten().map(|s| s.to_owned()))
+        .collect()
+    } else {
+      refspecs
     };
     Ok(AsyncTask::with_optional_signal(
       RemoteFetchTask {
         repo_path: self.repo_path.clone(),
         namespace: self.namespace.clone(),
-        remote_name: self.inner.name().ok().flatten().map(|s| s.to_owned()),
-        remote_url: self.inner.url().ok().map(|s| s.to_owned()),
+        remote_url,
         refspecs,
         options,
       },
@@ -360,6 +397,13 @@ impl Remote {
   /// JS-backed callbacks bound to the main JS thread and cannot be invoked
   /// safely from a worker thread. If callbacks (e.g. `pushUpdateReference`) are
   /// required, use the synchronous `push`.
+  ///
+  /// Resolves against a URL/refspec snapshot captured from this loaded
+  /// `Remote` at call time (using the configured `pushurl` when set, else
+  /// `url`), not live on-disk config — a later
+  /// `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
+  /// affect an already-scheduled push, matching the synchronous `push()`
+  /// contract ("no loaded remote instances will be affected").
   ///
   /// Safety: do not use the same `Remote` from the main thread while this async
   /// operation is pending; the underlying git2 handle is not `Sync`.
@@ -391,12 +435,34 @@ impl Remote {
       }
       None => None,
     };
+    let remote_url = self
+      .inner
+      .pushurl()
+      .convert("Failed to read remote pushurl")?
+      .map(|s| s.to_owned())
+      .or_else(|| self.inner.url().ok().map(|s| s.to_owned()))
+      .ok_or_else(|| {
+        Error::new(
+          Status::GenericFailure,
+          "Remote has no valid UTF-8 push URL".to_string(),
+        )
+      })?;
+    let refspecs = if refspecs.is_empty() {
+      self
+        .inner
+        .push_refspecs()
+        .convert("Failed to read remote push refspecs")?
+        .iter()
+        .filter_map(|r| r.ok().flatten().map(|s| s.to_owned()))
+        .collect()
+    } else {
+      refspecs
+    };
     Ok(AsyncTask::with_optional_signal(
       RemotePushTask {
         repo_path: self.repo_path.clone(),
         namespace: self.namespace.clone(),
-        remote_name: self.inner.name().ok().flatten().map(|s| s.to_owned()),
-        remote_url: self.inner.url().ok().map(|s| s.to_owned()),
+        remote_url,
         refspecs,
         options,
       },
@@ -435,8 +501,13 @@ pub struct RemoteFetchTask {
   /// `Remote::namespace`). Re-applied to the reopened worker handle before the
   /// remote is resolved so fetched refs land in `refs/namespaces/<ns>/…`.
   namespace: Option<String>,
-  remote_name: Option<String>,
-  remote_url: Option<String>,
+  /// The remote's fetch URL, captured from the loaded `Remote` at
+  /// `fetchAsync` call time. The worker reconstructs an anonymous remote from
+  /// this URL rather than re-resolving by name against on-disk config, so a
+  /// concurrent `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same
+  /// name does not affect an in-flight fetch — matching the snapshot
+  /// semantics of the synchronous `fetch()`.
+  remote_url: String,
   refspecs: Vec<String>,
   options: Option<git2::FetchOptions<'static>>,
 }
@@ -449,9 +520,11 @@ pub struct RemoteFetchTask {
 // `has_remote_callbacks` in `fetch_async`), so it holds only plain owned data
 // (depth/prune/proxy url/headers) with no JS `Env` or threadsafe function
 // captured — nothing unsound to use off the JS thread. The repository handle is
-// REOPENED from the owned `repo_path` inside `compute()` and the remote is
-// re-resolved there, so the task never aliases the JS-visible handle. No
-// aliasing, no concurrent access: the move is sound.
+// REOPENED from the owned `repo_path` inside `compute()`, and the remote is
+// reconstructed there from the captured URL snapshot via `remote_anonymous`
+// (never re-resolved by name against on-disk config), so the task never
+// aliases the JS-visible handle. No aliasing, no concurrent access: the move
+// is sound.
 unsafe impl Send for RemoteFetchTask {}
 
 #[napi]
@@ -470,11 +543,9 @@ impl Task for RemoteFetchTask {
         .set_namespace(ns)
         .convert("Failed to restore repository namespace")?;
     }
-    let mut remote = match &self.remote_name {
-      Some(name) => repo.find_remote(name),
-      None => repo.remote_anonymous(self.remote_url.as_deref().unwrap_or_default()),
-    }
-    .convert("Failed to resolve remote")?;
+    let mut remote = repo
+      .remote_anonymous(&self.remote_url)
+      .convert("Failed to resolve remote")?;
     let mut options = self.options.take().unwrap_or_default();
     remote
       .fetch(self.refspecs.as_slice(), Some(&mut options), None)
@@ -492,8 +563,17 @@ pub struct RemotePushTask {
   /// `Remote::namespace`). Re-applied to the reopened worker handle before the
   /// remote is resolved so pushed refs resolve under `refs/namespaces/<ns>/…`.
   namespace: Option<String>,
-  remote_name: Option<String>,
-  remote_url: Option<String>,
+  /// The remote's effective push URL (configured `pushurl` if set, else
+  /// `url`), captured from the loaded `Remote` at `pushAsync` call time. The
+  /// worker reconstructs an anonymous remote from this URL rather than
+  /// re-resolving by name against on-disk config, so a concurrent
+  /// `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
+  /// affect an in-flight push — matching the snapshot semantics of the
+  /// synchronous `push()`. Using this URL directly on an anonymous remote
+  /// reproduces the push target exactly: an anonymous remote never has an
+  /// in-memory pushurl override, so libgit2 falls back to its single `url` —
+  /// which is already the effective target we captured.
+  remote_url: String,
   refspecs: Vec<String>,
   options: Option<git2::PushOptions<'static>>,
 }
@@ -503,9 +583,11 @@ pub struct RemotePushTask {
 // raw header pointers. The stored `PushOptions` is only ever built when the
 // source `PushOptions` carries NO `RemoteCallbacks` (guarded by
 // `has_remote_callbacks` in `push_async`), so it captures no JS `Env`/threadsafe
-// function. The repository is REOPENED from the owned `repo_path` and the remote
-// re-resolved inside `compute()`, all on a single worker thread — never aliasing
-// or concurrently accessing the JS-visible handle.
+// function. The repository is REOPENED from the owned `repo_path` inside
+// `compute()`, and the remote is reconstructed there from the captured URL
+// snapshot via `remote_anonymous` (never re-resolved by name against on-disk
+// config), all on a single worker thread — never aliasing or concurrently
+// accessing the JS-visible handle.
 unsafe impl Send for RemotePushTask {}
 
 #[napi]
@@ -523,11 +605,9 @@ impl Task for RemotePushTask {
         .set_namespace(ns)
         .convert("Failed to restore repository namespace")?;
     }
-    let mut remote = match &self.remote_name {
-      Some(name) => repo.find_remote(name),
-      None => repo.remote_anonymous(self.remote_url.as_deref().unwrap_or_default()),
-    }
-    .convert("Failed to resolve remote")?;
+    let mut remote = repo
+      .remote_anonymous(&self.remote_url)
+      .convert("Failed to resolve remote")?;
     let mut options = self.options.take().unwrap_or_default();
     remote
       .push(self.refspecs.as_slice(), Some(&mut options))

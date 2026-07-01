@@ -712,6 +712,12 @@ export declare class Remote {
    * callbacks bound to the main JS thread and cannot be invoked safely from a
    * worker thread. If callbacks are required, use the synchronous `fetch`.
    *
+   * Resolves against a URL/refspec snapshot captured from this loaded
+   * `Remote` at call time, not live on-disk config — a later
+   * `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
+   * affect an already-scheduled fetch, matching the synchronous `fetch()`
+   * contract ("no loaded remote instances will be affected").
+   *
    * Safety: do not use the same `Remote` from the main thread while this async
    * operation is pending; the underlying git2 handle is not `Sync`.
    */
@@ -724,6 +730,13 @@ export declare class Remote {
    * JS-backed callbacks bound to the main JS thread and cannot be invoked
    * safely from a worker thread. If callbacks (e.g. `pushUpdateReference`) are
    * required, use the synchronous `push`.
+   *
+   * Resolves against a URL/refspec snapshot captured from this loaded
+   * `Remote` at call time (using the configured `pushurl` when set, else
+   * `url`), not live on-disk config — a later
+   * `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
+   * affect an already-scheduled push, matching the synchronous `push()`
+   * contract ("no loaded remote instances will be affected").
    *
    * Safety: do not use the same `Remote` from the main thread while this async
    * operation is pending; the underlying git2 handle is not `Sync`.

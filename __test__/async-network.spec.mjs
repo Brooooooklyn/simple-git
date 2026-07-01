@@ -33,7 +33,11 @@ const workRev = (work, ref) =>
 
 // A bare "remote" with a single commit on `main`, produced by a throwaway work
 // repo that pushes into it. Returns the bare path + that commit's OID.
-function makeBareWithCommit(root) {
+// `content` defaults to a fixed string; callers that need two distinct
+// commits (e.g. from two calls in the same wall-clock second, which would
+// otherwise produce byte-identical — and therefore identically-hashed —
+// commits) can pass different content to guarantee distinct OIDs.
+function makeBareWithCommit(root, content = "hello\n") {
   const bare = join(root, "remote.git");
   const seed = join(root, "seed");
   execSync(`git init -q --bare -b main "${bare}"`);
@@ -43,7 +47,7 @@ function makeBareWithCommit(root) {
   run("config user.email tester@example.com");
   run("config commit.gpgsign false");
   run("config core.autocrlf false");
-  writeFileSync(join(seed, "file.txt"), "hello\n");
+  writeFileSync(join(seed, "file.txt"), content);
   run("add file.txt");
   run('commit -q -m "initial commit"');
   run(`remote add origin "${bare}"`);
@@ -314,6 +318,152 @@ test("fetchAsync updates a remote-tracking ref", async (t) => {
       ["refs/heads/main:refs/remotes/origin/main"],
       null,
     );
+    t.is(workRev(consumer, "refs/remotes/origin/main"), head);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// REGRESSION GUARD: FetchOptions is a one-shot object (its inner git2 state
+// is drained via mem::swap on first use). Reusing it must throw SYNCHRONOUSLY
+// (the guard runs before AsyncTask::with_optional_signal is constructed, so
+// the rejection is not a Promise rejection but a thrown error at call time,
+// mirroring "pushAsync rejects PushOptions carrying RemoteCallbacks" above).
+// This test MUST fail before the reuse-guard fix and pass after.
+test("fetchAsync rejects a reused FetchOptions", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-fetch-async-reuse-"));
+  try {
+    const { bare } = makeBareWithCommit(root);
+    const consumer = join(root, "consumer");
+    execSync(`git init -q -b main "${consumer}"`);
+    execSync(`git remote add origin "${bare}"`, { cwd: consumer });
+
+    const remote = new Repository(consumer).findRemote("origin");
+    const options = new FetchOptions();
+    await remote.fetchAsync(
+      ["refs/heads/main:refs/remotes/origin/main"],
+      options,
+    );
+    const err = t.throws(() =>
+      remote.fetchAsync(
+        ["refs/heads/main:refs/remotes/origin/main"],
+        options,
+      ),
+    );
+    t.regex(err.message, /FetchOptions can only be used once/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// REGRESSION GUARD: fetchAsync must resolve the remote from the URL snapshot
+// captured when the JS `Remote` was loaded, not by re-resolving the remote's
+// NAME against live on-disk config at compute time. Two distinct bare
+// "remotes" (bareA, bareB) with different HEAD commits; the consumer's
+// `origin` starts out pointing at bareA. `remote` is loaded while that is
+// still true. The on-disk config is then mutated to point `origin` at bareB
+// AFTER `remote` was loaded (without going through `remote` itself). The
+// snapshot semantics documented on the synchronous `fetch()` ("no loaded
+// remote instances will be affected") require the already-loaded `remote` to
+// still fetch from bareA. Before the fix (re-resolving `find_remote("origin")`
+// at compute time) this fetches from bareB instead and the assertion fails.
+test("fetchAsync is unaffected by a remoteSetUrl after the Remote was loaded", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-fetch-async-snapshot-"));
+  try {
+    const { bare: bareA, head: headA } = makeBareWithCommit(
+      join(root, "a"),
+      "hello from A\n",
+    );
+    const { bare: bareB, head: headB } = makeBareWithCommit(
+      join(root, "b"),
+      "hello from B\n",
+    );
+    t.not(headA, headB);
+
+    const consumer = join(root, "consumer");
+    execSync(`git init -q -b main "${consumer}"`);
+    execSync(`git remote add origin "${bareA}"`, { cwd: consumer });
+
+    const remote = new Repository(consumer).findRemote("origin");
+
+    // Mutate on-disk config AFTER `remote` was loaded, not through `remote`.
+    execSync(`git remote set-url origin "${bareB}"`, { cwd: consumer });
+
+    await remote.fetchAsync(
+      ["refs/heads/main:refs/remotes/origin/main"],
+      null,
+    );
+
+    // The snapshot captured at load time (bareA) wins, not the live config
+    // (bareB).
+    t.is(workRev(consumer, "refs/remotes/origin/main"), headA);
+    t.not(workRev(consumer, "refs/remotes/origin/main"), headB);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regression guard against a *future* regression: proves the pushurl-
+// preservation half of the fix has no regression. `origin`'s fetch `url` is
+// deliberately bogus/nonexistent; a separate `pushurl` points at the real
+// bare repo. pushAsync must use the effective push target (pushurl), not the
+// (unrelated) fetch url. This is a guard against a naive
+// `remote_anonymous(self.inner.url())` implementation, which this brief
+// explicitly rejects; it should pass both before and after the fix (before
+// the fix, `find_remote(name)` already respects `pushurl` internally) — its
+// value is catching a future regression if this is ever "simplified" to use
+// `url` instead of the `pushurl`-fallback capture.
+test("pushAsync uses the remote's configured pushurl, not its fetch url", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-pushurl-"));
+  try {
+    const bare = join(root, "remote.git");
+    const work = join(root, "work");
+    execSync(`git init -q --bare -b main "${bare}"`);
+    execSync(`git init -q -b main "${work}"`);
+    const run = (args) => execSync(`git ${args}`, { cwd: work });
+    run("config user.name tester");
+    run("config user.email tester@example.com");
+    run("config commit.gpgsign false");
+    run("config core.autocrlf false");
+    writeFileSync(join(work, "file.txt"), "hello\n");
+    run("add file.txt");
+    run('commit -q -m "initial commit"');
+    const head = workRev(work, "HEAD");
+
+    // Fetch url is deliberately wrong/nonexistent; pushurl is the real bare
+    // repo.
+    execSync(`git remote add origin "file:///nonexistent-should-not-be-used"`, {
+      cwd: work,
+    });
+    execSync(`git remote set-url --push origin "${bare}"`, { cwd: work });
+
+    const remote = new Repository(work).findRemote("origin");
+    await remote.pushAsync(["refs/heads/main:refs/heads/main"], null);
+
+    t.is(bareRev(bare, "refs/heads/main"), head);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regression guard on the refspec-fallback branch specifically: with an
+// EMPTY refspecs array, fetchAsync must substitute the remote's configured
+// fetch refspecs (the default `+refs/heads/*:refs/remotes/origin/*` set up
+// automatically by `git remote add`), not just skip the fetch. Before the
+// fix this already worked by coincidence (find_remote(name) loads the real
+// config); this guards the NEW `if refspecs.is_empty() { ... }` code path
+// specifically, proving it wasn't dropped or mis-collected in the refactor.
+test("fetchAsync falls back to the remote's configured refspecs when refspecs is empty", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-fetch-async-fallback-"));
+  try {
+    const { bare, head } = makeBareWithCommit(root);
+    const consumer = join(root, "consumer");
+    execSync(`git init -q -b main "${consumer}"`);
+    execSync(`git remote add origin "${bare}"`, { cwd: consumer });
+
+    const remote = new Repository(consumer).findRemote("origin");
+    await remote.fetchAsync([], null);
+
     t.is(workRev(consumer, "refs/remotes/origin/main"), head);
   } finally {
     rmSync(root, { recursive: true, force: true });
