@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import test from "ava";
 
-import { Repository } from "../index.js";
+import { Repository, RepositoryOpenFlags } from "../index.js";
 
 const __dirname = join(fileURLToPath(import.meta.url), "..");
 const workDir = join(__dirname, "..");
@@ -20,6 +20,7 @@ function makeTempRepo() {
   run("config user.name tester");
   run("config user.email tester@example.com");
   run("config commit.gpgsign false");
+  run("config core.autocrlf false");
   writeFileSync(join(dir, "committed.txt"), "v1\n");
   run("add committed.txt");
   run("commit -q -m initial");
@@ -148,6 +149,51 @@ test("statusesAsync matches sync length", async (t) => {
     t.deepEqual(
       asyncResult.map((s) => s.path).sort(),
       sync.map((s) => s.path).sort(),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Regression guard: a worker reopening the repo path for an async task must
+// replay the `RepositoryOpenFlags` (here, `Bare`) the JS-visible handle was
+// opened with via `openExt`, not silently fall back to a plain
+// `git2::Repository::open`. Before the fix, a worker-local reopen of a
+// force-bare handle's path auto-detects as an ordinary non-bare repository
+// (the on-disk dir genuinely has a working tree), so `statusesAsync` would
+// happily scan the real worktree and see the unstaged modification below --
+// diverging from sync `statuses()`, which correctly refuses to run against a
+// bare repo. After the fix, both reject with the same libgit2 "bare
+// repository" error.
+test("statusesAsync matches sync on a force-bare-opened repo (both reject)", async (t) => {
+  const dir = makeTempRepo();
+  try {
+    // Dirty the tracked file WITHOUT staging, so a non-bare status scan would
+    // report a real worktree modification.
+    writeFileSync(join(dir, "committed.txt"), "v2-dirty\n");
+
+    // Force-open the SAME on-disk repo as bare. `Bare` treats `path` as
+    // already being the gitdir (no `.git` appended), so pass the resolved
+    // gitdir directly -- mirroring what `Repository::path()` (captured by
+    // `statusesAsync`) returns internally.
+    const repo = Repository.openExt(join(dir, ".git"), RepositoryOpenFlags.Bare, []);
+    t.is(repo.workdir(), null, "force-bare handle must report no workdir");
+
+    const syncError = t.throws(() => repo.statuses(), undefined, "sync statuses() must reject a bare repo");
+    t.true(
+      /bare repositor/i.test(syncError.message),
+      `sync error should mention bare repositories, got: ${syncError.message}`,
+    );
+
+    const asyncError = await t.throwsAsync(
+      () => repo.statusesAsync(),
+      undefined,
+      "statusesAsync must reject the same way as sync on a force-bare handle",
+    );
+    t.is(
+      asyncError.message,
+      syncError.message,
+      "async must fail identically to sync instead of silently scanning the real worktree",
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -126,6 +126,7 @@ pub enum RepositoryOpenFlags {
 
 pub struct GitDateTask {
   path: String,
+  open_flags: Option<u32>,
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
@@ -133,6 +134,7 @@ pub struct GitDateTask {
 
 pub struct GitCreatedDateTask {
   path: String,
+  open_flags: Option<u32>,
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
@@ -140,6 +142,7 @@ pub struct GitCreatedDateTask {
 
 pub struct GitModificationTask {
   path: String,
+  open_flags: Option<u32>,
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
@@ -147,6 +150,7 @@ pub struct GitModificationTask {
 
 pub struct GitBulkModificationTask {
   path: String,
+  open_flags: Option<u32>,
   namespace: Option<String>,
   workdir: Option<String>,
   filepaths: Vec<String>,
@@ -154,6 +158,7 @@ pub struct GitBulkModificationTask {
 
 pub struct GitStatusTask {
   path: String,
+  open_flags: Option<u32>,
   namespace: Option<String>,
   workdir: Option<String>,
   options: Option<StatusOptions>,
@@ -161,6 +166,7 @@ pub struct GitStatusTask {
 
 pub struct GitBlameTask {
   path: String,
+  open_flags: Option<u32>,
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
@@ -169,6 +175,7 @@ pub struct GitBlameTask {
 
 pub struct GitCommitTask {
   path: String,
+  open_flags: Option<u32>,
   namespace: Option<String>,
   workdir: Option<String>,
   update_ref: Option<String>,
@@ -177,6 +184,24 @@ pub struct GitCommitTask {
   message: String,
   tree_oid: git2::Oid,
   parents: Vec<String>,
+}
+
+/// Reopen a worker-local `git2::Repository` from `path`, replaying the
+/// `RepositoryOpenFlags` the original JS-visible handle was opened with (if
+/// any — see `Repository::open_flags`), so a worker sees the same
+/// `Bare`/`FromEnv` behavior as the handle the async call was made on. `None`
+/// (the common case: `new`/`init`/`discover`/`clone`) is a plain
+/// `git2::Repository::open`, identical to prior behavior.
+pub(crate) fn reopen_worker_repo(path: &str, open_flags: Option<u32>) -> Result<git2::Repository> {
+  match open_flags {
+    Some(flags) => git2::Repository::open_ext(
+      path,
+      git2::RepositoryOpenFlags::from_bits_truncate(flags),
+      Vec::<String>::new(),
+    )
+    .convert(format!("Failed to open git repo: [{path}]")),
+    None => git2::Repository::open(path).convert(format!("Failed to open git repo: [{path}]")),
+  }
 }
 
 /// Re-apply the in-memory, per-handle repository state that the JS-visible
@@ -233,8 +258,7 @@ impl Task for GitDateTask {
   type JsValue = DateTime<Utc>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = git2::Repository::open(&self.path)
-      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_file_modification(&repo, &self.filepath)
       .convert_without_message()
@@ -256,8 +280,7 @@ impl Task for GitCreatedDateTask {
   type JsValue = DateTime<Utc>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = git2::Repository::open(&self.path)
-      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_file_created_date(&repo, &self.filepath)
       .convert_without_message()
@@ -280,8 +303,7 @@ impl Task for GitModificationTask {
   type JsValue = Option<FileModification>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = git2::Repository::open(&self.path)
-      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_file_modification(&repo, &self.filepath).convert_without_message()
   }
@@ -297,8 +319,7 @@ impl Task for GitBulkModificationTask {
   type JsValue = HashMap<String, Option<FileModification>>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = git2::Repository::open(&self.path)
-      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_files_modification(&repo, &self.filepaths).convert_without_message()
   }
@@ -314,8 +335,7 @@ impl Task for GitStatusTask {
   type JsValue = Vec<FileStatus>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = git2::Repository::open(&self.path)
-      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     collect_statuses(&repo, self.options.clone())
   }
@@ -331,8 +351,7 @@ impl Task for GitBlameTask {
   type JsValue = Vec<BlameHunk>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = git2::Repository::open(&self.path)
-      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     collect_blame(&repo, &self.filepath, self.options.clone())
   }
@@ -348,8 +367,7 @@ impl Task for GitCommitTask {
   type JsValue = String;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = git2::Repository::open(&self.path)
-      .convert(format!("Failed to open git repo: [{}]", self.path))?;
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     let tree = repo
       .find_tree(self.tree_oid)
@@ -398,7 +416,10 @@ impl Task for GitCloneTask {
     self
       .result
       .take()
-      .map(|inner| Repository { inner })
+      .map(|inner| Repository {
+        inner,
+        open_flags: None,
+      })
       .ok_or_else(|| {
         napi::Error::new(
           Status::GenericFailure,
@@ -411,6 +432,14 @@ impl Task for GitCloneTask {
 #[napi]
 pub struct Repository {
   pub(crate) inner: git2::Repository,
+  /// The raw `RepositoryOpenFlags` bits this repo was opened with via
+  /// `openExt`, if any. `None` for every other constructor (`new`, `init`,
+  /// `discover`, `clone`, etc.) — meaning a worker reopening this repo's path
+  /// with plain `git2::Repository::open` is correct and equivalent. `Some`
+  /// only when `Bare`/`FromEnv`-style flags need to be replayed on a
+  /// worker-local reopen so async methods (`statusesAsync`/`blameFileAsync`/
+  /// etc.) behave like their sync counterparts — see `reopen_worker_repo`.
+  pub(crate) open_flags: Option<u32>,
 }
 
 #[napi]
@@ -427,6 +456,7 @@ impl Repository {
           format!("Failed to open git repo: [{p}], reason: {err}",),
         )
       })?,
+      open_flags: None,
     })
   }
 
@@ -468,6 +498,7 @@ impl Repository {
         ceiling_dirs,
       )
       .convert("Failed to open git repo")?,
+      open_flags: Some(flags),
     })
   }
 
@@ -483,6 +514,7 @@ impl Repository {
     Ok(Self {
       inner: git2::Repository::discover(&path)
         .convert(format!("Discover git repo from [{path}] failed"))?,
+      open_flags: None,
     })
   }
 
@@ -493,6 +525,7 @@ impl Repository {
   pub fn init_bare(path: String) -> Result<Self> {
     Ok(Self {
       inner: git2::Repository::init_bare(path).convert("Failed to init bare repo")?,
+      open_flags: None,
     })
   }
 
@@ -504,6 +537,7 @@ impl Repository {
   pub fn clone(url: String, path: String) -> Result<Self> {
     Ok(Self {
       inner: git2::Repository::clone(&url, path).convert("Failed to clone repo")?,
+      open_flags: None,
     })
   }
 
@@ -539,6 +573,7 @@ impl Repository {
     Ok(Self {
       inner: git2::Repository::clone_recurse(&url, path)
         .convert("Failed to clone repo recursively")?,
+      open_flags: None,
     })
   }
 
@@ -557,6 +592,7 @@ impl Repository {
           format!("Failed to open git repo: [{git_dir}], reason: {err}",),
         )
       })?,
+      open_flags: None,
     })
   }
 
@@ -721,6 +757,7 @@ impl Repository {
     name: String,
   ) -> Option<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
+    let open_flags = self.open_flags;
     Some(Remote {
       inner: self_ref
         .share_with(env, move |repo| {
@@ -731,6 +768,7 @@ impl Repository {
         })
         .ok()?,
       repo_path,
+      open_flags,
     })
   }
 
@@ -745,6 +783,7 @@ impl Repository {
     url: String,
   ) -> Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
+    let open_flags = self.open_flags;
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -753,6 +792,7 @@ impl Repository {
           .convert(format!("Failed to add remote [{}]", &name))
       })?,
       repo_path,
+      open_flags,
     })
   }
 
@@ -768,6 +808,7 @@ impl Repository {
     refspec: String,
   ) -> Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
+    let open_flags = self.open_flags;
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -776,6 +817,7 @@ impl Repository {
           .convert("Failed to add remote")
       })?,
       repo_path,
+      open_flags,
     })
   }
 
@@ -792,6 +834,7 @@ impl Repository {
     url: String,
   ) -> Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
+    let open_flags = self.open_flags;
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
@@ -800,6 +843,7 @@ impl Repository {
           .convert("Failed to create anonymous remote")
       })?,
       repo_path,
+      open_flags,
     })
   }
 
@@ -1442,6 +1486,7 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitCommitTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
         namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: self
           .inner
@@ -1519,6 +1564,7 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitDateTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
         namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: self
           .inner
@@ -1546,6 +1592,7 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitModificationTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
         namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: self
           .inner
@@ -1576,6 +1623,7 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitBulkModificationTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
         namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: self
           .inner
@@ -1620,6 +1668,7 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitStatusTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
         namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: self
           .inner
@@ -1665,6 +1714,7 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitBlameTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
         namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: self
           .inner
@@ -1695,6 +1745,7 @@ impl Repository {
     Ok(AsyncTask::with_optional_signal(
       GitCreatedDateTask {
         path: self.inner.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
         namespace: self.inner.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: self
           .inner

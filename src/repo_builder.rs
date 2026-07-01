@@ -140,6 +140,7 @@ impl RepoBuilder {
         .builder
         .clone(&url, Path::new(&path))
         .convert("Clone failed")?,
+      open_flags: None,
     })
   }
 }

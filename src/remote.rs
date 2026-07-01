@@ -5,6 +5,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
+use crate::repo::reopen_worker_repo;
 
 #[napi]
 /// An enumeration of the possible directions for a remote.
@@ -155,6 +156,12 @@ pub struct Remote {
   /// the remote there instead of moving the JS-visible handle off-thread. Not a
   /// `#[napi]` field, so it is invisible to the JS surface.
   pub(crate) repo_path: String,
+  /// The raw `RepositoryOpenFlags` bits the owning `Repository` was opened
+  /// with via `openExt`, if any (see `Repository::open_flags`). Threaded into
+  /// the async fetch/push tasks so a worker reopening `repo_path` replays the
+  /// same `Bare`/`FromEnv` behavior as the JS-visible handle this `Remote` was
+  /// derived from.
+  pub(crate) open_flags: Option<u32>,
 }
 
 #[napi]
@@ -358,6 +365,7 @@ impl Remote {
     Ok(AsyncTask::with_optional_signal(
       RemoteFetchTask {
         repo_path: self.repo_path.clone(),
+        open_flags: self.open_flags,
         namespace,
         remote_name,
         remote_url,
@@ -463,6 +471,7 @@ impl Remote {
     Ok(AsyncTask::with_optional_signal(
       RemotePushTask {
         repo_path: self.repo_path.clone(),
+        open_flags: self.open_flags,
         namespace,
         remote_url,
         refspecs,
@@ -499,6 +508,10 @@ impl Remote {
 
 pub struct RemoteFetchTask {
   repo_path: String,
+  /// The owning repo's `RepositoryOpenFlags`, if any (see
+  /// `Repository::open_flags`), replayed on the worker-local reopen so a
+  /// force-bare/`FromEnv`-opened repo behaves the same async as sync.
+  open_flags: Option<u32>,
   /// Active namespace of the owning repo, queried live at `fetchAsync`
   /// call time (see Fix A). Re-applied to the reopened worker handle
   /// before the remote is resolved so fetched refs land in
@@ -529,8 +542,7 @@ impl Task for RemoteFetchTask {
   type JsValue = ();
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = git2::Repository::open(&self.repo_path)
-      .convert(format!("Failed to open git repo: [{}]", self.repo_path))?;
+    let repo = reopen_worker_repo(&self.repo_path, self.open_flags)?;
     // Restore the parent repo's namespace before resolving the remote so the
     // reopened worker handle resolves/updates the namespaced refs, matching
     // sync `fetch`.
@@ -557,6 +569,10 @@ impl Task for RemoteFetchTask {
 
 pub struct RemotePushTask {
   repo_path: String,
+  /// The owning repo's `RepositoryOpenFlags`, if any (see
+  /// `Repository::open_flags`), replayed on the worker-local reopen so a
+  /// force-bare/`FromEnv`-opened repo behaves the same async as sync.
+  open_flags: Option<u32>,
   /// Active namespace of the owning repo, queried live at `pushAsync`
   /// call time (see Fix A). Re-applied to the reopened worker handle
   /// before the remote is resolved so pushed refs resolve under
@@ -629,8 +645,7 @@ impl Task for RemotePushTask {
   type JsValue = ();
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = git2::Repository::open(&self.repo_path)
-      .convert(format!("Failed to open git repo: [{}]", self.repo_path))?;
+    let repo = reopen_worker_repo(&self.repo_path, self.open_flags)?;
     // Restore the parent repo's namespace before resolving the remote so the
     // reopened worker handle resolves the namespaced refs, matching sync `push`.
     if let Some(ns) = &self.namespace {
