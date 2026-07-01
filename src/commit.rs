@@ -258,6 +258,17 @@ impl Commit {
     tree: Option<&Tree>,
   ) -> Result<String> {
     ensure_alive(&self.alive)?;
+    // Guard the argument handles: an author/committer/tree from a disposed
+    // repository would otherwise deref freed git2 state (arg-side UAF).
+    if let Some(a) = author {
+      ensure_alive(&a.alive)?;
+    }
+    if let Some(c) = committer {
+      ensure_alive(&c.alive)?;
+    }
+    if let Some(t) = tree {
+      ensure_alive(&t.alive)?;
+    }
     self
       .inner
       .amend(

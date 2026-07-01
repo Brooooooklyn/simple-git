@@ -28,7 +28,7 @@ use crate::status::{FileStatus, StatusOptions, build_status_opts, status_from_bi
 use crate::tag::Tag;
 use crate::tree::{Tree, TreeParent};
 use crate::util::path_to_javascript_string;
-use crate::{CodeInto, GitCode, Result, coded_error, disposed_error};
+use crate::{CodeInto, GitCode, Result, coded_error, disposed_error, ensure_alive};
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
   // Handle the `failed to stat '/root/.gitconfig'; class=Config (7)` Error
@@ -1348,6 +1348,9 @@ impl Repository {
     target: &Commit,
     force: bool,
   ) -> napi::Result<Branch> {
+    // Guard the argument handle: passing a `Commit` from a disposed repository
+    // would otherwise deref freed git2 state (arg-side use-after-free).
+    ensure_alive(&target.alive).code_into(env)?;
     // Create the branch ref; the returned borrowed branch is dropped, then the
     // owned `Branch` is rebuilt by re-finding it inside `share_with`.
     self
@@ -1378,6 +1381,7 @@ impl Repository {
   /// The checkout is **safe** by default — pass `options.force = true` to
   /// overwrite local modifications.
   pub fn checkout_tree(&self, treeish: &GitObject, options: Option<CheckoutOptions>) -> Result<()> {
+    ensure_alive(&treeish.alive)?;
     let mut builder = build_checkout_builder(options);
     self
       .inner()?
@@ -1514,6 +1518,8 @@ impl Repository {
     message: String,
     force: bool,
   ) -> Result<String> {
+    ensure_alive(&target.alive)?;
+    ensure_alive(&tagger.alive)?;
     self
       .inner()?
       .tag(&name, &target.inner, &tagger.inner, &message, force)
@@ -1536,6 +1542,8 @@ impl Repository {
     tagger: &Signature,
     message: String,
   ) -> Result<String> {
+    ensure_alive(&target.alive)?;
+    ensure_alive(&tagger.alive)?;
     self
       .inner()?
       .tag_annotation_create(&name, &target.inner, &tagger.inner, &message)
@@ -1550,6 +1558,7 @@ impl Repository {
   /// If force is true and a reference already exists with the given name,
   /// it'll be replaced.
   pub fn tag_lightweight(&self, name: String, target: &GitObject, force: bool) -> Result<String> {
+    ensure_alive(&target.alive)?;
     self
       .inner()?
       .tag_lightweight(&name, &target.inner, force)
@@ -1704,6 +1713,9 @@ impl Repository {
     old_tree: Option<&Tree>,
     options: Option<DiffOptions>,
   ) -> napi::Result<Diff> {
+    if let Some(t) = old_tree {
+      ensure_alive(&t.alive).code_into(env)?;
+    }
     let mut diff_options = build_diff_options(options);
     Ok(Diff {
       inner: self_reference.share_with(env, |repo| {
@@ -1732,6 +1744,9 @@ impl Repository {
     old_tree: Option<&Tree>,
     options: Option<DiffOptions>,
   ) -> napi::Result<Diff> {
+    if let Some(t) = old_tree {
+      ensure_alive(&t.alive).code_into(env)?;
+    }
     let mut diff_options = build_diff_options(options);
     Ok(Diff {
       inner: self_reference.share_with(env, |repo| {
@@ -1769,6 +1784,12 @@ impl Repository {
     tree: &Tree,
     parents: Option<Vec<String>>,
   ) -> Result<String> {
+    // Guard the argument handles: signatures/tree from a disposed repository
+    // would otherwise deref freed git2 state (arg-side use-after-free).
+    // `parents` are OID hex strings (not derived handles), so they need no guard.
+    ensure_alive(&author.alive)?;
+    ensure_alive(&committer.alive)?;
+    ensure_alive(&tree.alive)?;
     let parent_commits = parents
       .unwrap_or_default()
       .into_iter()
@@ -1816,6 +1837,12 @@ impl Repository {
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitCommitTask>> {
     let repo = self.inner()?;
+    // Guard the argument handles at this synchronous read point (they are read
+    // on the JS thread below, before the task is spawned). `parents` are OID
+    // hex strings (not derived handles), so they need no guard.
+    ensure_alive(&author.alive)?;
+    ensure_alive(&committer.alive)?;
+    ensure_alive(&tree.alive)?;
     Ok(AsyncTask::with_optional_signal(
       GitCommitTask {
         path: repo.path().to_string_lossy().into_owned(),
