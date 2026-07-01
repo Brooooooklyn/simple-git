@@ -6,6 +6,7 @@ use napi_derive::napi;
 use chrono::{DateTime, Utc};
 
 use crate::{
+  CodeInto, GitCode, Result,
   error::IntoNapiError,
   object::ObjectParent,
   signature::{Signature, SignatureInner},
@@ -51,9 +52,13 @@ impl Commit {
 
   #[napi]
   /// Get the tree pointed to by this commit.
-  pub fn tree(&self, this_ref: Reference<Commit>, env: Env) -> Result<Tree> {
+  pub fn tree(&self, this_ref: Reference<Commit>, env: Env) -> napi::Result<Tree> {
     let tree = this_ref.share_with(env, |commit| {
-      let tree = commit.inner.tree().convert("Find tree on commit failed")?;
+      let tree = commit
+        .inner
+        .tree()
+        .convert("Find tree on commit failed")
+        .code_into(env)?;
       Ok(tree)
     })?;
     Ok(Tree {
@@ -186,12 +191,12 @@ impl Commit {
     let committer_time = self.inner.time();
 
     DateTime::from_timestamp(committer_time.seconds(), 0)
-      .ok_or_else(|| Error::from_reason("Invalid commit time"))
+      .ok_or_else(|| Error::new(GitCode::GenericError, "Invalid commit time"))
   }
 
   #[napi]
   /// Get the author of this commit.
-  pub fn author(&self, this_ref: Reference<Commit>, env: Env) -> Result<Signature> {
+  pub fn author(&self, this_ref: Reference<Commit>, env: Env) -> napi::Result<Signature> {
     let author = this_ref.share_with(env, |commit| Ok(commit.inner.author()))?;
     Ok(Signature {
       inner: SignatureInner::FromCommit(author),
@@ -200,7 +205,7 @@ impl Commit {
 
   #[napi]
   /// Get the committer of this commit.
-  pub fn committer(&self, this_ref: Reference<Commit>, env: Env) -> Result<Signature> {
+  pub fn committer(&self, this_ref: Reference<Commit>, env: Env) -> napi::Result<Signature> {
     let committer = this_ref.share_with(env, |commit| Ok(commit.inner.committer()))?;
     Ok(Signature {
       inner: SignatureInner::FromCommit(committer),

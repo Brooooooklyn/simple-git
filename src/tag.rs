@@ -1,7 +1,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-use crate::{error::IntoNapiError, object::GitObject};
+use crate::{Result, error::IntoNapiError, object::GitObject};
 
 #[napi]
 pub struct Tag {

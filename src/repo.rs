@@ -26,6 +26,7 @@ use crate::status::{FileStatus, StatusOptions, build_status_opts, status_from_bi
 use crate::tag::Tag;
 use crate::tree::{Tree, TreeParent};
 use crate::util::path_to_javascript_string;
+use crate::{CodeInto, GitCode, Result, coded_error};
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
   // Handle the `failed to stat '/root/.gitconfig'; class=Config (7)` Error
@@ -41,7 +42,7 @@ static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
       git_config_dir.push(".gitconfig");
       std::fs::write(&git_config_dir, "").map_err(|err| {
         Error::new(
-          Status::GenericFailure,
+          GitCode::GenericError,
           format!("Initialize {git_config_dir:?} failed {err}"),
         )
       })?;
@@ -130,6 +131,7 @@ pub struct GitDateTask {
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
+  code: GitCode,
 }
 
 pub struct GitCreatedDateTask {
@@ -138,6 +140,7 @@ pub struct GitCreatedDateTask {
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
+  code: GitCode,
 }
 
 pub struct GitModificationTask {
@@ -146,6 +149,7 @@ pub struct GitModificationTask {
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
+  code: GitCode,
 }
 
 pub struct GitBulkModificationTask {
@@ -154,6 +158,7 @@ pub struct GitBulkModificationTask {
   namespace: Option<String>,
   workdir: Option<String>,
   filepaths: Vec<String>,
+  code: GitCode,
 }
 
 pub struct GitStatusTask {
@@ -162,6 +167,7 @@ pub struct GitStatusTask {
   namespace: Option<String>,
   workdir: Option<String>,
   options: Option<StatusOptions>,
+  code: GitCode,
 }
 
 pub struct GitBlameTask {
@@ -171,6 +177,7 @@ pub struct GitBlameTask {
   workdir: Option<String>,
   filepath: String,
   options: Option<BlameOptions>,
+  code: GitCode,
 }
 
 pub struct GitCommitTask {
@@ -184,6 +191,7 @@ pub struct GitCommitTask {
   message: String,
   tree_oid: git2::Oid,
   parents: Vec<String>,
+  code: GitCode,
 }
 
 /// Reopen a worker-local `git2::Repository` from `path`, replaying the
@@ -244,6 +252,7 @@ pub struct GitCloneTask {
   url: String,
   path: String,
   result: Option<git2::Repository>,
+  code: GitCode,
 }
 
 // `git2::Repository` is `Send` (see git2's `unsafe impl Send for Repository`),
@@ -252,12 +261,8 @@ pub struct GitCloneTask {
 // thread, moved out in `resolve()` on the main thread, and (because `compute()`
 // completes before `resolve()` runs) is only ever owned by one thread at a time.
 
-#[napi]
-impl Task for GitDateTask {
-  type Output = DateTime<Utc>;
-  type JsValue = DateTime<Utc>;
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
+impl GitDateTask {
+  fn run(&mut self) -> Result<DateTime<Utc>> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_file_modification(&repo, &self.filepath)
@@ -268,18 +273,35 @@ impl Task for GitDateTask {
           .expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
       })
   }
-
-  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output)
-  }
 }
 
 #[napi]
-impl Task for GitCreatedDateTask {
+impl Task for GitDateTask {
   type Output = DateTime<Utc>;
   type JsValue = DateTime<Utc>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitCreatedDateTask {
+  fn run(&mut self) -> Result<DateTime<Utc>> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     get_file_created_date(&repo, &self.filepath)
@@ -291,9 +313,38 @@ impl Task for GitCreatedDateTask {
         ))
       })
   }
+}
+
+#[napi]
+impl Task for GitCreatedDateTask {
+  type Output = DateTime<Utc>;
+  type JsValue = DateTime<Utc>;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitModificationTask {
+  fn run(&mut self) -> Result<Option<FileModification>> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    get_file_modification(&repo, &self.filepath).convert_without_message()
   }
 }
 
@@ -303,13 +354,30 @@ impl Task for GitModificationTask {
   type JsValue = Option<FileModification>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
-    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    get_file_modification(&repo, &self.filepath).convert_without_message()
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitBulkModificationTask {
+  fn run(&mut self) -> Result<HashMap<String, Option<FileModification>>> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    get_files_modification(&repo, &self.filepaths).convert_without_message()
   }
 }
 
@@ -319,13 +387,30 @@ impl Task for GitBulkModificationTask {
   type JsValue = HashMap<String, Option<FileModification>>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
-    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    get_files_modification(&repo, &self.filepaths).convert_without_message()
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitStatusTask {
+  fn run(&mut self) -> Result<Vec<FileStatus>> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    collect_statuses(&repo, self.options.clone())
   }
 }
 
@@ -335,13 +420,30 @@ impl Task for GitStatusTask {
   type JsValue = Vec<FileStatus>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
-    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    collect_statuses(&repo, self.options.clone())
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitBlameTask {
+  fn run(&mut self) -> Result<Vec<BlameHunk>> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    collect_blame(&repo, &self.filepath, self.options.clone())
   }
 }
 
@@ -351,22 +453,27 @@ impl Task for GitBlameTask {
   type JsValue = Vec<BlameHunk>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
-    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    collect_blame(&repo, &self.filepath, self.options.clone())
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
   }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
 }
 
-#[napi]
-impl Task for GitCommitTask {
-  type Output = String;
-  type JsValue = String;
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
+impl GitCommitTask {
+  fn run(&mut self) -> Result<String> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
     let tree = repo
@@ -395,9 +502,38 @@ impl Task for GitCommitTask {
       .convert_without_message()
       .map(|oid| oid.to_string())
   }
+}
+
+#[napi]
+impl Task for GitCommitTask {
+  type Output = String;
+  type JsValue = String;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitCloneTask {
+  fn run(&mut self) -> Result<()> {
+    let inner = git2::Repository::clone(&self.url, &self.path).convert("Failed to clone repo")?;
+    self.result = Some(inner);
+    Ok(())
   }
 }
 
@@ -407,12 +543,13 @@ impl Task for GitCloneTask {
   type JsValue = Repository;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    let inner = git2::Repository::clone(&self.url, &self.path).convert("Failed to clone repo")?;
-    self.result = Some(inner);
-    Ok(())
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
   }
 
-  fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
+  fn resolve(&mut self, env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
     self
       .result
       .take()
@@ -421,11 +558,20 @@ impl Task for GitCloneTask {
         open_flags: None,
       })
       .ok_or_else(|| {
-        napi::Error::new(
-          Status::GenericFailure,
+        coded_error(
+          env,
+          GitCode::GenericError,
           "Clone task produced no repository".to_string(),
         )
       })
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
   }
 }
 
@@ -450,12 +596,7 @@ impl Repository {
       .as_ref()
       .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
-      inner: git2::Repository::init(&p).map_err(|err| {
-        Error::new(
-          Status::GenericFailure,
-          format!("Failed to open git repo: [{p}], reason: {err}",),
-        )
-      })?,
+      inner: git2::Repository::init(&p).convert("Failed to init git repo")?,
       open_flags: None,
     })
   }
@@ -559,6 +700,7 @@ impl Repository {
         url,
         path,
         result: None,
+        code: GitCode::GenericError,
       },
       signal,
     )
@@ -586,25 +728,25 @@ impl Repository {
       .as_ref()
       .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
-      inner: git2::Repository::open(&git_dir).map_err(|err| {
-        Error::new(
-          Status::GenericFailure,
-          format!("Failed to open git repo: [{git_dir}], reason: {err}",),
-        )
-      })?,
+      inner: git2::Repository::open(&git_dir).convert("Failed to open git repo")?,
       open_flags: None,
     })
   }
 
   #[napi]
   /// Retrieve and resolve the reference pointed at by HEAD.
-  pub fn head(&self, self_ref: Reference<Repository>, env: Env) -> Result<reference::Reference> {
+  pub fn head(
+    &self,
+    self_ref: Reference<Repository>,
+    env: Env,
+  ) -> napi::Result<reference::Reference> {
     Ok(reference::Reference {
       inner: self_ref.share_with(env, |repo| {
         repo
           .inner
           .head()
           .convert("Get the HEAD of Repository failed")
+          .code_into(env)
       })?,
     })
   }
@@ -653,7 +795,7 @@ impl Repository {
   #[napi]
   /// Returns the path to the `.git` folder for normal repositories or the
   /// repository itself for bare repositories.
-  pub fn path<'env>(&'env self, env: &'env Env) -> Result<JsString<'env>> {
+  pub fn path<'env>(&'env self, env: &'env Env) -> napi::Result<JsString<'env>> {
     path_to_javascript_string(env, self.inner.path())
   }
 
@@ -765,6 +907,7 @@ impl Repository {
             .inner
             .find_remote(&name)
             .convert(format!("Failed to get remote [{}]", &name))
+            .code_into(env)
         })
         .ok()?,
       repo_path,
@@ -781,7 +924,7 @@ impl Repository {
     this: Reference<Repository>,
     name: String,
     url: String,
-  ) -> Result<Remote> {
+  ) -> napi::Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
     let open_flags = self.open_flags;
     Ok(Remote {
@@ -790,6 +933,7 @@ impl Repository {
           .inner
           .remote(&name, &url)
           .convert(format!("Failed to add remote [{}]", &name))
+          .code_into(env)
       })?,
       repo_path,
       open_flags,
@@ -806,7 +950,7 @@ impl Repository {
     name: String,
     url: String,
     refspec: String,
-  ) -> Result<Remote> {
+  ) -> napi::Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
     let open_flags = self.open_flags;
     Ok(Remote {
@@ -815,6 +959,7 @@ impl Repository {
           .inner
           .remote_with_fetch(&name, &url, &refspec)
           .convert("Failed to add remote")
+          .code_into(env)
       })?,
       repo_path,
       open_flags,
@@ -832,7 +977,7 @@ impl Repository {
     env: Env,
     this: Reference<Repository>,
     url: String,
-  ) -> Result<Remote> {
+  ) -> napi::Result<Remote> {
     let repo_path = self.inner.path().to_string_lossy().into_owned();
     let open_flags = self.open_flags;
     Ok(Remote {
@@ -841,6 +986,7 @@ impl Repository {
           .inner
           .remote_anonymous(&url)
           .convert("Failed to create anonymous remote")
+          .code_into(env)
       })?,
       repo_path,
       open_flags,
@@ -878,8 +1024,12 @@ impl Repository {
   ///
   /// All remote-tracking branches and configuration settings for the remote
   /// will be removed.
-  pub fn remote_delete(&self, name: String) -> Result<&Self> {
-    self.inner.remote_delete(&name).convert_without_message()?;
+  pub fn remote_delete(&self, env: Env, name: String) -> napi::Result<&Self> {
+    self
+      .inner
+      .remote_delete(&name)
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -889,11 +1039,12 @@ impl Repository {
   /// Add the given refspec to the fetch list in the configuration for the
   /// named remote, without loading it. No loaded remote instances will be
   /// affected.
-  pub fn remote_add_fetch(&self, name: String, refspec: String) -> Result<&Self> {
+  pub fn remote_add_fetch(&self, env: Env, name: String, refspec: String) -> napi::Result<&Self> {
     self
       .inner
       .remote_add_fetch(&name, &refspec)
-      .convert_without_message()?;
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -902,11 +1053,12 @@ impl Repository {
   ///
   /// Add the given refspec to the push list in the configuration. No
   /// loaded remote instances will be affected.
-  pub fn remote_add_push(&self, name: String, refspec: String) -> Result<&Self> {
+  pub fn remote_add_push(&self, env: Env, name: String, refspec: String) -> napi::Result<&Self> {
     self
       .inner
       .remote_add_push(&name, &refspec)
-      .convert_without_message()?;
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -915,11 +1067,12 @@ impl Repository {
   ///
   /// Updates the configured fetch URL for the named remote. No loaded
   /// remote instances will be affected.
-  pub fn remote_set_url(&self, name: String, url: String) -> Result<&Self> {
+  pub fn remote_set_url(&self, env: Env, name: String, url: String) -> napi::Result<&Self> {
     self
       .inner
       .remote_set_url(&name, &url)
-      .convert_without_message()?;
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -931,11 +1084,17 @@ impl Repository {
   /// error.
   ///
   /// `None` indicates that it should be cleared.
-  pub fn remote_set_pushurl(&self, name: String, url: Option<String>) -> Result<&Self> {
+  pub fn remote_set_pushurl(
+    &self,
+    env: Env,
+    name: String,
+    url: Option<String>,
+  ) -> napi::Result<&Self> {
     self
       .inner
       .remote_set_pushurl(&name, url.as_deref())
-      .convert_without_message()?;
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -948,8 +1107,13 @@ impl Repository {
           .share_with(env, |repo| {
             repo
               .inner
-              .find_tree(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?)
+              .find_tree(
+                git2::Oid::from_str(oid.as_str())
+                  .convert(format!("Invalid OID [{oid}]"))
+                  .code_into(env)?,
+              )
               .convert(format!("Find tree from OID [{oid}] failed"))
+              .code_into(env)
           })
           .ok()?,
       ),
@@ -969,6 +1133,7 @@ impl Repository {
           .inner
           .find_commit_by_prefix(&oid)
           .convert(format!("Find commit from OID [{oid}] failed"))
+          .code_into(env)
       })
       .ok()?;
     Some(Commit {
@@ -987,7 +1152,7 @@ impl Repository {
     this_ref: Reference<Repository>,
     env: Env,
     filter: Option<BranchType>,
-  ) -> Result<Vec<Branch>> {
+  ) -> napi::Result<Vec<Branch>> {
     // The `Branches<'repo>` iterator yields branches borrowing the repository,
     // which cannot escape into a `SharedReference`. Collect each branch's name
     // and type first, then rebuild owned `Branch`es by re-finding them.
@@ -996,10 +1161,11 @@ impl Repository {
       let branches = self
         .inner
         .branches(filter.map(Into::into))
-        .convert("Failed to list branches")?;
+        .convert("Failed to list branches")
+        .code_into(env)?;
       for branch in branches {
-        let (branch, branch_type) = branch.convert_without_message()?;
-        if let Some(name) = branch.name().convert_without_message()? {
+        let (branch, branch_type) = branch.convert_without_message().code_into(env)?;
+        if let Some(name) = branch.name().convert_without_message().code_into(env)? {
           specs.push((name.to_owned(), branch_type));
         }
       }
@@ -1011,6 +1177,7 @@ impl Repository {
           .inner
           .find_branch(&name, branch_type)
           .convert(format!("Find branch [{name}] failed"))
+          .code_into(env)
       })?;
       result.push(Branch { inner });
     }
@@ -1027,7 +1194,7 @@ impl Repository {
     env: Env,
     name: String,
     branch_type: BranchType,
-  ) -> Result<Option<Branch>> {
+  ) -> napi::Result<Option<Branch>> {
     let branch_type: git2::BranchType = branch_type.into();
     // Probe first so a genuine "not found" maps to `None` while other errors
     // surface, and the `SharedReference` is only built when the branch exists.
@@ -1035,13 +1202,16 @@ impl Repository {
       if err.code() == git2::ErrorCode::NotFound {
         return Ok(None);
       }
-      return Err(err).convert(format!("Find branch [{name}] failed"));
+      return Err(err)
+        .convert(format!("Find branch [{name}] failed"))
+        .code_into(env);
     }
     let inner = this_ref.share_with(env, move |repo| {
       repo
         .inner
         .find_branch(&name, branch_type)
         .convert(format!("Find branch [{name}] failed"))
+        .code_into(env)
     })?;
     Ok(Some(Branch { inner }))
   }
@@ -1059,18 +1229,20 @@ impl Repository {
     branch_name: String,
     target: &Commit,
     force: bool,
-  ) -> Result<Branch> {
+  ) -> napi::Result<Branch> {
     // Create the branch ref; the returned borrowed branch is dropped, then the
     // owned `Branch` is rebuilt by re-finding it inside `share_with`.
     self
       .inner
       .branch(&branch_name, &target.inner, force)
-      .convert(format!("Failed to create branch [{branch_name}]"))?;
+      .convert(format!("Failed to create branch [{branch_name}]"))
+      .code_into(env)?;
     let inner = this_ref.share_with(env, move |repo| {
       repo
         .inner
         .find_branch(&branch_name, git2::BranchType::Local)
         .convert(format!("Find branch [{branch_name}] failed"))
+        .code_into(env)
     })?;
     Ok(Branch { inner })
   }
@@ -1150,14 +1322,17 @@ impl Repository {
     oid: String,
     force: bool,
     log_message: String,
-  ) -> Result<reference::Reference> {
+  ) -> napi::Result<reference::Reference> {
     Ok(reference::Reference {
       inner: this_ref.share_with(env, move |repo| {
-        let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
+        let oid = git2::Oid::from_str(&oid)
+          .convert(format!("Invalid OID [{oid}]"))
+          .code_into(env)?;
         repo
           .inner
           .reference(&name, oid, force, &log_message)
           .convert(format!("Failed to create reference [{name}]"))
+          .code_into(env)
       })?,
     })
   }
@@ -1177,13 +1352,14 @@ impl Repository {
     target: String,
     force: bool,
     log_message: String,
-  ) -> Result<reference::Reference> {
+  ) -> napi::Result<reference::Reference> {
     Ok(reference::Reference {
       inner: this_ref.share_with(env, move |repo| {
         repo
           .inner
           .reference_symbolic(&name, &target, force, &log_message)
           .convert(format!("Failed to create symbolic reference [{name}]"))
+          .code_into(env)
       })?,
     })
   }
@@ -1260,21 +1436,26 @@ impl Repository {
     env: Env,
     this: Reference<Repository>,
     oid: String,
-  ) -> Result<Option<Tag>> {
-    let oid = git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?;
+  ) -> napi::Result<Option<Tag>> {
+    let oid = git2::Oid::from_str(oid.as_str())
+      .convert(format!("Invalid OID [{oid}]"))
+      .code_into(env)?;
     // Probe first so a genuine "not found" maps to `None` while other errors
     // surface, and the `SharedReference` is only built when the tag exists.
     if let Err(err) = self.inner.find_tag(oid) {
       if err.code() == git2::ErrorCode::NotFound {
         return Ok(None);
       }
-      return Err(err).convert(format!("Find tag from OID [{oid}] failed"));
+      return Err(err)
+        .convert(format!("Find tag from OID [{oid}] failed"))
+        .code_into(env);
     }
     let inner = this.share_with(env, move |repo| {
       repo
         .inner
         .find_tag(oid)
         .convert(format!("Find tag from OID [{oid}] failed"))
+        .code_into(env)
     })?;
     Ok(Some(Tag { inner }))
   }
@@ -1288,20 +1469,23 @@ impl Repository {
     env: Env,
     this: Reference<Repository>,
     prefix_hash: String,
-  ) -> Result<Option<Tag>> {
+  ) -> napi::Result<Option<Tag>> {
     // Probe first so a genuine "not found" maps to `None` while other errors
     // surface, and the `SharedReference` is only built when the tag exists.
     if let Err(err) = self.inner.find_tag_by_prefix(&prefix_hash) {
       if err.code() == git2::ErrorCode::NotFound {
         return Ok(None);
       }
-      return Err(err).convert(format!("Find tag from OID [{prefix_hash}] failed"));
+      return Err(err)
+        .convert(format!("Find tag from OID [{prefix_hash}] failed"))
+        .code_into(env);
     }
     let inner = this.share_with(env, move |repo| {
       repo
         .inner
         .find_tag_by_prefix(&prefix_hash)
         .convert(format!("Find tag from OID [{prefix_hash}] failed"))
+        .code_into(env)
     })?;
     Ok(Some(Tag { inner }))
   }
@@ -1377,7 +1561,7 @@ impl Repository {
     self_reference: Reference<Repository>,
     old_tree: Option<&Tree>,
     options: Option<DiffOptions>,
-  ) -> Result<Diff> {
+  ) -> napi::Result<Diff> {
     let mut diff_options = build_diff_options(options);
     Ok(Diff {
       inner: self_reference.share_with(env, |repo| {
@@ -1385,6 +1569,7 @@ impl Repository {
           .inner
           .diff_tree_to_workdir(old_tree.map(|t| t.inner()), Some(&mut diff_options))
           .convert_without_message()
+          .code_into(env)
       })?,
     })
   }
@@ -1402,7 +1587,7 @@ impl Repository {
     self_reference: Reference<Repository>,
     old_tree: Option<&Tree>,
     options: Option<DiffOptions>,
-  ) -> Result<Diff> {
+  ) -> napi::Result<Diff> {
     let mut diff_options = build_diff_options(options);
     Ok(Diff {
       inner: self_reference.share_with(env, |repo| {
@@ -1410,6 +1595,7 @@ impl Repository {
           .inner
           .diff_tree_to_workdir_with_index(old_tree.map(|t| t.inner()), Some(&mut diff_options))
           .convert_without_message()
+          .code_into(env)
       })?,
     })
   }
@@ -1498,6 +1684,7 @@ impl Repository {
         message,
         tree_oid: tree.as_ref().id(),
         parents: parents.unwrap_or_default(),
+        code: GitCode::GenericError,
       },
       signal,
     ))
@@ -1538,9 +1725,15 @@ impl Repository {
 
   #[napi]
   /// Create a revwalk that can be used to traverse the commit graph.
-  pub fn rev_walk(&self, this_ref: Reference<Repository>, env: Env) -> Result<RevWalk> {
+  pub fn rev_walk(&self, this_ref: Reference<Repository>, env: Env) -> napi::Result<RevWalk> {
     Ok(RevWalk {
-      inner: this_ref.share_with(env, |repo| repo.inner.revwalk().convert_without_message())?,
+      inner: this_ref.share_with(env, |repo| {
+        repo
+          .inner
+          .revwalk()
+          .convert_without_message()
+          .code_into(env)
+      })?,
     })
   }
 
@@ -1571,6 +1764,7 @@ impl Repository {
           .workdir()
           .map(|p| p.to_string_lossy().into_owned()),
         filepath,
+        code: GitCode::GenericError,
       },
       signal,
     ))
@@ -1599,6 +1793,7 @@ impl Repository {
           .workdir()
           .map(|p| p.to_string_lossy().into_owned()),
         filepath,
+        code: GitCode::GenericError,
       },
       signal,
     ))
@@ -1630,6 +1825,7 @@ impl Repository {
           .workdir()
           .map(|p| p.to_string_lossy().into_owned()),
         filepaths,
+        code: GitCode::GenericError,
       },
       signal,
     ))
@@ -1675,6 +1871,7 @@ impl Repository {
           .workdir()
           .map(|p| p.to_string_lossy().into_owned()),
         options,
+        code: GitCode::GenericError,
       },
       signal,
     ))
@@ -1722,6 +1919,7 @@ impl Repository {
           .map(|p| p.to_string_lossy().into_owned()),
         filepath: path,
         options,
+        code: GitCode::GenericError,
       },
       signal,
     ))
@@ -1752,6 +1950,7 @@ impl Repository {
           .workdir()
           .map(|p| p.to_string_lossy().into_owned()),
         filepath,
+        code: GitCode::GenericError,
       },
       signal,
     ))

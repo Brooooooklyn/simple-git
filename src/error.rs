@@ -1,29 +1,29 @@
 pub(crate) trait IntoNapiError: Sized {
   type Associate;
 
-  fn convert<S: AsRef<str>>(self, msg: S) -> Result<Self::Associate, napi::Error>;
+  fn convert<S: AsRef<str>>(self, msg: S) -> crate::Result<Self::Associate>;
 
-  fn convert_without_message(self) -> Result<Self::Associate, napi::Error>;
+  fn convert_without_message(self) -> crate::Result<Self::Associate>;
 }
 
 impl<T> IntoNapiError for Result<T, git2::Error> {
   type Associate = T;
 
   #[inline]
-  fn convert<S: AsRef<str>>(self, msg: S) -> Result<T, napi::Error> {
+  fn convert<S: AsRef<str>>(self, msg: S) -> crate::Result<T> {
     self.map_err(|err| {
       napi::Error::new(
-        napi::Status::GenericFailure,
+        crate::GitCode::from_git2(err.code()),
         format!("{}: {}", msg.as_ref(), err),
       )
     })
   }
 
   #[inline]
-  fn convert_without_message(self) -> Result<Self::Associate, napi::Error> {
+  fn convert_without_message(self) -> crate::Result<Self::Associate> {
     self.map_err(|err| {
       napi::Error::new(
-        napi::Status::GenericFailure,
+        crate::GitCode::from_git2(err.code()),
         format!("libgit2 error: {err}"),
       )
     })
@@ -33,27 +33,26 @@ impl<T> IntoNapiError for Result<T, git2::Error> {
 pub trait NotNullError {
   type Associate;
 
-  fn expect_not_null(self, msg: String) -> Result<Self::Associate, napi::Error>;
+  fn expect_not_null(self, msg: String) -> crate::Result<Self::Associate>;
 }
 
 impl<T> NotNullError for Option<T> {
   type Associate = T;
 
   #[inline]
-  fn expect_not_null(self, msg: String) -> Result<T, napi::Error> {
-    self.ok_or_else(|| napi::Error::new(napi::Status::GenericFailure, msg))
+  fn expect_not_null(self, msg: String) -> crate::Result<T> {
+    self.ok_or_else(|| napi::Error::new(crate::GitCode::NotFound, msg))
   }
 }
 
-/// Task 1 (additive): coded-error primitives.
+/// Coded-error primitives.
 ///
 /// These live in a nested module on purpose. `error.rs` above uses the 2-arg
-/// prelude `Result<T, E>` in `IntoNapiError`/`NotNullError`; a module-level
-/// `type Result<T>` would shadow that prelude `Result` and break those existing
-/// signatures (which this task must not modify). Nesting keeps the `Result`
-/// alias out of the parent module's scope so both coexist. Nothing here is used
-/// yet — the `#[allow(dead_code)]` markers are temporary; Task 2 wires these onto
-/// every thrown error (sync and async) and re-exports them for the crate.
+/// prelude `Result<T, E>` in the `impl ... for Result<T, git2::Error>` receiver;
+/// a module-level `type Result<T>` would shadow that prelude `Result`. Nesting
+/// keeps the `Result` alias out of the parent module's scope so both coexist,
+/// while `lib.rs` re-exports these at the crate root so `crate::Result` /
+/// `crate::GitCode` / `crate::coded_error` / `crate::CodeInto` resolve crate-wide.
 pub(crate) mod codes {
   use napi::{Env, Status, bindgen_prelude::*};
 
@@ -62,7 +61,6 @@ pub(crate) mod codes {
   /// token. `GenericError` doubles as the catch-all. `GitCode: Copy` ⇒ it is
   /// `Send + Sync`, which is required so it can ride along as an async carrier
   /// field on `napi::Error<GitCode>`.
-  #[allow(dead_code)]
   #[derive(Copy, Clone, Debug, PartialEq, Eq)]
   pub enum GitCode {
     GenericError,
@@ -139,7 +137,6 @@ pub(crate) mod codes {
     /// breaks the clippy-clean bar). So `GenericError` is folded into the same
     /// `_ => GitCode::GenericError` catch-all that keeps this forward-compatible
     /// with any variant a future git2 may add. The remaining 27 map 1:1.
-    #[allow(dead_code)]
     pub fn from_git2(code: git2::ErrorCode) -> Self {
       match code {
         git2::ErrorCode::NotFound => GitCode::NotFound,
@@ -178,7 +175,6 @@ pub(crate) mod codes {
   /// Crate-local result whose error carries a `GitCode` (distinct from
   /// `napi::Result<T, S = Status>`, whose error carries a `Status`). Task 2
   /// threads this through the fallible git paths.
-  #[allow(dead_code)]
   pub type Result<T> = core::result::Result<T, napi::Error<GitCode>>;
 
   /// Build a `napi::Error<Status>` whose pre-materialised JS error object carries
@@ -186,7 +182,6 @@ pub(crate) mod codes {
   /// `.code` survives onto the JS `Error`. The infallible `unwrap_or_else`
   /// fallback guarantees this never panics even if the napi object plumbing fails
   /// (in which case the error is still surfaced, just without `.code`).
-  #[allow(dead_code)]
   pub fn coded_error(env: Env, code: GitCode, message: String) -> napi::Error {
     (|| -> napi::Result<napi::Error> {
       let mut obj = env.create_error(napi::Error::new(Status::GenericFailure, message.clone()))?;
@@ -199,7 +194,6 @@ pub(crate) mod codes {
   /// Collapse a `Result<T>` (error carries a `GitCode`) into a `napi::Result<T>`
   /// whose error still surfaces `.code`. This lets `share_with` closures and the
   /// async outer-converts turn an `Error<GitCode>` into a coded `Error<Status>`.
-  #[allow(dead_code)]
   pub(crate) trait CodeInto<T> {
     fn code_into(self, env: Env) -> napi::Result<T>;
   }

@@ -2,6 +2,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
+use crate::{CodeInto, Result};
 
 #[napi]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -83,7 +84,7 @@ impl Branch {
   /// branch reference.
   ///
   /// Returns `None` when the branch has no configured upstream.
-  pub fn upstream(&self, env: Env) -> Result<Option<Branch>> {
+  pub fn upstream(&self, env: Env) -> napi::Result<Option<Branch>> {
     // Probe on the borrowed branch first so we can inspect the real libgit2
     // error code while it is still intact: only a genuine "no upstream
     // configured" (NotFound) collapses to None — every other failure (corrupt
@@ -93,10 +94,15 @@ impl Branch {
       if err.code() == git2::ErrorCode::NotFound {
         return Ok(None);
       }
-      return Err(err).convert("Get upstream branch failed");
+      return Err(err)
+        .convert("Get upstream branch failed")
+        .code_into(env);
     }
     let inner = self.inner.clone(env)?.share_with(env, |branch| {
-      branch.upstream().convert("Get upstream branch failed")
+      branch
+        .upstream()
+        .convert("Get upstream branch failed")
+        .code_into(env)
     })?;
     Ok(Some(Branch { inner }))
   }
@@ -106,9 +112,13 @@ impl Branch {
   ///
   /// Branches are direct references, so the resolved direct reference is
   /// returned (e.g. `refs/heads/main`).
-  pub fn get(&self, env: Env) -> Result<crate::reference::Reference> {
+  pub fn get(&self, env: Env) -> napi::Result<crate::reference::Reference> {
     let inner = self.inner.clone(env)?.share_with(env, |branch| {
-      branch.get().resolve().convert_without_message()
+      branch
+        .get()
+        .resolve()
+        .convert_without_message()
+        .code_into(env)
     })?;
     Ok(crate::reference::Reference { inner })
   }

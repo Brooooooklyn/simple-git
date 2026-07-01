@@ -2,6 +2,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
+use crate::{GitCode, Result};
 
 #[napi]
 /// The priority level a configuration entry or file applies to. Higher levels
@@ -134,7 +135,7 @@ impl Config {
     let (value, lossless) = value.get_i64();
     if !lossless {
       return Err(Error::new(
-        Status::InvalidArg,
+        GitCode::InvalidArg,
         format!("BigInt value for `{name}` does not fit in a 64-bit signed integer"),
       ));
     }

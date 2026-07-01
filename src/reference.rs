@@ -1,6 +1,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+use crate::CodeInto;
 use crate::error::IntoNapiError;
 use crate::tree::{Tree, TreeParent};
 
@@ -129,7 +130,11 @@ impl Reference {
   ) -> Result<Tree> {
     Ok(Tree {
       inner: TreeParent::Reference(self_ref.share_with(env, |reference| {
-        reference.inner.peel_to_tree().convert_without_message()
+        reference
+          .inner
+          .peel_to_tree()
+          .convert_without_message()
+          .code_into(env)
       })?),
     })
   }
@@ -157,10 +162,9 @@ impl Reference {
   /// If a direct reference is passed as an argument, a copy of that
   /// reference is returned.
   pub fn resolve(&self, env: Env) -> Result<Reference> {
-    let shared = self
-      .inner
-      .clone(env)?
-      .share_with(env, |r| r.resolve().convert_without_message())?;
+    let shared = self.inner.clone(env)?.share_with(env, |r| {
+      r.resolve().convert_without_message().code_into(env)
+    })?;
     Ok(Self { inner: shared })
   }
 
@@ -179,7 +183,9 @@ impl Reference {
     msg: String,
   ) -> Result<Reference> {
     let inner = self.inner.clone(env)?.share_with(env, |r| {
-      r.rename(&new_name, force, &msg).convert_without_message()
+      r.rename(&new_name, force, &msg)
+        .convert_without_message()
+        .code_into(env)
     })?;
     Ok(Self { inner })
   }

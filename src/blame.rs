@@ -5,6 +5,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
+use crate::{GitCode, Result};
 
 /// Options controlling how a blame is computed.
 ///
@@ -118,7 +119,7 @@ pub(crate) fn hunk_to_struct(hunk: &git2::BlameHunk) -> Result<BlameHunk> {
     None => (None, None, 0),
   };
   let final_time = DateTime::from_timestamp(final_seconds, 0)
-    .ok_or_else(|| Error::from_reason("Invalid blame final time"))?;
+    .ok_or_else(|| Error::new(GitCode::GenericError, "Invalid blame final time"))?;
   Ok(BlameHunk {
     lines_in_hunk: hunk.lines_in_hunk() as u32,
     final_commit_id: hunk.final_commit_id().to_string(),

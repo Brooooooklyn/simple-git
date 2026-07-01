@@ -7,6 +7,7 @@ use napi::bindgen_prelude::{
 use napi_derive::napi;
 
 use crate::{
+  CodeInto,
   error::IntoNapiError,
   object::{GitObject, ObjectParent},
   repo::Repository,
@@ -64,10 +65,11 @@ impl Tree {
   pub fn get_id(&self, this_ref: Reference<Tree>, env: Env, id: String) -> Option<TreeEntry> {
     let reference = this_ref
       .share_with(env, |tree| {
-        if let Some(entry) = tree
-          .inner()
-          .get_id(git2::Oid::from_str(&id).convert_without_message()?)
-        {
+        if let Some(entry) = tree.inner().get_id(
+          git2::Oid::from_str(&id)
+            .convert_without_message()
+            .code_into(env)?,
+        ) {
           Ok(entry)
         } else {
           Err(Error::new(napi::Status::InvalidArg, "Tree entry not found"))
@@ -131,6 +133,7 @@ impl Tree {
           .inner()
           .get_path(Path::new(&name))
           .convert_without_message()
+          .code_into(env)
       })
       .ok()?;
     Some(TreeEntry {
@@ -198,12 +201,12 @@ impl TreeEntry {
 
   #[napi]
   /// Get the name of a tree entry
-  pub fn name(&self) -> Result<&str> {
+  pub fn name(&self) -> crate::Result<&str> {
     self
       .inner
       .name()
       .ok()
-      .ok_or_else(|| Error::from_reason("Invalid utf-8"))
+      .ok_or_else(|| Error::new(crate::GitCode::GenericError, "Invalid utf-8"))
   }
 
   #[napi]
@@ -216,7 +219,11 @@ impl TreeEntry {
   /// Convert a tree entry to the object it points to.
   pub fn to_object(&self, env: Env, repo: Reference<Repository>) -> Result<GitObject> {
     let object = repo.share_with(env, |repo| {
-      self.inner.to_object(&repo.inner).convert_without_message()
+      self
+        .inner
+        .to_object(&repo.inner)
+        .convert_without_message()
+        .code_into(env)
     })?;
     Ok(GitObject {
       inner: ObjectParent::Repository(object),

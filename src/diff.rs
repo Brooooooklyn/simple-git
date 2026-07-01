@@ -3,6 +3,7 @@ use std::ops::Deref;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+use crate::Result;
 use crate::deltas::Deltas;
 use crate::error::IntoNapiError;
 
@@ -42,7 +43,7 @@ impl Diff {
 
   #[napi]
   /// Returns an iterator over the deltas in this diff.
-  pub fn deltas(&self, env: Env, self_ref: Reference<Diff>) -> Result<Deltas> {
+  pub fn deltas(&self, env: Env, self_ref: Reference<Diff>) -> napi::Result<Deltas> {
     Ok(Deltas {
       inner: self_ref.share_with(env, |diff| Ok(diff.inner.deltas()))?,
     })

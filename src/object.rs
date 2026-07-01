@@ -4,6 +4,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::{
+  CodeInto, Result,
   blob::{Blob, BlobParent},
   error::IntoNapiError,
   repo::Repository,
@@ -96,9 +97,13 @@ impl GitObject {
 
   #[napi]
   /// Recursively peel an object until a blob is found
-  pub fn peel_to_blob(&self, env: Env, self_ref: Reference<GitObject>) -> Result<Blob> {
+  pub fn peel_to_blob(&self, env: Env, self_ref: Reference<GitObject>) -> napi::Result<Blob> {
     let blob = self_ref.share_with(env, |obj| {
-      obj.inner.peel_to_blob().convert_without_message()
+      obj
+        .inner
+        .peel_to_blob()
+        .convert_without_message()
+        .code_into(env)
     })?;
     Ok(Blob {
       inner: BlobParent::GitObject(blob),

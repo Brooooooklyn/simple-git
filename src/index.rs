@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+use crate::Result;
 use crate::error::IntoNapiError;
 
 #[napi]

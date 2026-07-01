@@ -6,6 +6,7 @@ use napi_derive::napi;
 
 use crate::error::IntoNapiError;
 use crate::repo::reopen_worker_repo;
+use crate::{CodeInto, GitCode, Result, coded_error};
 
 #[napi]
 /// An enumeration of the possible directions for a remote.
@@ -212,7 +213,7 @@ impl Remote {
       .and_then(|b| {
         b.as_str().ok().map(|name| name.to_owned()).ok_or_else(|| {
           Error::new(
-            Status::GenericFailure,
+            GitCode::GenericError,
             "Default branch name contains non-utf-8 characters".to_string(),
           )
         })
@@ -262,7 +263,7 @@ impl Remote {
       Some(o) => {
         if o.used {
           return Err(Error::new(
-            Status::GenericFailure,
+            GitCode::InvalidArg,
             "FetchOptions can only be used once".to_string(),
           ));
         }
@@ -294,7 +295,7 @@ impl Remote {
       Some(o) => {
         if o.used {
           return Err(Error::new(
-            Status::GenericFailure,
+            GitCode::InvalidArg,
             "PushOptions can only be used once".to_string(),
           ));
         }
@@ -337,18 +338,22 @@ impl Remote {
     fetch_options: Option<&mut FetchOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<RemoteFetchTask>> {
-    let namespace = self.inner.clone_owner(env)?.namespace();
+    let namespace = self
+      .inner
+      .clone_owner(env)
+      .map_err(|mut e| Error::new(GitCode::GenericError, core::mem::take(&mut e.reason)))?
+      .namespace();
     let options = match fetch_options {
       Some(o) => {
         if o.used {
           return Err(Error::new(
-            Status::GenericFailure,
+            GitCode::InvalidArg,
             "FetchOptions can only be used once".to_string(),
           ));
         }
         if o.has_remote_callbacks {
           return Err(Error::new(
-            Status::GenericFailure,
+            GitCode::InvalidArg,
             "fetchAsync does not support RemoteCallbacks; use the synchronous fetch() instead"
               .to_string(),
           ));
@@ -371,6 +376,7 @@ impl Remote {
         remote_url,
         refspecs,
         options,
+        code: GitCode::GenericError,
       },
       signal,
     ))
@@ -422,18 +428,22 @@ impl Remote {
     push_options: Option<&mut PushOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<RemotePushTask>> {
-    let namespace = self.inner.clone_owner(env)?.namespace();
+    let namespace = self
+      .inner
+      .clone_owner(env)
+      .map_err(|mut e| Error::new(GitCode::GenericError, core::mem::take(&mut e.reason)))?
+      .namespace();
     let options = match push_options {
       Some(o) => {
         if o.used {
           return Err(Error::new(
-            Status::GenericFailure,
+            GitCode::InvalidArg,
             "PushOptions can only be used once".to_string(),
           ));
         }
         if o.has_remote_callbacks {
           return Err(Error::new(
-            Status::GenericFailure,
+            GitCode::InvalidArg,
             "pushAsync does not support RemoteCallbacks; use the synchronous push() instead"
               .to_string(),
           ));
@@ -453,7 +463,7 @@ impl Remote {
       .or_else(|| self.inner.url().ok().map(|s| s.to_owned()))
       .ok_or_else(|| {
         Error::new(
-          Status::GenericFailure,
+          GitCode::GenericError,
           "Remote has no valid UTF-8 push URL".to_string(),
         )
       })?;
@@ -476,6 +486,7 @@ impl Remote {
         remote_url,
         refspecs,
         options,
+        code: GitCode::GenericError,
       },
       signal,
     ))
@@ -521,6 +532,11 @@ pub struct RemoteFetchTask {
   remote_url: Option<String>,
   refspecs: Vec<String>,
   options: Option<git2::FetchOptions<'static>>,
+  /// Carries the `GitCode` of a failed `run()` from the worker thread
+  /// (`compute`) to the main thread (`reject`) so the rejected promise's error
+  /// gets a `.code`. Written in `compute`, read in `reject`; `compute` fully
+  /// precedes `reject` on the same `&mut self`, so a plain field is sound.
+  code: GitCode,
 }
 
 // SAFETY: every field is `Send` EXCEPT `git2::FetchOptions`, which is `!Send`
@@ -536,12 +552,8 @@ pub struct RemoteFetchTask {
 // aliasing, no concurrent access: the move is sound.
 unsafe impl Send for RemoteFetchTask {}
 
-#[napi]
-impl Task for RemoteFetchTask {
-  type Output = ();
-  type JsValue = ();
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
+impl RemoteFetchTask {
+  fn run(&mut self) -> Result<()> {
     let repo = reopen_worker_repo(&self.repo_path, self.open_flags)?;
     // Restore the parent repo's namespace before resolving the remote so the
     // reopened worker handle resolves/updates the namespaced refs, matching
@@ -561,9 +573,30 @@ impl Task for RemoteFetchTask {
       .fetch(self.refspecs.as_slice(), Some(&mut options), None)
       .convert_without_message()
   }
+}
+
+#[napi]
+impl Task for RemoteFetchTask {
+  type Output = ();
+  type JsValue = ();
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
 
   fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(())
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
   }
 }
 
@@ -619,6 +652,9 @@ pub struct RemotePushTask {
   remote_url: String,
   refspecs: Vec<String>,
   options: Option<git2::PushOptions<'static>>,
+  /// Carries the `GitCode` of a failed `run()` from the worker thread
+  /// (`compute`) to the main thread (`reject`); see `RemoteFetchTask::code`.
+  code: GitCode,
 }
 
 // SAFETY: identical reasoning to `RemoteFetchTask`. Every field is `Send`
@@ -639,12 +675,8 @@ pub struct RemotePushTask {
 // JS-visible handle.
 unsafe impl Send for RemotePushTask {}
 
-#[napi]
-impl Task for RemotePushTask {
-  type Output = ();
-  type JsValue = ();
-
-  fn compute(&mut self) -> napi::Result<Self::Output> {
+impl RemotePushTask {
+  fn run(&mut self) -> Result<()> {
     let repo = reopen_worker_repo(&self.repo_path, self.open_flags)?;
     // Restore the parent repo's namespace before resolving the remote so the
     // reopened worker handle resolves the namespaced refs, matching sync `push`.
@@ -661,9 +693,30 @@ impl Task for RemotePushTask {
       .push(self.refspecs.as_slice(), Some(&mut options))
       .convert_without_message()
   }
+}
+
+#[napi]
+impl Task for RemotePushTask {
+  type Output = ();
+  type JsValue = ();
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
 
   fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(())
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
   }
 }
 
@@ -715,7 +768,7 @@ impl RemoteCallbacks {
     &mut self,
     env: Env,
     callback: Function<CredInfo, &'static mut Cred>,
-  ) -> Result<&Self> {
+  ) -> napi::Result<&Self> {
     let func_ref = callback.create_ref()?;
     self
       .inner
@@ -850,10 +903,15 @@ impl FetchOptions {
 
   #[napi]
   /// Set the callbacks to use for the fetch operation.
-  pub fn remote_callback(&mut self, callback: &mut RemoteCallbacks) -> Result<&Self> {
+  pub fn remote_callback(
+    &mut self,
+    env: Env,
+    callback: &mut RemoteCallbacks,
+  ) -> napi::Result<&Self> {
     if callback.used {
-      return Err(Error::new(
-        Status::GenericFailure,
+      return Err(coded_error(
+        env,
+        GitCode::InvalidArg,
         "RemoteCallbacks can only be used once".to_string(),
       ));
     }
@@ -867,10 +925,11 @@ impl FetchOptions {
 
   #[napi]
   /// Set the proxy options to use for the fetch operation.
-  pub fn proxy_options(&mut self, options: &mut ProxyOptions) -> Result<&Self> {
+  pub fn proxy_options(&mut self, env: Env, options: &mut ProxyOptions) -> napi::Result<&Self> {
     if options.used {
-      return Err(Error::new(
-        Status::GenericFailure,
+      return Err(coded_error(
+        env,
+        GitCode::InvalidArg,
         "ProxyOptions can only be used once".to_string(),
       ));
     }
@@ -934,8 +993,8 @@ impl FetchOptions {
   /// Set extra headers for this fetch operation.
   ///
   /// Throws if any header contains an interior NUL byte.
-  pub fn custom_headers(&mut self, headers: Vec<String>) -> Result<&Self> {
-    reject_interior_nul(&headers, "custom header")?;
+  pub fn custom_headers(&mut self, env: Env, headers: Vec<String>) -> napi::Result<&Self> {
+    reject_interior_nul(&headers, "custom header").code_into(env)?;
     self
       .inner
       .custom_headers(&headers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
@@ -967,10 +1026,15 @@ impl PushOptions {
 
   #[napi]
   /// Set the callbacks to use for the push operation.
-  pub fn remote_callback(&mut self, callback: &mut RemoteCallbacks) -> Result<&Self> {
+  pub fn remote_callback(
+    &mut self,
+    env: Env,
+    callback: &mut RemoteCallbacks,
+  ) -> napi::Result<&Self> {
     if callback.used {
-      return Err(Error::new(
-        Status::GenericFailure,
+      return Err(coded_error(
+        env,
+        GitCode::InvalidArg,
         "RemoteCallbacks can only be used once".to_string(),
       ));
     }
@@ -984,10 +1048,11 @@ impl PushOptions {
 
   #[napi]
   /// Set the proxy options to use for the push operation.
-  pub fn proxy_options(&mut self, options: &mut ProxyOptions) -> Result<&Self> {
+  pub fn proxy_options(&mut self, env: Env, options: &mut ProxyOptions) -> napi::Result<&Self> {
     if options.used {
-      return Err(Error::new(
-        Status::GenericFailure,
+      return Err(coded_error(
+        env,
+        GitCode::InvalidArg,
         "ProxyOptions can only be used once".to_string(),
       ));
     }
@@ -1025,8 +1090,8 @@ impl PushOptions {
   /// Set extra headers for this push operation.
   ///
   /// Throws if any header contains an interior NUL byte.
-  pub fn custom_headers(&mut self, headers: Vec<String>) -> Result<&Self> {
-    reject_interior_nul(&headers, "custom header")?;
+  pub fn custom_headers(&mut self, env: Env, headers: Vec<String>) -> napi::Result<&Self> {
+    reject_interior_nul(&headers, "custom header").code_into(env)?;
     self
       .inner
       .custom_headers(&headers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
@@ -1037,8 +1102,8 @@ impl PushOptions {
   /// Set "push options" to deliver to the remote.
   ///
   /// Throws if any push option contains an interior NUL byte.
-  pub fn remote_push_options(&mut self, options: Vec<String>) -> Result<&Self> {
-    reject_interior_nul(&options, "remote push option")?;
+  pub fn remote_push_options(&mut self, env: Env, options: Vec<String>) -> napi::Result<&Self> {
+    reject_interior_nul(&options, "remote push option").code_into(env)?;
     self
       .inner
       .remote_push_options(&options.iter().map(|s| s.as_str()).collect::<Vec<_>>());
@@ -1054,7 +1119,7 @@ fn reject_interior_nul(values: &[String], what: &str) -> Result<()> {
   for value in values {
     if value.contains('\0') {
       return Err(Error::new(
-        Status::InvalidArg,
+        GitCode::InvalidArg,
         format!("{what} contains an interior NUL byte"),
       ));
     }
