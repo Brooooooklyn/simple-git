@@ -85,6 +85,9 @@ test("cloneAsync clones a local bare repo into a usable Repository", async (t) =
     t.true(repo instanceof Repository);
     // A usable repo: HEAD resolves and points at the remote's commit.
     t.is(repo.head().target(), head);
+    // Free the git2 handle (and its held-open .pack fd) before rmSync deletes
+    // the temp dir, so Windows can unlink it (fixes CI EBUSY).
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -118,6 +121,7 @@ test("commitAsync returns a resolvable commit OID", async (t) => {
     // The OID resolves and HEAD advanced to it.
     t.truthy(repo.findCommit(oid));
     t.is(workRev(work, "HEAD"), oid);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -128,9 +132,13 @@ test("pushAsync updates the bare remote ref", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-"));
   try {
     const { bare, work, head } = makePushSetup(root);
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     await remote.pushAsync(["refs/heads/main:refs/heads/main"], null);
     t.is(bareRev(bare, "refs/heads/main"), head);
+    // The worker reopened its own git2 handle in compute(); disposing the
+    // main-thread handle post-await frees it before rmSync (Windows EBUSY).
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -141,10 +149,12 @@ test("pushAsync accepts a callback-free PushOptions", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-opts-"));
   try {
     const { bare, work, head } = makePushSetup(root);
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     const options = new PushOptions().packbuilderParallelism(1);
     await remote.pushAsync(["refs/heads/main:refs/heads/main"], options);
     t.is(bareRev(bare, "refs/heads/main"), head);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -157,13 +167,15 @@ test("pushAsync rejects PushOptions carrying RemoteCallbacks", (t) => {
   const root = mkdtempSync(join(tmpdir(), "simple-git-push-async-cb-"));
   try {
     const { work } = makePushSetup(root);
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     const callbacks = new RemoteCallbacks().pushUpdateReference(() => {});
     const options = new PushOptions().remoteCallback(callbacks);
     const err = t.throws(() =>
       remote.pushAsync(["refs/heads/main:refs/heads/main"], options),
     );
     t.regex(err.message, /RemoteCallbacks/);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -250,6 +262,7 @@ test("commitAsync respects an active namespace", async (t) => {
         cwd: work,
       }),
     );
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -299,6 +312,7 @@ test("pushAsync resolves the refspec source through an active namespace", async 
     // The remote received the NAMESPACED source commit, not the plain one.
     t.is(bareRev(bare, "refs/heads/main"), c2);
     t.not(c1, c2);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -353,6 +367,7 @@ test("pushAsync observes a setNamespace call made after findRemote but before pu
     // setNamespace call made after findRemote was observed live.
     t.is(bareRev(bare, "refs/heads/main"), c2);
     t.not(c1, c2);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -367,12 +382,16 @@ test("fetchAsync updates a remote-tracking ref", async (t) => {
     execSync(`git init -q -b main "${consumer}"`);
     execSync(`git remote add origin "${bare}"`, { cwd: consumer });
 
-    const remote = new Repository(consumer).findRemote("origin");
+    const repo = new Repository(consumer);
+    const remote = repo.findRemote("origin");
     await remote.fetchAsync(
       ["refs/heads/main:refs/remotes/origin/main"],
       null,
     );
     t.is(workRev(consumer, "refs/remotes/origin/main"), head);
+    // Free the git2 handle (holding the fetched .pack fd) before rmSync
+    // deletes the temp dir (fixes Windows CI EBUSY).
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -392,7 +411,8 @@ test("fetchAsync rejects a reused FetchOptions", async (t) => {
     execSync(`git init -q -b main "${consumer}"`);
     execSync(`git remote add origin "${bare}"`, { cwd: consumer });
 
-    const remote = new Repository(consumer).findRemote("origin");
+    const repo = new Repository(consumer);
+    const remote = repo.findRemote("origin");
     const options = new FetchOptions();
     await remote.fetchAsync(
       ["refs/heads/main:refs/remotes/origin/main"],
@@ -405,6 +425,7 @@ test("fetchAsync rejects a reused FetchOptions", async (t) => {
       ),
     );
     t.regex(err.message, /FetchOptions can only be used once/);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -441,7 +462,8 @@ test("fetchAsync observes a remoteSetUrl made after the Remote was loaded (docum
     execSync(`git init -q -b main "${consumer}"`);
     execSync(`git remote add origin "${bareA}"`, { cwd: consumer });
 
-    const remote = new Repository(consumer).findRemote("origin");
+    const repo = new Repository(consumer);
+    const remote = repo.findRemote("origin");
 
     // Mutate on-disk config AFTER `remote` was loaded, not through `remote`.
     execSync(`git remote set-url origin "${bareB}"`, { cwd: consumer });
@@ -455,6 +477,7 @@ test("fetchAsync observes a remoteSetUrl made after the Remote was loaded (docum
     // (bareA) — proving the documented behavior on fetchAsync is accurate.
     t.is(workRev(consumer, "refs/remotes/origin/main"), headB);
     t.not(workRev(consumer, "refs/remotes/origin/main"), headA);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -509,13 +532,15 @@ test("pushAsync uses the remote's configured pushurl, not its fetch url", async 
     });
     execSync(`git remote set-url --push origin "${bare}"`, { cwd: work });
 
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     await remote.pushAsync(["refs/heads/main:refs/heads/main"], null);
 
     // The target (pushurl) bare repo received the push...
     t.is(bareRev(bare, "refs/heads/main"), head);
     // ...and the bogus (fetch-url) bare repo was never touched.
     t.false(existsSync(join(bogusBare, "refs/heads/main")));
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -537,10 +562,12 @@ test("fetchAsync falls back to the remote's configured refspecs when refspecs is
     execSync(`git init -q -b main "${consumer}"`);
     execSync(`git remote add origin "${bare}"`, { cwd: consumer });
 
-    const remote = new Repository(consumer).findRemote("origin");
+    const repo = new Repository(consumer);
+    const remote = repo.findRemote("origin");
     await remote.fetchAsync([], null);
 
     t.is(workRev(consumer, "refs/remotes/origin/main"), head);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -56,11 +56,15 @@ const workRev = (work, ref) =>
 test("fetch updates a local tracking ref", (t) => {
   const { root, bare, work, head } = makeFetchSetup();
   try {
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     t.truthy(remote);
     remote.fetch(["refs/heads/main:refs/remotes/origin/main"], null);
     t.is(workRev(work, "refs/remotes/origin/main"), head);
     t.is(workRev(work, "refs/remotes/origin/main"), bareRev(bare, "refs/heads/main"));
+    // Free the git2 handle (and its held-open fetched .pack fd) before rmSync
+    // deletes the temp dir, so Windows can unlink it (fixes CI EBUSY).
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -71,10 +75,12 @@ test("fetch updates a local tracking ref", (t) => {
 test("fetch accepts a FetchOptions instance", (t) => {
   const { root, work, head } = makeFetchSetup();
   try {
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     const options = new FetchOptions();
     remote.fetch(["refs/heads/main:refs/remotes/origin/main"], options);
     t.is(workRev(work, "refs/remotes/origin/main"), head);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -87,13 +93,15 @@ test("fetch accepts a FetchOptions instance", (t) => {
 test("FetchOptions can only be used once", (t) => {
   const { root, work } = makeFetchSetup();
   try {
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     const options = new FetchOptions();
     remote.fetch(["refs/heads/main:refs/remotes/origin/main"], options);
     const err = t.throws(() =>
       remote.fetch(["refs/heads/main:refs/remotes/origin/main"], options),
     );
     t.regex(err.message, /FetchOptions can only be used once/);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
