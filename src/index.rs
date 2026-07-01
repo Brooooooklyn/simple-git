@@ -75,7 +75,7 @@ impl Index {
 
   #[napi]
   /// Get the count of entries currently in the index.
-  pub fn count(&self) -> u32 {
+  pub fn size(&self) -> u32 {
     self.inner.len() as u32
   }
 

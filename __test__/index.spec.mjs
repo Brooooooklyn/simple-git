@@ -35,7 +35,7 @@ test("addAll + write + writeTree returns a resolvable tree OID", (t) => {
     const index = repo.index();
     index.addAll();
     index.write();
-    t.true(index.count() >= 1);
+    t.true(index.size() >= 1);
     const treeOid = index.writeTree();
     t.is(treeOid.length, 40);
     t.truthy(repo.findTree(treeOid));

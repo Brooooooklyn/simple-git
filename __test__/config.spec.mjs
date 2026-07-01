@@ -36,10 +36,10 @@ test("config snapshot reads a string value matching the git CLI", (t) => {
   t.is(value, expected);
 });
 
-// Read-only: get_bool decodes a boolean config key.
-test("config getBool reads a boolean value", (t) => {
+// Read-only: get_boolean decodes a boolean config key.
+test("config getBoolean reads a boolean value", (t) => {
   const repo = new Repository(workDir);
-  const bare = repo.config().getBool("core.bare");
+  const bare = repo.config().getBoolean("core.bare");
   t.is(typeof bare, "boolean");
   t.false(bare);
 });
@@ -61,14 +61,14 @@ test("config typed setters round-trip (bool/number/bigint)", (t) => {
   const dir = makeTempRepo();
   try {
     const config = new Repository(dir).config();
-    config.setBool("custom.flag", true);
-    t.true(config.getBool("custom.flag"));
+    config.setBoolean("custom.flag", true);
+    t.true(config.getBoolean("custom.flag"));
     config.setNumber("custom.intval", 42);
     t.is(config.getNumber("custom.intval"), 42);
     config.setBigInt("custom.bigval", 1234567890n);
     t.is(config.getBigInt("custom.bigval"), 1234567890n);
     // core.bare is written by `git init` as a real boolean.
-    t.false(config.getBool("core.bare"));
+    t.false(config.getBoolean("core.bare"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -111,14 +111,14 @@ test("diffFlagsContains is (flags & flag) === flag", (t) => {
   t.false(diffFlagsContains(DiffFlags.NotBinary, DiffFlags.Binary));
 });
 
-// --- Cred.credtype(): returns raw bits as a number -------------------------
+// --- Cred.credType(): returns raw bits as a number -------------------------
 
-test("Cred.credtype() returns the raw CredentialType bits as a number", (t) => {
-  const username = Cred.username("x").credtype();
+test("Cred.credType() returns the raw CredentialType bits as a number", (t) => {
+  const username = Cred.username("x").credType();
   t.is(typeof username, "number");
   t.is(username, CredentialType.Username);
 
-  const userpass = Cred.userpassPlaintext("u", "p").credtype();
+  const userpass = Cred.userpassPlaintext("u", "p").credType();
   t.is(typeof userpass, "number");
   t.is(userpass, CredentialType.UserPassPlaintext);
 });

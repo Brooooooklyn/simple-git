@@ -1310,7 +1310,7 @@ impl Cred {
   ///
   /// The value is the raw `CredentialType` bitset (an OR-able `number`); test
   /// individual bits with `credTypeContains` and the `CredentialType` constants.
-  pub fn credtype(&self) -> u32 {
+  pub fn cred_type(&self) -> u32 {
     // Normalize the platform-variant raw `git_credtype_t` to a portable u32. The
     // values match `git2::CredentialType` (always u32), so callers can mask with
     // CredentialType.* / credTypeContains.
@@ -1322,7 +1322,7 @@ impl Cred {
 /// Check whether a raw credential-type bitset contains a given `CredentialType`
 /// bit.
 ///
-/// `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credtype()`);
+/// `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credType()`);
 /// `another` is one of the `CredentialType` constants. Returns
 /// `(cred_type & another) === another`.
 pub fn cred_type_contains(cred_type: u32, another: CredentialType) -> bool {

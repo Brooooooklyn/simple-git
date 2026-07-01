@@ -6,7 +6,7 @@ export declare class Blob {
   /** Determine if the blob content is most certainly binary or not. */
   isBinary(): boolean
   /** Get the content of this blob. */
-  content(): Uint8Array
+  content(): Buffer
   /** Get the size in bytes of the contents of this blob. */
   size(): number
 }
@@ -212,7 +212,7 @@ export declare class Config {
    */
   getString(name: string): string
   /** Get the value of a boolean config variable. */
-  getBool(name: string): boolean
+  getBoolean(name: string): boolean
   /** Get the value of an i32 config variable, as a JS `number`. */
   getNumber(name: string): number
   /**
@@ -231,7 +231,7 @@ export declare class Config {
    * Set the value of a boolean config variable in the config file with the
    * highest level (usually the local one).
    */
-  setBool(name: string, value: boolean): void
+  setBoolean(name: string, value: boolean): void
   /**
    * Set the value of an i32 config variable in the config file with the
    * highest level (usually the local one). Takes a JS `number`.
@@ -300,7 +300,7 @@ export declare class Cred {
    * The value is the raw `CredentialType` bitset (an OR-able `number`); test
    * individual bits with `credTypeContains` and the `CredentialType` constants.
    */
-  credtype(): number
+  credType(): number
 }
 
 /**
@@ -485,7 +485,7 @@ export declare class Index {
   /** Remove an index entry corresponding to a file on disk. */
   removePath(path: string): void
   /** Get the count of entries currently in the index. */
-  count(): number
+  size(): number
   /** Write the in-memory index back to disk using an atomic file lock. */
   write(): void
   /**
@@ -1585,7 +1585,7 @@ export declare class TreeEntry {
   /** Get the name of a tree entry */
   name(): string
   /** Get the filename of a tree entry */
-  nameBytes(): Uint8Array
+  nameBytes(): Buffer
   /** Convert a tree entry to the object it points to. */
   toObject(repo: Repository): GitObject
 }
@@ -1792,7 +1792,7 @@ export interface CredInfo {
  * Check whether a raw credential-type bitset contains a given `CredentialType`
  * bit.
  *
- * `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credtype()`);
+ * `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credType()`);
  * `another` is one of the `CredentialType` constants. Returns
  * `(cred_type & another) === another`.
  */

@@ -51,7 +51,7 @@ const scanned = await repo.statusesAsync({ includeIgnored: true }) // off-thread
 const config = repo.config() // => Config (system + global + repo, prioritized)
 config.setString('user.name', 'LongYinan')
 console.log(config.getString('user.name')) // 'LongYinan'
-console.log(config.getBool('core.bare')) // false
+console.log(config.getBoolean('core.bare')) // false
 const sig = repo.signature() // built from user.name / user.email
 console.log(sig.name(), sig.email()) // 'LongYinan' 'github@lyn.one'
 
@@ -244,13 +244,13 @@ export class Config {
   static openDefault(): Config
   /** Get a string config value (highest-priority occurrence wins). */
   getString(name: string): string
-  getBool(name: string): boolean
+  getBoolean(name: string): boolean
   getNumber(name: string): number
   /** i64 value as a `bigint` (no >2^53 truncation). */
   getBigInt(name: string): bigint
   /** Set a value in the highest-level config file (usually the local one). */
   setString(name: string, value: string): void
-  setBool(name: string, value: boolean): void
+  setBoolean(name: string, value: boolean): void
   setNumber(name: string, value: number): void
   /** Set an i64 value from a `bigint`; throws if it doesn't fit in i64. */
   setBigInt(name: string, value: bigint): void
@@ -311,7 +311,7 @@ export class Index {
   /** Remove an index entry corresponding to a file on disk. */
   removePath(path: string): void
   /** Get the count of entries currently in the index. */
-  count(): number
+  size(): number
   /** Write the in-memory index back to disk using an atomic file lock. */
   write(): void
   /** Write the index as a tree to the object database and return its OID. */

@@ -1,9 +1,7 @@
 use std::ops::Deref;
 use std::path::Path;
 
-use napi::bindgen_prelude::{
-  Env, Error, Generator, Reference, Result, SharedReference, Uint8Array,
-};
+use napi::bindgen_prelude::{Buffer, Env, Error, Generator, Reference, Result, SharedReference};
 use napi_derive::napi;
 
 use crate::{
@@ -211,7 +209,7 @@ impl TreeEntry {
 
   #[napi]
   /// Get the filename of a tree entry
-  pub fn name_bytes(&self) -> Uint8Array {
+  pub fn name_bytes(&self) -> Buffer {
     self.inner.name_bytes().to_vec().into()
   }
 

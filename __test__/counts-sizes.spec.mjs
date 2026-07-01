@@ -83,6 +83,38 @@ test("Blob.size() is a plain number", (t) => {
   }
 });
 
+// Blob.content() widened from Uint8Array to Buffer (Buffer is a Uint8Array
+// subtype, so this stays a non-breaking surface change).
+test("Blob.content() returns a Buffer", (t) => {
+  const { root, repo } = makeRepo();
+  try {
+    const blob = repo
+      .head()
+      .peelToTree()
+      .getPath("file.txt")
+      .toObject(repo)
+      .peelToBlob();
+    t.true(Buffer.isBuffer(blob.content()));
+    t.is(blob.content().toString("utf8"), "v2\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// TreeEntry.nameBytes() widened from Uint8Array to Buffer. Resolve a TreeEntry
+// via Reference.peelToTree().get(0) (the makeRepo tree has one entry: file.txt).
+test("TreeEntry.nameBytes() returns a Buffer", (t) => {
+  const { root, repo } = makeRepo();
+  try {
+    const entry = repo.head().peelToTree().get(0);
+    t.truthy(entry);
+    t.true(Buffer.isBuffer(entry.nameBytes()));
+    t.is(entry.nameBytes().toString("utf8"), "file.txt");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("DiffFile.size() is a plain number", (t) => {
   const { root, repo } = makeRepo();
   try {

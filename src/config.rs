@@ -84,7 +84,7 @@ impl Config {
 
   #[napi]
   /// Get the value of a boolean config variable.
-  pub fn get_bool(&self, name: String) -> Result<bool> {
+  pub fn get_boolean(&self, name: String) -> Result<bool> {
     self.inner.get_bool(&name).convert_without_message()
   }
 
@@ -114,7 +114,7 @@ impl Config {
   #[napi]
   /// Set the value of a boolean config variable in the config file with the
   /// highest level (usually the local one).
-  pub fn set_bool(&mut self, name: String, value: bool) -> Result<()> {
+  pub fn set_boolean(&mut self, name: String, value: bool) -> Result<()> {
     self.inner.set_bool(&name, value).convert_without_message()
   }
 

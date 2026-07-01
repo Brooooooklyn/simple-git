@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use napi::bindgen_prelude::{SharedReference, Uint8Array};
+use napi::bindgen_prelude::{Buffer, SharedReference};
 use napi_derive::napi;
 
 use crate::object::GitObject;
@@ -40,7 +40,7 @@ impl Blob {
 
   #[napi]
   /// Get the content of this blob.
-  pub fn content(&self) -> Uint8Array {
+  pub fn content(&self) -> Buffer {
     self.inner.content().to_vec().into()
   }
 
