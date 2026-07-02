@@ -245,11 +245,40 @@ test("isGitError rejects non-errors, plain objects, and null/undefined", (t) => 
   t.is(isGitError({ code: "NotFound" }), false);
 });
 
-test("isGitError accepts a non-git Error carrying a string code (documented shape-guard trade-off)", (t) => {
-  // The guard is structural: any Error with a string `.code` passes, e.g. a
-  // Node system error like ENOENT. This is the accepted, standard trade-off —
-  // the valid token set is intentionally not enumerated.
+test("isGitError rejects a non-git Error whose string code is not a GitErrorCode member (ENOENT)", (t) => {
+  // The guard is SOUND: membership is validated against the generated
+  // `GitErrorCode` enum, so a Node system error like ENOENT — an `Error` with a
+  // non-member string `.code` — does NOT narrow to a git error.
   const e = new Error("boom");
   e.code = "ENOENT";
-  t.is(isGitError(e), true);
+  t.is(isGitError(e), false);
+});
+
+test("isGitError rejects an aborted-call code that is not a GitErrorCode member (Cancelled)", (t) => {
+  // napi's `AbortSignal` cancellation surfaces `code: 'Cancelled'`, a napi-level
+  // token that is NOT a `GitErrorCode` member, so the guard rejects it.
+  const e = new Error("The operation was aborted");
+  e.code = "Cancelled";
+  t.is(isGitError(e), false);
+});
+
+test("isGitError is total: an Error with a throwing `code` getter returns false and does not throw", (t) => {
+  const e = new Error("boom");
+  Object.defineProperty(e, "code", {
+    get() {
+      throw new Error("code getter blew up");
+    },
+    enumerable: true,
+    configurable: true,
+  });
+  let out;
+  t.notThrows(() => {
+    out = isGitError(e);
+  });
+  t.is(out, false);
+  // The cleared pending exception must not leak into the next call.
+  t.is(isGitError(new Error("x")), false);
+  const member = new Error("m");
+  member.code = GitErrorCode.NotFound;
+  t.is(isGitError(member), true);
 });

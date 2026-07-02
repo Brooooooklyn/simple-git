@@ -1,4 +1,6 @@
 import { execSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +13,26 @@ const workDir = join(__dirname, "..");
 
 const git = (args) =>
   execSync(`git ${args}`, { cwd: workDir }).toString().trim();
+
+// Build a hermetic throwaway repo committing each name in `files` (relative to
+// the work tree). Caller removes `root`. Used by the `__proto__`-safety
+// regression: git happily tracks a file literally named `__proto__`.
+function makeRepo(files) {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-modification-"));
+  const work = join(root, "work");
+  execSync(`git init -q -b main "${work}"`);
+  const run = (args) => execSync(`git ${args}`, { cwd: work });
+  run("config user.name tester");
+  run("config user.email tester@example.com");
+  run("config commit.gpgsign false");
+  run("config core.autocrlf false");
+  for (const name of files) {
+    writeFileSync(join(work, name), `${name}\n`);
+  }
+  run("add -A");
+  run("commit -q -m seed");
+  return { root, repo: new Repository(work) };
+}
 
 test.beforeEach((t) => {
   t.context.repo = new Repository(workDir);
@@ -140,4 +162,79 @@ test("getFilesLatestModifiedAsync matches sync bulk result", async (t) => {
   const sync = repo.getFilesLatestModified(paths);
   const bulkAsync = await repo.getFilesLatestModifiedAsync(paths);
   t.deepEqual(bulkAsync, sync);
+});
+
+// -------- __proto__-safety regression (own-keyed result object) --------------
+// The result is built with own-property DEFINE semantics, so a valid path key
+// literally named `__proto__` becomes an OWN enumerable data property instead
+// of triggering `Object.prototype`'s `__proto__` setter (which would corrupt
+// the result object's prototype). Asserts the `Record<string, ...>` contract:
+// every path is an own key, value is a FileModification or null, prototype intact.
+
+test("getFilesLatestModified keeps a present __proto__ path as an own key (sync)", (t) => {
+  const { root, repo } = makeRepo(["__proto__", "normal.txt"]);
+  try {
+    const result = repo.getFilesLatestModified(["__proto__", "normal.txt"]);
+    t.true(Object.getOwnPropertyNames(result).includes("__proto__"));
+    t.truthy(result["__proto__"]); // an own FileModification, not the prototype
+    t.regex(result["__proto__"].commitId, /^[0-9a-f]{40}$/);
+    t.true(Object.prototype.hasOwnProperty.call(result, "__proto__"));
+    t.is(Object.getPrototypeOf(result), Object.prototype);
+    // Normal sibling unaffected.
+    t.truthy(result["normal.txt"]);
+    t.true(Object.getOwnPropertyNames(result).includes("normal.txt"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("getFilesLatestModified keeps a missing __proto__ path as an own null key (sync)", (t) => {
+  const { root, repo } = makeRepo(["normal.txt"]);
+  try {
+    const result = repo.getFilesLatestModified(["__proto__"]);
+    t.true(Object.getOwnPropertyNames(result).includes("__proto__"));
+    t.is(result["__proto__"], null); // own key, value null (never-committed)
+    t.true(Object.prototype.hasOwnProperty.call(result, "__proto__"));
+    t.is(Object.getPrototypeOf(result), Object.prototype);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("getFilesLatestModifiedAsync keeps __proto__ paths as own keys (async)", async (t) => {
+  const present = makeRepo(["__proto__", "normal.txt"]);
+  const missing = makeRepo(["normal.txt"]);
+  try {
+    const p = await present.repo.getFilesLatestModifiedAsync([
+      "__proto__",
+      "normal.txt",
+    ]);
+    t.true(Object.getOwnPropertyNames(p).includes("__proto__"));
+    t.truthy(p["__proto__"]);
+    t.true(Object.prototype.hasOwnProperty.call(p, "__proto__"));
+    t.is(Object.getPrototypeOf(p), Object.prototype);
+
+    const m = await missing.repo.getFilesLatestModifiedAsync(["__proto__"]);
+    t.true(Object.getOwnPropertyNames(m).includes("__proto__"));
+    t.is(m["__proto__"], null);
+    t.is(Object.getPrototypeOf(m), Object.prototype);
+  } finally {
+    rmSync(present.root, { recursive: true, force: true });
+    rmSync(missing.root, { recursive: true, force: true });
+  }
+});
+
+// `constructor` and other non-`__proto__` keys were already normal shadowing
+// own props; confirm the define path keeps them own + prototype intact.
+test("getFilesLatestModified keeps a constructor path as an own key (sync)", (t) => {
+  const { root, repo } = makeRepo(["normal.txt"]);
+  try {
+    const result = repo.getFilesLatestModified(["constructor"]);
+    t.true(Object.getOwnPropertyNames(result).includes("constructor"));
+    t.is(result["constructor"], null);
+    t.true(Object.prototype.hasOwnProperty.call(result, "constructor"));
+    t.is(Object.getPrototypeOf(result), Object.prototype);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

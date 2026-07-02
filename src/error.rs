@@ -181,15 +181,17 @@ pub(crate) mod codes {
   /// Runtime type guard for the coded errors this addon throws.
   ///
   /// Returns `true` iff `e` is a genuine `Error` instance — tested with
-  /// `instanceof` against the current realm's global `Error` constructor — that
-  /// also carries a string `code` property. Returns `false` for non-errors,
-  /// plain objects, `null`/`undefined`, and `Error`s without a string `code`.
+  /// `instanceof` against the current realm's global `Error` constructor — whose
+  /// `code` is a real member of the `GitErrorCode` enum. Membership is validated
+  /// against that generated enum (the single source of truth), so a non-git
+  /// `Error` (e.g. Node's `ENOENT`) or an `AbortSignal` cancellation
+  /// (`code: 'Cancelled'`, which is a napi-level token, NOT a `GitErrorCode`)
+  /// returns `false`. Non-errors, plain objects, `null`/`undefined`, and `Error`s
+  /// without a member `code` all return `false`.
   ///
-  /// This is a structural (shape) guard: it also matches a non-git `Error` that
-  /// happens to expose a string `.code` (e.g. Node's `ENOENT`). That is the
-  /// accepted, standard trade-off — the valid token set is intentionally not
-  /// enumerated. The companion `GitErrorCode` enum lists the tokens this addon
-  /// actually produces.
+  /// The guard is TOTAL: it never throws for any input. An `Error` whose `code`
+  /// is a throwing getter yields `false` (the pending exception is cleared), so
+  /// it is always safe to call inside a `catch`.
   // napi emits the calling wrapper behind `#[cfg(all(not(test), ...))]`, so under
   // `cfg(test)` nothing references this fn. Unlike the other free `#[napi]` fns
   // (which sit in `pub mod`s and are thus part of the crate's public API), this
@@ -213,11 +215,28 @@ pub(crate) mod codes {
     if !e.instanceof(error_ctor)? {
       return Ok(false);
     }
-    // `typeof e.code === "string"`.
-    let code = e
+    // SOUND + TOTAL membership read. Reading `.code` as a `GitErrorCode`
+    // succeeds ONLY when it is a real member of the generated enum (the single
+    // source of truth): the `string_enum` `FromNapiValue` returns `Ok` for a
+    // member and `Err(InvalidArg)` — with NO pending exception — for a
+    // non-member string, a non-string, or a missing property. A THROWING `code`
+    // getter instead surfaces as `Err` WITH a pending JS exception, so clear the
+    // pending exception unconditionally (`napi_get_and_clear_last_exception` is a
+    // no-op when nothing is pending). This keeps the guard total: it returns a
+    // bool and never throws, for every possible input.
+    match e
       .coerce_to_object()?
-      .get_named_property_unchecked::<Unknown>("code")?;
-    Ok(code.get_type()? == ValueType::String)
+      .get_named_property::<GitErrorCode>("code")
+    {
+      Ok(_) => Ok(true),
+      Err(_) => {
+        unsafe {
+          let mut pending = std::ptr::null_mut();
+          napi::sys::napi_get_and_clear_last_exception(env.raw(), &mut pending);
+        }
+        Ok(false)
+      }
+    }
   }
 
   use std::sync::atomic::{AtomicBool, Ordering};

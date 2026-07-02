@@ -660,11 +660,13 @@ try {
 }
 ```
 
-`isGitError(e)` returns `true` only when `e` is a genuine `Error` instance that
-carries a string `code`; it narrows `e` to `Error & { code: GitErrorCode }` in
-TypeScript. It is a structural guard, so a non-git `Error` that happens to expose
-a string `.code` (e.g. Node's `ENOENT`) also matches — that is the accepted
-trade-off; the valid tokens are not enumerated at runtime.
+`isGitError(e)` returns `true` only when `e` is a genuine `Error` instance whose
+`code` is a real member of the `GitErrorCode` enum; it narrows `e` to
+`Error & { code: GitErrorCode }` in TypeScript. Membership is validated against
+the enum (the single source of truth), so a non-git `Error` that merely exposes
+some other string `.code` (e.g. Node's `ENOENT`) returns `false`. The guard is
+total — it never throws, even for an `Error` whose `code` is a throwing getter
+(it returns `false`) — so it is always safe to call inside a `catch`.
 
 The 29 members of `GitErrorCode` are the 28 libgit2 error classes plus one
 napi-level token:
@@ -728,10 +730,10 @@ await repo.getFileLatestModifiedDateAsync('build.rs').catch((e) => {
 > reject an aborted call with napi's own `AbortError`, whose `.code === "Cancelled"`.
 > That is napi's runtime cancellation code — it is **not** a `GitErrorCode` member
 > (it comes from napi, not the git layer), because cancellation bypasses the
-> task's own reject hook. `isGitError` still returns `true` for it (it is an
-> `Error` with a string `code`), so compare `e.code` against the specific
-> `GitErrorCode` members you handle rather than treating every `isGitError` hit
-> as a git-layer failure.
+> task's own reject hook. Because `"Cancelled"` is not a `GitErrorCode` member,
+> `isGitError` returns **`false`** for it. Detect an aborted call separately —
+> via the `AbortSignal`'s `aborted`/`abort` event or by checking
+> `e.code === "Cancelled"` — rather than through `isGitError`.
 
 ## Performance
 

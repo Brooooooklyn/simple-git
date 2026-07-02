@@ -16,7 +16,7 @@ use crate::config::Config;
 use crate::diff::{Diff, DiffOptions};
 use crate::error::IntoNapiError;
 use crate::file_modification::{
-  FileModification, get_file_modification, get_files_modification, time_to_date,
+  FileModMap, FileModification, get_file_modification, get_files_modification, time_to_date,
 };
 use crate::index::Index;
 use crate::object::GitObject;
@@ -375,7 +375,10 @@ impl GitBulkModificationTask {
 #[napi]
 impl Task for GitBulkModificationTask {
   type Output = HashMap<String, Option<FileModification>>;
-  type JsValue = HashMap<String, Option<FileModification>>;
+  // The map is built off-thread in `compute`; `resolve` wraps it in `FileModMap`
+  // so the JS result object is constructed with own-property define semantics
+  // (`__proto__`-safe), mirroring the sync `get_files_latest_modified` path.
+  type JsValue = FileModMap;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
     self.run().map_err(|mut e| {
@@ -385,7 +388,7 @@ impl Task for GitBulkModificationTask {
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output)
+    Ok(FileModMap(output))
   }
 
   fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
@@ -2002,11 +2005,14 @@ impl Repository {
   /// inputs must be file paths (a directory or glob will not match). Every input
   /// path is present as a key in the result; a never-committed path maps to
   /// `null`. Merge commits are skipped; only real errors throw.
-  pub fn get_files_latest_modified(
-    &self,
-    filepaths: Vec<String>,
-  ) -> Result<HashMap<String, Option<FileModification>>> {
-    get_files_modification(self.inner()?, &filepaths).convert_without_message()
+  pub fn get_files_latest_modified(&self, filepaths: Vec<String>) -> Result<FileModMap> {
+    // Wrap in `FileModMap` so the result object is built with own-property
+    // define semantics (a path literally named `__proto__` becomes an own key,
+    // not a prototype mutation). The TS type stays `Record<..>` via the
+    // `ts_return_type` override above.
+    get_files_modification(self.inner()?, &filepaths)
+      .map(FileModMap)
+      .convert_without_message()
   }
 
   #[napi(ts_return_type = "Promise<Record<string, FileModification | null>>")]

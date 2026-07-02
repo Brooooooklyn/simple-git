@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 /// Last commit that modified a file, with author/committer identity.
@@ -196,4 +197,60 @@ pub(crate) fn get_files_modification(
     }
   }
   Ok(result)
+}
+
+/// Newtype over the bulk file-modification map. Its `ToNapiValue` builds the
+/// result object with own-property DEFINE semantics (`[[DefineOwnProperty]]` via
+/// `napi_define_properties`), NOT `[[Set]]`.
+///
+/// napi's default `HashMap` serialization uses `napi_set_named_property`
+/// (`[[Set]]`), so a valid path key literally named `__proto__` would fire
+/// `Object.prototype`'s `__proto__` setter and mutate the RESULT object's
+/// prototype instead of creating an own key (present `__proto__` -> its value
+/// becomes the prototype; missing -> prototype set to `null`, losing
+/// `hasOwnProperty`). Defining each entry as an own enumerable data property
+/// bypasses that setter, so EVERY path (including `__proto__`) becomes an own
+/// key mapping to its `FileModification` or `null` while the object keeps the
+/// normal `Object.prototype`. Surfaces to TS as
+/// `Record<string, FileModification | null>` (via the method `ts_return_type`).
+pub struct FileModMap(pub(crate) HashMap<String, Option<FileModification>>);
+
+impl TypeName for FileModMap {
+  fn type_name() -> &'static str {
+    "Object"
+  }
+
+  fn value_type() -> ValueType {
+    ValueType::Object
+  }
+}
+
+impl ToNapiValue for FileModMap {
+  unsafe fn to_napi_value(
+    raw_env: napi::sys::napi_env,
+    val: Self,
+  ) -> napi::Result<napi::sys::napi_value> {
+    let env = Env::from_raw(raw_env);
+    let mut obj = Object::new(&env)?;
+    let attributes = PropertyAttributes::Enumerable
+      | PropertyAttributes::Writable
+      | PropertyAttributes::Configurable;
+    let properties = val
+      .0
+      .into_iter()
+      .map(|(key, value)| {
+        // `Option<FileModification>` ToNapiValue: `None` -> JS `null`,
+        // `Some(fm)` -> the FileModification object. `with_utf8_name` errors
+        // only on an interior NUL (git paths never contain one).
+        Ok(
+          Property::new()
+            .with_utf8_name(&key)?
+            .with_napi_value(&env, value)?
+            .with_property_attributes(attributes),
+        )
+      })
+      .collect::<napi::Result<Vec<Property>>>()?;
+    obj.define_properties(&properties)?;
+    Ok(obj.raw())
+  }
 }

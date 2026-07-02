@@ -2120,15 +2120,17 @@ export declare const enum GitErrorCode {
  * Runtime type guard for the coded errors this addon throws.
  *
  * Returns `true` iff `e` is a genuine `Error` instance — tested with
- * `instanceof` against the current realm's global `Error` constructor — that
- * also carries a string `code` property. Returns `false` for non-errors,
- * plain objects, `null`/`undefined`, and `Error`s without a string `code`.
+ * `instanceof` against the current realm's global `Error` constructor — whose
+ * `code` is a real member of the `GitErrorCode` enum. Membership is validated
+ * against that generated enum (the single source of truth), so a non-git
+ * `Error` (e.g. Node's `ENOENT`) or an `AbortSignal` cancellation
+ * (`code: 'Cancelled'`, which is a napi-level token, NOT a `GitErrorCode`)
+ * returns `false`. Non-errors, plain objects, `null`/`undefined`, and `Error`s
+ * without a member `code` all return `false`.
  *
- * This is a structural (shape) guard: it also matches a non-git `Error` that
- * happens to expose a string `.code` (e.g. Node's `ENOENT`). That is the
- * accepted, standard trade-off — the valid token set is intentionally not
- * enumerated. The companion `GitErrorCode` enum lists the tokens this addon
- * actually produces.
+ * The guard is TOTAL: it never throws for any input. An `Error` whose `code`
+ * is a throwing getter yields `false` (the pending exception is cleared), so
+ * it is always safe to call inside a `catch`.
  */
 export declare function isGitError(e: unknown): e is Error & { code: GitErrorCode }
 
