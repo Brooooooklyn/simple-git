@@ -83,22 +83,30 @@ test("Created date async should work", async (t) => {
 // `getFileLastModifiedDate` Date twin returns `null` (covered in modification.spec).
 test("Created date THROWS for non-existent file", (t) => {
   const { repo } = t.context;
-  t.throws(() => repo.getFileCreatedDate("non-existent-file.txt"));
+  const err = t.throws(() => repo.getFileCreatedDate("non-existent-file.txt"));
+  t.is(err.code, "GenericError");
+  t.is(err.message, "Failed to get created date for [non-existent-file.txt]");
 });
 
 test("Created date async THROWS for non-existent file", async (t) => {
   const { repo } = t.context;
-  await t.throwsAsync(() => repo.getFileCreatedDateAsync("non-existent-file.txt"));
+  const err = await t.throwsAsync(() => repo.getFileCreatedDateAsync("non-existent-file.txt"));
+  t.is(err.code, "GenericError");
+  t.is(err.message, "Failed to get created date for [non-existent-file.txt]");
 });
 
 test("Latest modified date THROWS for non-existent file", (t) => {
   const { repo } = t.context;
-  t.throws(() => repo.getFileLatestModifiedDate("does-not-exist-xyz.txt"));
+  const err = t.throws(() => repo.getFileLatestModifiedDate("does-not-exist-xyz.txt"));
+  t.is(err.code, "GenericError");
+  t.is(err.message, "Failed to get commit for [does-not-exist-xyz.txt]");
 });
 
 test("Latest modified date async THROWS for non-existent file", async (t) => {
   const { repo } = t.context;
-  await t.throwsAsync(() => repo.getFileLatestModifiedDateAsync("does-not-exist-xyz.txt"));
+  const err = await t.throwsAsync(() => repo.getFileLatestModifiedDateAsync("does-not-exist-xyz.txt"));
+  t.is(err.code, "GenericError");
+  t.is(err.message, "Failed to get commit for [does-not-exist-xyz.txt]");
 });
 
 // Guard the null-vs-throw boundary: a fresh repo with an unborn HEAD (no commit)
@@ -118,10 +126,11 @@ test("File-date accessors THROW on an unborn HEAD (no commit), not null", async 
     t.throws(() => repo.getFileCreatedDate("anything.txt"));
     t.throws(() => repo.getFileLatestModifiedDate("anything.txt"));
     await t.throwsAsync(() => repo.getFileCreatedDateAsync("anything.txt"));
-    // Unborn HEAD is a REAL error, so even the null-safe Date twin throws,
-    // and the number async rejects.
+    // Unborn HEAD is a REAL error, so even the null-safe Date twin throws
+    // (both sync and async), and the number async rejects.
     t.throws(() => repo.getFileLastModifiedDate("anything.txt"));
     await t.throwsAsync(() => repo.getFileLatestModifiedDateAsync("anything.txt"));
+    await t.throwsAsync(() => repo.getFileLastModifiedDateAsync("anything.txt"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
