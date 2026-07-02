@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use chrono::{DateTime, Utc};
 use napi::{JsString, bindgen_prelude::*};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
@@ -11,19 +13,22 @@ use crate::branch::{Branch, BranchType};
 use crate::checkout::{CheckoutOptions, build_checkout_builder};
 use crate::commit::{Commit, CommitInner};
 use crate::config::Config;
-use crate::diff::Diff;
-use crate::error::{IntoNapiError, NotNullError};
-use crate::file_modification::{FileModification, get_file_modification, get_files_modification};
+use crate::diff::{Diff, DiffOptions};
+use crate::error::IntoNapiError;
+use crate::file_modification::{
+  FileModMap, FileModification, get_file_modification, get_files_modification, time_to_date,
+};
 use crate::index::Index;
-use crate::object::{GitObject, ObjectParent};
+use crate::object::GitObject;
 use crate::reference;
 use crate::remote::Remote;
 use crate::rev_walk::RevWalk;
 use crate::signature::Signature;
 use crate::status::{FileStatus, StatusOptions, build_status_opts, status_from_bits};
 use crate::tag::Tag;
-use crate::tree::{Tree, TreeEntry, TreeParent};
+use crate::tree::{Tree, TreeParent};
 use crate::util::path_to_javascript_string;
+use crate::{CodeInto, GitErrorCode, Result, coded_error, disposed_error, ensure_alive};
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
   // Handle the `failed to stat '/root/.gitconfig'; class=Config (7)` Error
@@ -39,7 +44,7 @@ static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
       git_config_dir.push(".gitconfig");
       std::fs::write(&git_config_dir, "").map_err(|err| {
         Error::new(
-          Status::GenericFailure,
+          GitErrorCode::GenericError,
           format!("Initialize {git_config_dir:?} failed {err}"),
         )
       })?;
@@ -84,98 +89,289 @@ impl From<git2::RepositoryState> for RepositoryState {
 }
 
 #[napi]
+#[repr(u32)]
+/// OR-able flags for `Repository.openExt`. Each discriminant is the real
+/// libgit2 `GIT_REPOSITORY_OPEN_*` bit, so they can be combined with `|`.
 pub enum RepositoryOpenFlags {
   /// Only open the specified path; don't walk upward searching.
-  NoSearch,
+  /// 1 << 0
+  NoSearch = 1,
   /// Search across filesystem boundaries.
-  CrossFS,
+  /// 1 << 1
+  CrossFS = 2,
   /// Force opening as bare repository, and defer loading its config.
-  Bare,
+  /// 1 << 2
+  Bare = 4,
   /// Don't try appending `/.git` to the specified repository path.
-  NoDotGit,
+  /// 1 << 3
+  NoDotGit = 8,
   /// Respect environment variables like `$GIT_DIR`.
-  FromEnv,
+  /// 1 << 4
+  FromEnv = 16,
 }
 
-impl From<RepositoryOpenFlags> for git2::RepositoryOpenFlags {
-  fn from(val: RepositoryOpenFlags) -> Self {
-    match val {
-      RepositoryOpenFlags::NoSearch => git2::RepositoryOpenFlags::NO_SEARCH,
-      RepositoryOpenFlags::CrossFS => git2::RepositoryOpenFlags::CROSS_FS,
-      RepositoryOpenFlags::Bare => git2::RepositoryOpenFlags::BARE,
-      RepositoryOpenFlags::NoDotGit => git2::RepositoryOpenFlags::NO_DOTGIT,
-      RepositoryOpenFlags::FromEnv => git2::RepositoryOpenFlags::FROM_ENV,
-    }
+// Async tasks below capture only owned, `Send` data (a repository `path`
+// String plus the operation's own owned params) on the JS thread. Each
+// `compute()` runs on a libuv worker and REOPENS its own worker-local
+// `git2::Repository` from `path`, so it never aliases the JS-visible handle the
+// main thread still holds (`git2::Repository` is `Send` but NOT `Sync`). The
+// reopened handle is dropped before `compute()` returns. Because every field is
+// `Send`, these read-only tasks are auto-`Send` and need no `unsafe impl Send`.
+//
+// A reopened worker handle starts from the on-disk repository state and does
+// NOT inherit the in-memory, per-handle overrides the JS-visible `Repository`
+// carried (the active `namespace`, which redirects ref/HEAD resolution, and any
+// `workdir` override). Each task therefore captures those two on the JS thread
+// at call time (`namespace`/`workdir` fields) and re-applies them via
+// `restore_worker_handle_state` immediately after reopening — a no-op when
+// neither is set, so default repos are unaffected. Both are `Option<String>`
+// (Send), so the read tasks stay auto-`Send`.
+
+pub struct GitLastModifiedDateTask {
+  path: String,
+  open_flags: Option<u32>,
+  namespace: Option<String>,
+  workdir: Option<String>,
+  filepath: String,
+  code: GitErrorCode,
+}
+
+pub struct GitLatestModifiedDateTask {
+  path: String,
+  open_flags: Option<u32>,
+  namespace: Option<String>,
+  workdir: Option<String>,
+  filepath: String,
+  code: GitErrorCode,
+}
+
+pub struct GitCreatedDateTask {
+  path: String,
+  open_flags: Option<u32>,
+  namespace: Option<String>,
+  workdir: Option<String>,
+  filepath: String,
+  code: GitErrorCode,
+}
+
+pub struct GitModificationTask {
+  path: String,
+  open_flags: Option<u32>,
+  namespace: Option<String>,
+  workdir: Option<String>,
+  filepath: String,
+  code: GitErrorCode,
+}
+
+pub struct GitBulkModificationTask {
+  path: String,
+  open_flags: Option<u32>,
+  namespace: Option<String>,
+  workdir: Option<String>,
+  filepaths: Vec<String>,
+  code: GitErrorCode,
+}
+
+pub struct GitStatusTask {
+  path: String,
+  open_flags: Option<u32>,
+  namespace: Option<String>,
+  workdir: Option<String>,
+  options: Option<StatusOptions>,
+  code: GitErrorCode,
+}
+
+pub struct GitBlameTask {
+  path: String,
+  open_flags: Option<u32>,
+  namespace: Option<String>,
+  workdir: Option<String>,
+  filepath: String,
+  options: Option<BlameOptions>,
+  code: GitErrorCode,
+}
+
+pub struct GitCommitTask {
+  path: String,
+  open_flags: Option<u32>,
+  namespace: Option<String>,
+  workdir: Option<String>,
+  update_ref: Option<String>,
+  author: git2::Signature<'static>,
+  committer: git2::Signature<'static>,
+  message: String,
+  tree_oid: git2::Oid,
+  parents: Vec<String>,
+  code: GitErrorCode,
+}
+
+/// Reopen a worker-local `git2::Repository` from `path`, replaying the
+/// `RepositoryOpenFlags` the original JS-visible handle was opened with (if
+/// any — see `Repository::open_flags`), so a worker sees the same
+/// `Bare`/`FromEnv` behavior as the handle the async call was made on. `None`
+/// (the common case: `new`/`init`/`discover`/`clone`) is a plain
+/// `git2::Repository::open`, identical to prior behavior.
+///
+/// KNOWN, DELIBERATE limitation (documented + deferred for 1.0): replaying
+/// `FromEnv` makes libgit2 re-read env-derived index/odb inputs
+/// (`GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`)
+/// on the worker at reopen time. git-dir (via `path`), workdir, and namespace
+/// (via `restore_worker_handle_state`) are pinned, but those lazily-resolved
+/// inputs are not, so mutating them between a sync call and a later `*Async`
+/// call on the same handle can diverge. A full pin is out of scope for 1.0:
+/// the odb write path needs `libgit2-sys` FFI (git2 0.21 exposes no safe
+/// resolved-odb getter/setter), and stripping `FromEnv` would break legitimate
+/// constant `GIT_INDEX_FILE`/`GIT_OBJECT_DIRECTORY` overrides.
+pub(crate) fn reopen_worker_repo(path: &str, open_flags: Option<u32>) -> Result<git2::Repository> {
+  match open_flags {
+    Some(flags) => git2::Repository::open_ext(
+      path,
+      git2::RepositoryOpenFlags::from_bits_truncate(flags),
+      Vec::<String>::new(),
+    )
+    .convert(format!("Failed to open git repo: [{path}]")),
+    None => git2::Repository::open(path).convert(format!("Failed to open git repo: [{path}]")),
   }
 }
 
-pub struct GitDateTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
-  filepath: String,
+/// Re-apply the in-memory, per-handle repository state that the JS-visible
+/// `Repository` carried but a freshly reopened worker handle does not inherit:
+/// the active `namespace` (redirects ref/HEAD resolution to
+/// `refs/namespaces/<ns>/…`) and any `workdir` override. Both are captured on
+/// the JS thread at call time and threaded into the task. `update_gitlink` is
+/// `false`: we only restore the in-memory override, never rewrite the gitlink.
+/// A no-op when neither is set (the common case), so default repos behave
+/// exactly as a freshly reopened handle.
+fn restore_worker_handle_state(
+  repo: &git2::Repository,
+  namespace: Option<&str>,
+  workdir: Option<&str>,
+) -> Result<()> {
+  if let Some(ns) = namespace {
+    repo
+      .set_namespace(ns)
+      .convert("Failed to restore repository namespace")?;
+  }
+  if let Some(wd) = workdir {
+    repo
+      .set_workdir(Path::new(wd), false)
+      .convert("Failed to restore repository workdir")?;
+  }
+  Ok(())
 }
 
-unsafe impl Send for GitDateTask {}
+// SAFETY: every field is `Send` EXCEPT the two `git2::Signature<'static>`
+// values, which are `!Send` only because the type holds a raw pointer (each is
+// an owned `'static` copy produced via `to_owned()` on the main thread, with no
+// borrow of any repository). They are *moved* into the task and only ever read
+// inside `compute()` on a single worker thread — never shared with, nor
+// concurrently accessed by, the main thread. The repository is REOPENED from
+// the owned `path` inside `compute()`, so the task never touches the
+// JS-visible handle. No aliasing, no concurrent access: the move is sound.
+unsafe impl Send for GitCommitTask {}
 
-pub struct GitCreatedDateTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
-  filepath: String,
+pub struct GitCloneTask {
+  url: String,
+  path: String,
+  result: Option<git2::Repository>,
+  code: GitErrorCode,
 }
 
-unsafe impl Send for GitCreatedDateTask {}
+// `git2::Repository` is `Send` (see git2's `unsafe impl Send for Repository`),
+// so `GitCloneTask` — whose fields are all `Send` — is auto-`Send` and needs no
+// manual impl. The cloned handle is created inside `compute()` on the worker
+// thread, moved out in `resolve()` on the main thread, and (because `compute()`
+// completes before `resolve()` runs) is only ever owned by one thread at a time.
 
-pub struct GitModificationTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
-  filepath: String,
+impl GitLastModifiedDateTask {
+  fn run(&mut self) -> Result<Option<DateTime<Utc>>> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    get_file_modification(&repo, &self.filepath)
+      .convert_without_message()
+      .map(|value| value.map(|m| m.committer_time))
+  }
 }
-
-unsafe impl Send for GitModificationTask {}
-
-pub struct GitBulkModificationTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
-  filepaths: Vec<String>,
-}
-
-unsafe impl Send for GitBulkModificationTask {}
-
-pub struct GitStatusTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
-  options: Option<StatusOptions>,
-}
-
-unsafe impl Send for GitStatusTask {}
-
-pub struct GitBlameTask {
-  repo: RwLock<napi::bindgen_prelude::Reference<Repository>>,
-  filepath: String,
-  options: Option<BlameOptions>,
-}
-
-unsafe impl Send for GitBlameTask {}
 
 #[napi]
-impl Task for GitDateTask {
-  type Output = i64;
-  type JsValue = i64;
+impl Task for GitLastModifiedDateTask {
+  type Output = Option<DateTime<Utc>>;
+  type JsValue = Option<DateTime<Utc>>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_modification(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepath,
-    )
-    .convert_without_message()
-    .and_then(|value| {
-      value
-        .map(|m| m.timestamp)
-        .expect_not_null(format!("Failed to get commit for [{}]", &self.filepath))
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
     })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitLatestModifiedDateTask {
+  fn run(&mut self) -> Result<i64> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    get_file_modification(&repo, &self.filepath)
+      .convert_without_message()?
+      .map(|m| m.committer_time.timestamp_millis())
+      .ok_or_else(|| {
+        napi::Error::new(
+          GitErrorCode::GenericError,
+          format!("Failed to get commit for [{}]", self.filepath),
+        )
+      })
+  }
+}
+
+#[napi]
+impl Task for GitLatestModifiedDateTask {
+  type Output = i64;
+  type JsValue = i64;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitCreatedDateTask {
+  fn run(&mut self) -> Result<i64> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    get_file_created_date(&repo, &self.filepath)
+      .convert_without_message()?
+      .map(|d| d.timestamp_millis())
+      .ok_or_else(|| {
+        napi::Error::new(
+          GitErrorCode::GenericError,
+          format!("Failed to get created date for [{}]", self.filepath),
+        )
+      })
   }
 }
 
@@ -185,25 +381,30 @@ impl Task for GitCreatedDateTask {
   type JsValue = i64;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_created_date(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepath,
-    )
-    .convert_without_message()
-    .and_then(|value| {
-      value.expect_not_null(format!(
-        "Failed to get created date for [{}]",
-        &self.filepath
-      ))
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
     })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitModificationTask {
+  fn run(&mut self) -> Result<Option<FileModification>> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    get_file_modification(&repo, &self.filepath).convert_without_message()
   }
 }
 
@@ -213,41 +414,66 @@ impl Task for GitModificationTask {
   type JsValue = Option<FileModification>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_file_modification(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepath,
-    )
-    .convert_without_message()
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitBulkModificationTask {
+  fn run(&mut self) -> Result<HashMap<String, Option<FileModification>>> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    get_files_modification(&repo, &self.filepaths).convert_without_message()
   }
 }
 
 #[napi]
 impl Task for GitBulkModificationTask {
   type Output = HashMap<String, Option<FileModification>>;
-  type JsValue = HashMap<String, Option<FileModification>>;
+  // The map is built off-thread in `compute`; `resolve` wraps it in `FileModMap`
+  // so the JS result object is constructed with own-property define semantics
+  // (`__proto__`-safe), mirroring the sync `get_files_latest_modified` path.
+  type JsValue = FileModMap;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    get_files_modification(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepaths,
-    )
-    .convert_without_message()
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-    Ok(output)
+    Ok(FileModMap(output))
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitStatusTask {
+  fn run(&mut self) -> Result<Vec<FileStatus>> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    collect_statuses(&repo, self.options.clone())
   }
 }
 
@@ -257,18 +483,30 @@ impl Task for GitStatusTask {
   type JsValue = Vec<FileStatus>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    collect_statuses(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      self.options.clone(),
-    )
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitBlameTask {
+  fn run(&mut self) -> Result<Vec<BlameHunk>> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    collect_blame(&repo, &self.filepath, self.options.clone())
   }
 }
 
@@ -278,82 +516,276 @@ impl Task for GitBlameTask {
   type JsValue = Vec<BlameHunk>;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
-    collect_blame(
-      &self
-        .repo
-        .read()
-        .map_err(|err| napi::Error::new(Status::GenericFailure, format!("{err}")))?
-        .inner,
-      &self.filepath,
-      self.options.clone(),
-    )
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
   }
 
   fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
     Ok(output)
   }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitCommitTask {
+  fn run(&mut self) -> Result<String> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    let tree = repo
+      .find_tree(self.tree_oid)
+      .convert(format!("Find tree from OID [{}] failed", self.tree_oid))?;
+    let parent_commits = self
+      .parents
+      .iter()
+      .map(|oid| {
+        let oid = git2::Oid::from_str(oid).convert(format!("Invalid OID [{oid}]"))?;
+        repo
+          .find_commit(oid)
+          .convert(format!("Find commit from OID [{oid}] failed"))
+      })
+      .collect::<Result<Vec<git2::Commit>>>()?;
+    let parent_refs = parent_commits.iter().collect::<Vec<&git2::Commit>>();
+    repo
+      .commit(
+        self.update_ref.as_deref(),
+        &self.author,
+        &self.committer,
+        self.message.as_str(),
+        &tree,
+        &parent_refs,
+      )
+      .convert_without_message()
+      .map(|oid| oid.to_string())
+  }
+}
+
+#[napi]
+impl Task for GitCommitTask {
+  type Output = String;
+  type JsValue = String;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+impl GitCloneTask {
+  fn run(&mut self) -> Result<()> {
+    let inner = git2::Repository::clone(&self.url, &self.path).convert("Failed to clone repo")?;
+    self.result = Some(inner);
+    Ok(())
+  }
+}
+
+#[napi]
+impl Task for GitCloneTask {
+  type Output = ();
+  type JsValue = Repository;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
+
+  fn resolve(&mut self, env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
+    self
+      .result
+      .take()
+      .map(|inner| Repository {
+        inner: Some(inner),
+        open_flags: None,
+        alive: Arc::new(AtomicBool::new(true)),
+      })
+      .ok_or_else(|| {
+        coded_error(
+          env,
+          GitErrorCode::GenericError,
+          "Clone task produced no repository".to_string(),
+        )
+      })
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
 }
 
 #[napi]
 pub struct Repository {
-  pub(crate) inner: git2::Repository,
+  /// The underlying git2 handle. `Some` while the repository is live; set to
+  /// `None` by `dispose()`/`free()`, after which every guarded access via
+  /// `inner()` throws `"Repository has been disposed"`.
+  pub(crate) inner: Option<git2::Repository>,
+  /// The raw `RepositoryOpenFlags` bits this repo was opened with via
+  /// `openExt`, if any. `None` for every other constructor (`new`, `init`,
+  /// `discover`, `clone`, etc.) — meaning a worker reopening this repo's path
+  /// with plain `git2::Repository::open` is correct and equivalent. `Some`
+  /// only when `Bare`/`FromEnv`-style flags need to be replayed on a
+  /// worker-local reopen so async methods (`statusesAsync`/`blameFileAsync`/
+  /// etc.) behave like their sync counterparts — see `reopen_worker_repo`.
+  pub(crate) open_flags: Option<u32>,
+  /// Shared liveness flag. `true` while this repository is live; flipped to
+  /// `false` by `dispose()`/`free()`. Every derived handle (Remote, Tree,
+  /// Commit, …) holds a `clone` of this same `Arc`, so once the repository is
+  /// disposed each guarded derived-handle method observes the flip and throws
+  /// `"Repository has been disposed"` instead of dereferencing a freed git2
+  /// object (use-after-free). `AtomicBool` (not `Cell`) purely so the handles
+  /// can share it via `Arc`; it is only ever touched on the single JS thread —
+  /// see `ensure_alive` for the `Relaxed`-ordering rationale.
+  pub(crate) alive: Arc<AtomicBool>,
+}
+
+impl Repository {
+  /// Guarded access to the underlying git2 handle. Returns an error once the
+  /// repository has been disposed via `dispose()`/`free()`, routing every
+  /// internal access through a single disposed-state check. Reuses the shared
+  /// `disposed_error()` so this and every derived-handle guard throw an
+  /// IDENTICAL error.
+  pub(crate) fn inner(&self) -> Result<&git2::Repository> {
+    self.inner.as_ref().ok_or_else(disposed_error)
+  }
 }
 
 #[napi]
 impl Repository {
+  /// Eagerly release the underlying git2 repository handle
+  /// (`git_repository_free`), closing any open packfile file descriptors and
+  /// memory-mapped indexes without waiting for JavaScript garbage collection.
+  ///
+  /// This is idempotent: calling it more than once (or calling `free()`
+  /// afterwards) is a no-op.
+  ///
+  /// After disposal, every throwing method throws
+  /// `"Repository has been disposed"`; the `Option`-returning methods
+  /// (`workdir()`, `namespace()`, `findRemote()`, `findTree()`,
+  /// `findCommit()`, `findTag()`, `findTagByPrefix()`) return `null` instead.
+  /// Any handle previously derived from
+  /// this repository — `Remote`, `Reference`, `Tree`, `TreeEntry`, `Commit`,
+  /// `Tag`, `Branch`, `GitObject`, `Diff`, `RevWalk` and their descendants —
+  /// throws the same `"Repository has been disposed"` error on use, whether it
+  /// is the receiver or an argument passed to another method. This is
+  /// machine-enforced (mirroring better-sqlite3's `db.close()`), not merely a
+  /// documented contract.
+  ///
+  /// Disposal does NOT cancel `*Async` operations already in flight: a worker
+  /// scheduled before `dispose()` reopens the repository from its path on its
+  /// own thread and runs to completion (its promise still resolves and refs or
+  /// objects may change on disk), because it never touches this freed handle.
+  /// New `*Async` calls made after disposal throw synchronously. To cancel a
+  /// pending async operation, pass an `AbortSignal` to the `*Async` method
+  /// rather than relying on `dispose()`.
+  ///
+  /// `Symbol.dispose` cannot be generated by napi, so `using` support is
+  /// opt-in via a single line at startup:
+  ///
+  /// ```js
+  /// Repository.prototype[Symbol.dispose] ??= Repository.prototype.dispose
+  /// ```
+  #[napi]
+  pub fn dispose(&mut self) {
+    self.inner = None;
+    // Flip the shared flag so every derived handle's `ensure_alive` guard now
+    // throws instead of dereferencing the freed git2 object. `Relaxed` is
+    // sufficient — repo and handles share the single JS thread (see
+    // `ensure_alive`). Idempotent: a second `dispose()`/`free()` just re-stores
+    // `false`.
+    self.alive.store(false, Ordering::Relaxed);
+  }
+
+  /// Alias for `dispose()`. Eagerly releases the underlying git2 repository
+  /// handle; idempotent. See `dispose()` for the full disposal contract.
+  #[napi]
+  pub fn free(&mut self) {
+    self.dispose();
+  }
+
   #[napi(factory)]
   pub fn init(p: String) -> Result<Repository> {
     INIT_GIT_CONFIG
       .as_ref()
       .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
-      inner: git2::Repository::init(&p).map_err(|err| {
-        Error::new(
-          Status::GenericFailure,
-          format!("Failed to open git repo: [{p}], reason: {err}",),
-        )
-      })?,
+      inner: Some(git2::Repository::init(&p).convert("Failed to init git repo")?),
+      open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
   #[napi(factory)]
   /// Find and open an existing repository, with additional options.
   ///
-  /// If flags contains REPOSITORY_OPEN_NO_SEARCH, the path must point
-  /// directly to a repository; otherwise, this may point to a subdirectory
-  /// of a repository, and `open_ext` will search up through parent
-  /// directories.
+  /// `flags` is a raw bitset of `RepositoryOpenFlags` OR-ed together (e.g.
+  /// `RepositoryOpenFlags.NoSearch | RepositoryOpenFlags.CrossFS`). Unknown
+  /// bits are ignored.
   ///
-  /// If flags contains REPOSITORY_OPEN_CROSS_FS, the search through parent
-  /// directories will not cross a filesystem boundary (detected when the
-  /// stat st_dev field changes).
+  /// - `RepositoryOpenFlags.NoSearch`: only open the repository at `path`; do
+  ///   not walk upward through parent directories searching for one.
+  /// - `RepositoryOpenFlags.CrossFS`: when searching upward, allow crossing
+  ///   filesystem boundaries.
+  /// - `RepositoryOpenFlags.Bare`: force opening as a bare repository (ignore
+  ///   any working directory) and defer loading its config.
+  /// - `RepositoryOpenFlags.NoDotGit`: don't try appending `/.git` to `path`.
+  /// - `RepositoryOpenFlags.FromEnv`: resolve the repository from the same
+  ///   environment variables git honors (ignores the other flags and
+  ///   `ceilingDirs`).
   ///
-  /// If flags contains REPOSITORY_OPEN_BARE, force opening the repository as
-  /// bare even if it isn't, ignoring any working directory, and defer
-  /// loading the repository configuration for performance.
+  ///   Note: a `FromEnv` handle re-consults the environment when an `*Async`
+  ///   method reopens it on a worker thread. The git directory, working
+  ///   directory, and namespace are re-pinned to this handle's resolved
+  ///   values, but environment-derived index/object inputs (notably
+  ///   `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, and
+  ///   `GIT_ALTERNATE_OBJECT_DIRECTORIES`) are re-read from the *current*
+  ///   process environment at reopen time. Mutating those variables between a
+  ///   synchronous call and a later `*Async` call on the same handle can make
+  ///   the two observe different index/object state. For stable results, do
+  ///   not change those variables mid-flight, or open without `FromEnv`.
   ///
-  /// If flags contains REPOSITORY_OPEN_NO_DOTGIT, don't try appending
-  /// `/.git` to `path`.
-  ///
-  /// If flags contains REPOSITORY_OPEN_FROM_ENV, `open_ext` will ignore
-  /// other flags and `ceiling_dirs`, and respect the same environment
-  /// variables git does. Note, however, that `path` overrides `$GIT_DIR`; to
-  /// respect `$GIT_DIR` as well, use `open_from_env`.
-  ///
-  /// ceiling_dirs specifies a list of paths that the search through parent
-  /// directories will stop before entering.  Use the functions in std::env
-  /// to construct or manipulate such a path list.
-  pub fn open_ext(
-    path: String,
-    flags: RepositoryOpenFlags,
-    ceiling_dirs: Vec<String>,
-  ) -> Result<Repository> {
+  /// `ceilingDirs` is a list of absolute paths at which the upward search stops
+  /// (ignored when `RepositoryOpenFlags.FromEnv` is set).
+  pub fn open_ext(path: String, flags: u32, ceiling_dirs: Vec<String>) -> Result<Repository> {
     INIT_GIT_CONFIG
       .as_ref()
       .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
-      inner: git2::Repository::open_ext(path, flags.into(), ceiling_dirs)
+      inner: Some(
+        git2::Repository::open_ext(
+          path,
+          git2::RepositoryOpenFlags::from_bits_truncate(flags),
+          ceiling_dirs,
+        )
         .convert("Failed to open git repo")?,
+      ),
+      open_flags: Some(flags),
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -367,8 +799,12 @@ impl Repository {
       .as_ref()
       .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
-      inner: git2::Repository::discover(&path)
-        .convert(format!("Discover git repo from [{path}] failed"))?,
+      inner: Some(
+        git2::Repository::discover(&path)
+          .convert(format!("Discover git repo from [{path}] failed"))?,
+      ),
+      open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -378,7 +814,9 @@ impl Repository {
   /// The folder must exist prior to invoking this function.
   pub fn init_bare(path: String) -> Result<Self> {
     Ok(Self {
-      inner: git2::Repository::init_bare(path).convert("Failed to init bare repo")?,
+      inner: Some(git2::Repository::init_bare(path).convert("Failed to init bare repo")?),
+      open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -389,8 +827,34 @@ impl Repository {
   /// delegate to a fresh `RepoBuilder`
   pub fn clone(url: String, path: String) -> Result<Self> {
     Ok(Self {
-      inner: git2::Repository::clone(&url, path).convert("Failed to clone repo")?,
+      inner: Some(git2::Repository::clone(&url, path).convert("Failed to clone repo")?),
+      open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
+  }
+
+  #[napi]
+  /// Asynchronous variant of `clone`, performed off the main thread.
+  ///
+  /// The network/clone work runs on a worker thread and the resulting
+  /// `Repository` is constructed on the main thread once the clone completes.
+  ///
+  /// Safety: the resulting `Repository` only exists once the promise resolves; the
+  /// underlying git2 handle is not `Sync`, so use it only from the main thread.
+  pub fn clone_async(
+    url: String,
+    path: String,
+    signal: Option<AbortSignal>,
+  ) -> AsyncTask<GitCloneTask> {
+    AsyncTask::with_optional_signal(
+      GitCloneTask {
+        url,
+        path,
+        result: None,
+        code: GitErrorCode::GenericError,
+      },
+      signal,
+    )
   }
 
   #[napi(factory)]
@@ -400,8 +864,11 @@ impl Repository {
   /// This is similar to `git clone --recursive`.
   pub fn clone_recurse(url: String, path: String) -> Result<Self> {
     Ok(Self {
-      inner: git2::Repository::clone_recurse(&url, path)
-        .convert("Failed to clone repo recursively")?,
+      inner: Some(
+        git2::Repository::clone_recurse(&url, path).convert("Failed to clone repo recursively")?,
+      ),
+      open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
@@ -414,25 +881,29 @@ impl Repository {
       .as_ref()
       .map_err(|err| Error::new(err.status, err.reason.clone()))?;
     Ok(Self {
-      inner: git2::Repository::open(&git_dir).map_err(|err| {
-        Error::new(
-          Status::GenericFailure,
-          format!("Failed to open git repo: [{git_dir}], reason: {err}",),
-        )
-      })?,
+      inner: Some(git2::Repository::open(&git_dir).convert("Failed to open git repo")?),
+      open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 
   #[napi]
   /// Retrieve and resolve the reference pointed at by HEAD.
-  pub fn head(&self, self_ref: Reference<Repository>, env: Env) -> Result<reference::Reference> {
+  pub fn head(
+    &self,
+    self_ref: Reference<Repository>,
+    env: Env,
+  ) -> napi::Result<reference::Reference> {
     Ok(reference::Reference {
       inner: self_ref.share_with(env, |repo| {
         repo
-          .inner
+          .inner()
+          .code_into(env)?
           .head()
           .convert("Get the HEAD of Repository failed")
+          .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -443,7 +914,8 @@ impl Repository {
   /// repository will be returned, including global and system configurations.
   pub fn config(&self) -> Result<Config> {
     Ok(Config {
-      inner: self.inner.config().convert_without_message()?,
+      inner: self.inner()?.config().convert_without_message()?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -455,39 +927,39 @@ impl Repository {
   /// `user.name` or `user.email` are not set.
   pub fn signature(&self) -> Result<Signature> {
     Ok(Signature::from_git2(
-      self.inner.signature().convert_without_message()?,
+      self.inner()?.signature().convert_without_message()?,
     ))
   }
 
   #[napi]
   /// Tests whether this repository is a shallow clone.
   pub fn is_shallow(&self) -> Result<bool> {
-    Ok(self.inner.is_shallow())
+    Ok(self.inner()?.is_shallow())
   }
 
   #[napi]
   /// Tests whether this repository is empty.
   pub fn is_empty(&self) -> Result<bool> {
-    self.inner.is_empty().convert_without_message()
+    self.inner()?.is_empty().convert_without_message()
   }
 
   #[napi]
   /// Tests whether this repository is a worktree.
   pub fn is_worktree(&self) -> Result<bool> {
-    Ok(self.inner.is_worktree())
+    Ok(self.inner()?.is_worktree())
   }
 
   #[napi]
   /// Returns the path to the `.git` folder for normal repositories or the
   /// repository itself for bare repositories.
-  pub fn path<'env>(&'env self, env: &'env Env) -> Result<JsString<'env>> {
-    path_to_javascript_string(env, self.inner.path())
+  pub fn path<'env>(&'env self, env: &'env Env) -> napi::Result<JsString<'env>> {
+    path_to_javascript_string(env, self.inner().code_into(*env)?.path())
   }
 
   #[napi]
   /// Returns the current state of this repository
   pub fn state(&self) -> Result<RepositoryState> {
-    Ok(self.inner.state().into())
+    Ok(self.inner()?.state().into())
   }
 
   #[napi]
@@ -496,7 +968,8 @@ impl Repository {
   /// If this repository is bare, then `None` is returned.
   pub fn workdir<'env>(&'env self, env: &'env Env) -> Option<JsString<'env>> {
     self
-      .inner
+      .inner()
+      .ok()?
       .workdir()
       .and_then(move |path| path_to_javascript_string(env, path).ok())
   }
@@ -509,7 +982,7 @@ impl Repository {
   /// directory).
   pub fn set_workdir(&self, path: String, update_gitlink: bool) -> Result<()> {
     self
-      .inner
+      .inner()?
       .set_workdir(PathBuf::from(path).as_path(), update_gitlink)
       .convert_without_message()?;
     Ok(())
@@ -521,14 +994,20 @@ impl Repository {
   /// If there is no namespace, or the namespace is not a valid utf8 string,
   /// `None` is returned.
   pub fn namespace(&self) -> Option<String> {
-    self.inner.namespace().ok().flatten().map(|n| n.to_owned())
+    self
+      .inner()
+      .ok()?
+      .namespace()
+      .ok()
+      .flatten()
+      .map(|n| n.to_owned())
   }
 
   #[napi]
   /// Set the active namespace for this repository.
   pub fn set_namespace(&self, namespace: String) -> Result<()> {
     self
-      .inner
+      .inner()?
       .set_namespace(&namespace)
       .convert_without_message()?;
     Ok(())
@@ -537,25 +1016,25 @@ impl Repository {
   #[napi]
   /// Remove the active namespace for this repository.
   pub fn remove_namespace(&self) -> Result<()> {
-    self.inner.remove_namespace().convert_without_message()?;
+    self.inner()?.remove_namespace().convert_without_message()?;
     Ok(())
   }
 
   #[napi]
-  /// Retrieves the Git merge message.
+  /// Retrieves the Git merge message (the contents of `.git/MERGE_MSG`).
   /// Remember to remove the message when finished.
-  pub fn message(&self) -> Result<String> {
+  pub fn merge_message(&self) -> Result<String> {
     self
-      .inner
+      .inner()?
       .message()
       .convert("Failed to get Git merge message")
   }
 
   #[napi]
-  /// Remove the Git merge message.
-  pub fn remove_message(&self) -> Result<()> {
+  /// Remove the Git merge message (`.git/MERGE_MSG`).
+  pub fn remove_merge_message(&self) -> Result<()> {
     self
-      .inner
+      .inner()?
       .remove_message()
       .convert("Remove the Git merge message failed")
   }
@@ -564,7 +1043,7 @@ impl Repository {
   /// List all remotes for a given repository
   pub fn remotes(&self) -> Result<Vec<String>> {
     self
-      .inner
+      .inner()?
       .remotes()
       .map(|remotes| {
         remotes
@@ -583,15 +1062,22 @@ impl Repository {
     env: Env,
     name: String,
   ) -> Option<Remote> {
+    let repo_path = self.inner().ok()?.path().to_string_lossy().into_owned();
+    let open_flags = self.open_flags;
     Some(Remote {
       inner: self_ref
         .share_with(env, move |repo| {
           repo
-            .inner
+            .inner()
+            .code_into(env)?
             .find_remote(&name)
             .convert(format!("Failed to get remote [{}]", &name))
+            .code_into(env)
         })
         .ok()?,
+      repo_path,
+      open_flags,
+      alive: self.alive.clone(),
     })
   }
 
@@ -604,14 +1090,26 @@ impl Repository {
     this: Reference<Repository>,
     name: String,
     url: String,
-  ) -> Result<Remote> {
+  ) -> napi::Result<Remote> {
+    let repo_path = self
+      .inner()
+      .code_into(env)?
+      .path()
+      .to_string_lossy()
+      .into_owned();
+    let open_flags = self.open_flags;
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
-          .inner
+          .inner()
+          .code_into(env)?
           .remote(&name, &url)
           .convert(format!("Failed to add remote [{}]", &name))
+          .code_into(env)
       })?,
+      repo_path,
+      open_flags,
+      alive: self.alive.clone(),
     })
   }
 
@@ -624,15 +1122,27 @@ impl Repository {
     this: Reference<Repository>,
     name: String,
     url: String,
-    refspect: String,
-  ) -> Result<Remote> {
+    refspec: String,
+  ) -> napi::Result<Remote> {
+    let repo_path = self
+      .inner()
+      .code_into(env)?
+      .path()
+      .to_string_lossy()
+      .into_owned();
+    let open_flags = self.open_flags;
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
-          .inner
-          .remote_with_fetch(&name, &url, &refspect)
+          .inner()
+          .code_into(env)?
+          .remote_with_fetch(&name, &url, &refspec)
           .convert("Failed to add remote")
+          .code_into(env)
       })?,
+      repo_path,
+      open_flags,
+      alive: self.alive.clone(),
     })
   }
 
@@ -647,14 +1157,26 @@ impl Repository {
     env: Env,
     this: Reference<Repository>,
     url: String,
-  ) -> Result<Remote> {
+  ) -> napi::Result<Remote> {
+    let repo_path = self
+      .inner()
+      .code_into(env)?
+      .path()
+      .to_string_lossy()
+      .into_owned();
+    let open_flags = self.open_flags;
     Ok(Remote {
       inner: this.share_with(env, move |repo| {
         repo
-          .inner
+          .inner()
+          .code_into(env)?
           .remote_anonymous(&url)
           .convert("Failed to create anonymous remote")
+          .code_into(env)
       })?,
+      repo_path,
+      open_flags,
+      alive: self.alive.clone(),
     })
   }
 
@@ -675,7 +1197,7 @@ impl Repository {
   pub fn remote_rename(&self, name: String, new_name: String) -> Result<Vec<String>> {
     Ok(
       self
-        .inner
+        .inner()?
         .remote_rename(&name, &new_name)
         .convert(format!("Failed to rename remote [{}]", &name))?
         .into_iter()
@@ -689,20 +1211,29 @@ impl Repository {
   ///
   /// All remote-tracking branches and configuration settings for the remote
   /// will be removed.
-  pub fn remote_delete(&self, name: String) -> Result<&Self> {
-    self.inner.remote_delete(&name).convert_without_message()?;
+  pub fn remote_delete(&self, env: Env, name: String) -> napi::Result<&Self> {
+    self
+      .inner()
+      .code_into(env)?
+      .remote_delete(&name)
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
   #[napi]
   /// Add a fetch refspec to the remote's configuration
   ///
-  /// Add the given refspec to the fetch list in the configuration. No loaded
-  pub fn remote_add_fetch(&self, name: String, refspec: String) -> Result<&Self> {
+  /// Add the given refspec to the fetch list in the configuration for the
+  /// named remote, without loading it. No loaded remote instances will be
+  /// affected.
+  pub fn remote_add_fetch(&self, env: Env, name: String, refspec: String) -> napi::Result<&Self> {
     self
-      .inner
+      .inner()
+      .code_into(env)?
       .remote_add_fetch(&name, &refspec)
-      .convert_without_message()?;
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -711,24 +1242,28 @@ impl Repository {
   ///
   /// Add the given refspec to the push list in the configuration. No
   /// loaded remote instances will be affected.
-  pub fn remote_add_push(&self, name: String, refspec: String) -> Result<&Self> {
+  pub fn remote_add_push(&self, env: Env, name: String, refspec: String) -> napi::Result<&Self> {
     self
-      .inner
+      .inner()
+      .code_into(env)?
       .remote_add_push(&name, &refspec)
-      .convert_without_message()?;
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
   #[napi]
-  /// Add a push refspec to the remote's configuration.
+  /// Set the URL of a remote in the repository's configuration.
   ///
-  /// Add the given refspec to the push list in the configuration. No
-  /// loaded remote instances will be affected.
-  pub fn remote_set_url(&self, name: String, url: String) -> Result<&Self> {
+  /// Updates the configured fetch URL for the named remote. No loaded
+  /// remote instances will be affected.
+  pub fn remote_set_url(&self, env: Env, name: String, url: String) -> napi::Result<&Self> {
     self
-      .inner
+      .inner()
+      .code_into(env)?
       .remote_set_url(&name, &url)
-      .convert_without_message()?;
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -740,11 +1275,18 @@ impl Repository {
   /// error.
   ///
   /// `None` indicates that it should be cleared.
-  pub fn remote_set_pushurl(&self, name: String, url: Option<String>) -> Result<&Self> {
+  pub fn remote_set_push_url(
+    &self,
+    env: Env,
+    name: String,
+    url: Option<String>,
+  ) -> napi::Result<&Self> {
     self
-      .inner
+      .inner()
+      .code_into(env)?
       .remote_set_pushurl(&name, url.as_deref())
-      .convert_without_message()?;
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -756,12 +1298,19 @@ impl Repository {
         self_ref
           .share_with(env, |repo| {
             repo
-              .inner
-              .find_tree(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?)
+              .inner()
+              .code_into(env)?
+              .find_tree(
+                git2::Oid::from_str(oid.as_str())
+                  .convert(format!("Invalid OID [{oid}]"))
+                  .code_into(env)?,
+              )
               .convert(format!("Find tree from OID [{oid}] failed"))
+              .code_into(env)
           })
           .ok()?,
       ),
+      alive: self.alive.clone(),
     })
   }
 
@@ -775,13 +1324,16 @@ impl Repository {
     let commit = this_ref
       .share_with(env, |repo| {
         repo
-          .inner
+          .inner()
+          .code_into(env)?
           .find_commit_by_prefix(&oid)
           .convert(format!("Find commit from OID [{oid}] failed"))
+          .code_into(env)
       })
       .ok()?;
     Some(Commit {
       inner: CommitInner::Repository(commit),
+      alive: self.alive.clone(),
     })
   }
 
@@ -796,19 +1348,21 @@ impl Repository {
     this_ref: Reference<Repository>,
     env: Env,
     filter: Option<BranchType>,
-  ) -> Result<Vec<Branch>> {
+  ) -> napi::Result<Vec<Branch>> {
     // The `Branches<'repo>` iterator yields branches borrowing the repository,
     // which cannot escape into a `SharedReference`. Collect each branch's name
     // and type first, then rebuild owned `Branch`es by re-finding them.
     let mut specs: Vec<(String, git2::BranchType)> = Vec::new();
     {
       let branches = self
-        .inner
+        .inner()
+        .code_into(env)?
         .branches(filter.map(Into::into))
-        .convert("Failed to list branches")?;
+        .convert("Failed to list branches")
+        .code_into(env)?;
       for branch in branches {
-        let (branch, branch_type) = branch.convert_without_message()?;
-        if let Some(name) = branch.name().convert_without_message()? {
+        let (branch, branch_type) = branch.convert_without_message().code_into(env)?;
+        if let Some(name) = branch.name().convert_without_message().code_into(env)? {
           specs.push((name.to_owned(), branch_type));
         }
       }
@@ -817,11 +1371,16 @@ impl Repository {
     for (name, branch_type) in specs {
       let inner = this_ref.clone(env)?.share_with(env, move |repo| {
         repo
-          .inner
+          .inner()
+          .code_into(env)?
           .find_branch(&name, branch_type)
           .convert(format!("Find branch [{name}] failed"))
+          .code_into(env)
       })?;
-      result.push(Branch { inner });
+      result.push(Branch {
+        inner,
+        alive: self.alive.clone(),
+      });
     }
     Ok(result)
   }
@@ -836,23 +1395,30 @@ impl Repository {
     env: Env,
     name: String,
     branch_type: BranchType,
-  ) -> Result<Option<Branch>> {
+  ) -> napi::Result<Option<Branch>> {
     let branch_type: git2::BranchType = branch_type.into();
     // Probe first so a genuine "not found" maps to `None` while other errors
     // surface, and the `SharedReference` is only built when the branch exists.
-    if let Err(err) = self.inner.find_branch(&name, branch_type) {
+    if let Err(err) = self.inner().code_into(env)?.find_branch(&name, branch_type) {
       if err.code() == git2::ErrorCode::NotFound {
         return Ok(None);
       }
-      return Err(err).convert(format!("Find branch [{name}] failed"));
+      return Err(err)
+        .convert(format!("Find branch [{name}] failed"))
+        .code_into(env);
     }
     let inner = this_ref.share_with(env, move |repo| {
       repo
-        .inner
+        .inner()
+        .code_into(env)?
         .find_branch(&name, branch_type)
         .convert(format!("Find branch [{name}] failed"))
+        .code_into(env)
     })?;
-    Ok(Some(Branch { inner }))
+    Ok(Some(Branch {
+      inner,
+      alive: self.alive.clone(),
+    }))
   }
 
   #[napi]
@@ -868,20 +1434,30 @@ impl Repository {
     branch_name: String,
     target: &Commit,
     force: bool,
-  ) -> Result<Branch> {
+  ) -> napi::Result<Branch> {
+    // Guard the argument handle: passing a `Commit` from a disposed repository
+    // would otherwise deref freed git2 state (arg-side use-after-free).
+    ensure_alive(&target.alive).code_into(env)?;
     // Create the branch ref; the returned borrowed branch is dropped, then the
     // owned `Branch` is rebuilt by re-finding it inside `share_with`.
     self
-      .inner
+      .inner()
+      .code_into(env)?
       .branch(&branch_name, &target.inner, force)
-      .convert(format!("Failed to create branch [{branch_name}]"))?;
+      .convert(format!("Failed to create branch [{branch_name}]"))
+      .code_into(env)?;
     let inner = this_ref.share_with(env, move |repo| {
       repo
-        .inner
+        .inner()
+        .code_into(env)?
         .find_branch(&branch_name, git2::BranchType::Local)
         .convert(format!("Find branch [{branch_name}] failed"))
+        .code_into(env)
     })?;
-    Ok(Branch { inner })
+    Ok(Branch {
+      inner,
+      alive: self.alive.clone(),
+    })
   }
 
   #[napi]
@@ -892,9 +1468,10 @@ impl Repository {
   /// The checkout is **safe** by default — pass `options.force = true` to
   /// overwrite local modifications.
   pub fn checkout_tree(&self, treeish: &GitObject, options: Option<CheckoutOptions>) -> Result<()> {
+    ensure_alive(&treeish.alive)?;
     let mut builder = build_checkout_builder(options);
     self
-      .inner
+      .inner()?
       .checkout_tree(&treeish.inner, Some(&mut builder))
       .convert_without_message()
   }
@@ -908,7 +1485,7 @@ impl Repository {
   pub fn checkout_head(&self, options: Option<CheckoutOptions>) -> Result<()> {
     let mut builder = build_checkout_builder(options);
     self
-      .inner
+      .inner()?
       .checkout_head(Some(&mut builder))
       .convert_without_message()
   }
@@ -922,7 +1499,7 @@ impl Repository {
   pub fn checkout_index(&self, options: Option<CheckoutOptions>) -> Result<()> {
     let mut builder = build_checkout_builder(options);
     self
-      .inner
+      .inner()?
       .checkout_index(None, Some(&mut builder))
       .convert_without_message()
   }
@@ -934,7 +1511,7 @@ impl Repository {
   /// to that branch; otherwise it points to a not-yet-existing branch. This
   /// does not touch the working directory — checkout separately.
   pub fn set_head(&self, refname: String) -> Result<()> {
-    self.inner.set_head(&refname).convert_without_message()
+    self.inner()?.set_head(&refname).convert_without_message()
   }
 
   #[napi]
@@ -942,7 +1519,10 @@ impl Repository {
   /// from any branch.
   pub fn set_head_detached(&self, oid: String) -> Result<()> {
     let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
-    self.inner.set_head_detached(oid).convert_without_message()
+    self
+      .inner()?
+      .set_head_detached(oid)
+      .convert_without_message()
   }
 
   #[napi]
@@ -959,15 +1539,20 @@ impl Repository {
     oid: String,
     force: bool,
     log_message: String,
-  ) -> Result<reference::Reference> {
+  ) -> napi::Result<reference::Reference> {
     Ok(reference::Reference {
       inner: this_ref.share_with(env, move |repo| {
-        let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
+        let oid = git2::Oid::from_str(&oid)
+          .convert(format!("Invalid OID [{oid}]"))
+          .code_into(env)?;
         repo
-          .inner
+          .inner()
+          .code_into(env)?
           .reference(&name, oid, force, &log_message)
           .convert(format!("Failed to create reference [{name}]"))
+          .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -986,14 +1571,17 @@ impl Repository {
     target: String,
     force: bool,
     log_message: String,
-  ) -> Result<reference::Reference> {
+  ) -> napi::Result<reference::Reference> {
     Ok(reference::Reference {
       inner: this_ref.share_with(env, move |repo| {
         repo
-          .inner
+          .inner()
+          .code_into(env)?
           .reference_symbolic(&name, &target, force, &log_message)
           .convert(format!("Failed to create symbolic reference [{name}]"))
+          .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1017,8 +1605,10 @@ impl Repository {
     message: String,
     force: bool,
   ) -> Result<String> {
+    ensure_alive(&target.alive)?;
+    ensure_alive(&tagger.alive)?;
     self
-      .inner
+      .inner()?
       .tag(&name, &target.inner, &tagger.inner, &message, force)
       .map(|o| o.to_string())
       .convert("Failed to create tag")
@@ -1032,15 +1622,17 @@ impl Repository {
   /// The tag name will be checked for validity. You must avoid the characters
   /// '~', '^', ':', ' \ ', '?', '[', and '*', and the sequences ".." and " @
   /// {" which have special meaning to revparse.
-  pub fn tag_annotation_create(
+  pub fn tag_annotation(
     &self,
     name: String,
     target: &GitObject,
     tagger: &Signature,
     message: String,
   ) -> Result<String> {
+    ensure_alive(&target.alive)?;
+    ensure_alive(&tagger.alive)?;
     self
-      .inner
+      .inner()?
       .tag_annotation_create(&name, &target.inner, &tagger.inner, &message)
       .map(|o| o.to_string())
       .convert("Failed to create tag annotation")
@@ -1053,8 +1645,9 @@ impl Repository {
   /// If force is true and a reference already exists with the given name,
   /// it'll be replaced.
   pub fn tag_lightweight(&self, name: String, target: &GitObject, force: bool) -> Result<String> {
+    ensure_alive(&target.alive)?;
     self
-      .inner
+      .inner()?
       .tag_lightweight(&name, &target.inner, force)
       .map(|o| o.to_string())
       .convert("Failed to create lightweight tag")
@@ -1062,33 +1655,83 @@ impl Repository {
 
   #[napi]
   /// Lookup a tag object from the repository.
-  pub fn find_tag(&self, env: Env, this: Reference<Repository>, oid: String) -> Result<Tag> {
-    Ok(Tag {
-      inner: this.share_with(env, |repo| {
-        repo
-          .inner
-          .find_tag(git2::Oid::from_str(oid.as_str()).convert(format!("Invalid OID [{oid}]"))?)
-          .convert(format!("Find tag from OID [{oid}] failed"))
-      })?,
-    })
+  ///
+  /// Returns `null` when no tag object with that OID exists.
+  pub fn find_tag(
+    &self,
+    env: Env,
+    this: Reference<Repository>,
+    oid: String,
+  ) -> napi::Result<Option<Tag>> {
+    let oid = git2::Oid::from_str(oid.as_str())
+      .convert(format!("Invalid OID [{oid}]"))
+      .code_into(env)?;
+    // A disposed repository has no tags to resolve, so return `None`
+    // (consistent with findRemote/findTree/findCommit) rather than throwing.
+    let Some(repo) = self.inner.as_ref() else {
+      return Ok(None);
+    };
+    // Probe first so a genuine "not found" maps to `None` while other errors
+    // surface, and the `SharedReference` is only built when the tag exists.
+    if let Err(err) = repo.find_tag(oid) {
+      if err.code() == git2::ErrorCode::NotFound {
+        return Ok(None);
+      }
+      return Err(err)
+        .convert(format!("Find tag from OID [{oid}] failed"))
+        .code_into(env);
+    }
+    let inner = this.share_with(env, move |repo| {
+      repo
+        .inner()
+        .code_into(env)?
+        .find_tag(oid)
+        .convert(format!("Find tag from OID [{oid}] failed"))
+        .code_into(env)
+    })?;
+    Ok(Some(Tag {
+      inner,
+      alive: self.alive.clone(),
+    }))
   }
 
   #[napi]
   /// Lookup a tag object by prefix hash from the repository.
+  ///
+  /// Returns `null` when no tag object matches the prefix.
   pub fn find_tag_by_prefix(
     &self,
     env: Env,
     this: Reference<Repository>,
     prefix_hash: String,
-  ) -> Result<Tag> {
-    Ok(Tag {
-      inner: this.share_with(env, |repo| {
-        repo
-          .inner
-          .find_tag_by_prefix(&prefix_hash)
-          .convert(format!("Find tag from OID [{prefix_hash}] failed"))
-      })?,
-    })
+  ) -> napi::Result<Option<Tag>> {
+    // A disposed repository has no tags to resolve, so return `None`
+    // (consistent with findRemote/findTree/findCommit) rather than throwing.
+    let Some(repo) = self.inner.as_ref() else {
+      return Ok(None);
+    };
+    // Probe first so a genuine "not found" maps to `None` while other errors
+    // surface, and the `SharedReference` is only built when the tag exists.
+    if let Err(err) = repo.find_tag_by_prefix(&prefix_hash) {
+      if err.code() == git2::ErrorCode::NotFound {
+        return Ok(None);
+      }
+      return Err(err)
+        .convert(format!("Find tag from OID [{prefix_hash}] failed"))
+        .code_into(env);
+    }
+    let inner = this.share_with(env, move |repo| {
+      repo
+        .inner()
+        .code_into(env)?
+        .find_tag_by_prefix(&prefix_hash)
+        .convert(format!("Find tag from OID [{prefix_hash}] failed"))
+        .code_into(env)
+    })?;
+    Ok(Some(Tag {
+      inner,
+      alive: self.alive.clone(),
+    }))
   }
 
   #[napi]
@@ -1097,7 +1740,7 @@ impl Repository {
   /// The tag name will be checked for validity, see `tag` for some rules
   /// about valid names.
   pub fn tag_delete(&self, name: String) -> Result<()> {
-    self.inner.tag_delete(&name).convert_without_message()?;
+    self.inner()?.tag_delete(&name).convert_without_message()?;
     Ok(())
   }
 
@@ -1107,7 +1750,7 @@ impl Repository {
   /// An optional fnmatch pattern can also be specified.
   pub fn tag_names(&self, pattern: Option<String>) -> Result<Vec<String>> {
     self
-      .inner
+      .inner()?
       .tag_names(pattern.as_deref())
       .convert("Failed to get tag names")
       .map(|tags| {
@@ -1120,14 +1763,19 @@ impl Repository {
 
   #[napi]
   /// iterate over all tags calling `cb` on each.
-  /// the callback is provided the tag id and name
-  pub fn tag_foreach(&self, cb: Function<(String, Buffer), bool>) -> Result<()> {
+  ///
+  /// The callback receives a single `TagForeachItem` object carrying the tag's
+  /// OID (`id`, a 40-char hex string) and its raw reference name (`nameBytes`,
+  /// a `Buffer`). Return `true` to continue iteration, `false` to stop.
+  pub fn tag_foreach(&self, cb: Function<TagForeachItem, bool>) -> Result<()> {
     self
-      .inner
+      .inner()?
       .tag_foreach(|oid, name| {
-        let oid = oid.to_string();
-        let name = name.to_vec();
-        cb.call((oid, name.into())).unwrap_or(false)
+        cb.call(TagForeachItem {
+          id: oid.to_string(),
+          name_bytes: name.to_vec().into(),
+        })
+        .unwrap_or(false)
       })
       .convert_without_message()
   }
@@ -1156,15 +1804,22 @@ impl Repository {
     env: Env,
     self_reference: Reference<Repository>,
     old_tree: Option<&Tree>,
-  ) -> Result<Diff> {
-    let mut diff_options = git2::DiffOptions::default();
+    options: Option<DiffOptions>,
+  ) -> napi::Result<Diff> {
+    if let Some(t) = old_tree {
+      ensure_alive(&t.alive).code_into(env)?;
+    }
+    let mut diff_options = build_diff_options(options);
     Ok(Diff {
       inner: self_reference.share_with(env, |repo| {
         repo
-          .inner
+          .inner()
+          .code_into(env)?
           .diff_tree_to_workdir(old_tree.map(|t| t.inner()), Some(&mut diff_options))
           .convert_without_message()
+          .code_into(env)
       })?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1180,32 +1835,22 @@ impl Repository {
     env: Env,
     self_reference: Reference<Repository>,
     old_tree: Option<&Tree>,
-  ) -> Result<Diff> {
-    let mut diff_options = git2::DiffOptions::default();
+    options: Option<DiffOptions>,
+  ) -> napi::Result<Diff> {
+    if let Some(t) = old_tree {
+      ensure_alive(&t.alive).code_into(env)?;
+    }
+    let mut diff_options = build_diff_options(options);
     Ok(Diff {
       inner: self_reference.share_with(env, |repo| {
         repo
-          .inner
+          .inner()
+          .code_into(env)?
           .diff_tree_to_workdir_with_index(old_tree.map(|t| t.inner()), Some(&mut diff_options))
           .convert_without_message()
+          .code_into(env)
       })?,
-    })
-  }
-
-  #[napi]
-  pub fn tree_entry_to_object(
-    &self,
-    tree_entry: &TreeEntry,
-    this_ref: Reference<Repository>,
-    env: Env,
-  ) -> Result<GitObject> {
-    Ok(GitObject {
-      inner: ObjectParent::Repository(this_ref.share_with(env, |repo| {
-        tree_entry
-          .inner
-          .to_object(&repo.inner)
-          .convert_without_message()
-      })?),
+      alive: self.alive.clone(),
     })
   }
 
@@ -1232,20 +1877,26 @@ impl Repository {
     tree: &Tree,
     parents: Option<Vec<String>>,
   ) -> Result<String> {
+    // Guard the argument handles: signatures/tree from a disposed repository
+    // would otherwise deref freed git2 state (arg-side use-after-free).
+    // `parents` are OID hex strings (not derived handles), so they need no guard.
+    ensure_alive(&author.alive)?;
+    ensure_alive(&committer.alive)?;
+    ensure_alive(&tree.alive)?;
     let parent_commits = parents
       .unwrap_or_default()
       .into_iter()
       .map(|oid| {
         let oid = git2::Oid::from_str(&oid).convert(format!("Invalid OID [{oid}]"))?;
         self
-          .inner
+          .inner()?
           .find_commit(oid)
           .convert(format!("Find commit from OID [{oid}] failed"))
       })
       .collect::<Result<Vec<git2::Commit>>>()?;
     let parent_refs = parent_commits.iter().collect::<Vec<&git2::Commit>>();
     self
-      .inner
+      .inner()?
       .commit(
         update_ref.as_deref(),
         author.as_ref(),
@@ -1259,13 +1910,59 @@ impl Repository {
   }
 
   #[napi]
+  #[allow(clippy::too_many_arguments)]
+  /// Asynchronous variant of `commit`, performed off the main thread.
+  ///
+  /// Resolves with the new commit's OID hex string. Arguments mirror `commit`:
+  /// the `author`/`committer` signatures are copied and the `tree` is captured
+  /// by OID, so the work can be moved to a worker thread safely.
+  ///
+  /// Safety: do not use the same `Repository` from the main thread while this
+  /// async operation is pending; the underlying git2 handle is not `Sync`.
+  pub fn commit_async(
+    &self,
+    update_ref: Option<String>,
+    author: &Signature,
+    committer: &Signature,
+    message: String,
+    tree: &Tree,
+    parents: Option<Vec<String>>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitCommitTask>> {
+    let repo = self.inner()?;
+    // Guard the argument handles at this synchronous read point (they are read
+    // on the JS thread below, before the task is spawned). `parents` are OID
+    // hex strings (not derived handles), so they need no guard.
+    ensure_alive(&author.alive)?;
+    ensure_alive(&committer.alive)?;
+    ensure_alive(&tree.alive)?;
+    Ok(AsyncTask::with_optional_signal(
+      GitCommitTask {
+        path: repo.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
+        namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
+        update_ref,
+        author: author.as_ref().to_owned(),
+        committer: committer.as_ref().to_owned(),
+        message,
+        tree_oid: tree.as_ref().id(),
+        parents: parents.unwrap_or_default(),
+        code: GitErrorCode::GenericError,
+      },
+      signal,
+    ))
+  }
+
+  #[napi]
   /// Get the index (staging area) file for this repository.
   ///
   /// If a custom index has not been set, the default index for the repository
   /// will be returned (the one at `.git/index`).
   pub fn index(&self) -> Result<Index> {
     Ok(Index {
-      inner: self.inner.index().convert_without_message()?,
+      inner: self.inner()?.index().convert_without_message()?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1274,7 +1971,7 @@ impl Repository {
   /// OID hex string.
   pub fn blob(&self, data: Uint8Array) -> Result<String> {
     self
-      .inner
+      .inner()?
       .blob(&data)
       .map(|oid| oid.to_string())
       .convert_without_message()
@@ -1285,7 +1982,7 @@ impl Repository {
   /// database as a blob, returning its OID hex string.
   pub fn blob_path(&self, path: String) -> Result<String> {
     self
-      .inner
+      .inner()?
       .blob_path(Path::new(&path))
       .map(|oid| oid.to_string())
       .convert_without_message()
@@ -1293,83 +1990,164 @@ impl Repository {
 
   #[napi]
   /// Create a revwalk that can be used to traverse the commit graph.
-  pub fn rev_walk(&self, this_ref: Reference<Repository>, env: Env) -> Result<RevWalk> {
+  pub fn rev_walk(&self, this_ref: Reference<Repository>, env: Env) -> napi::Result<RevWalk> {
     Ok(RevWalk {
-      inner: this_ref.share_with(env, |repo| repo.inner.revwalk().convert_without_message())?,
+      inner: this_ref.share_with(env, |repo| {
+        repo
+          .inner()
+          .code_into(env)?
+          .revwalk()
+          .convert_without_message()
+          .code_into(env)
+      })?,
+      alive: self.alive.clone(),
     })
   }
 
   #[napi]
+  /// Last-modified commit time of `filepath` in **milliseconds since the Unix
+  /// epoch**. Throws when no commit in history touched the path. For a
+  /// `null`-on-missing `Date`, use `getFileLastModifiedDate`.
   pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<i64> {
-    get_file_modification(&self.inner, &filepath)
-      .convert_without_message()
-      .and_then(|value| {
-        value
-          .map(|m| m.timestamp)
-          .expect_not_null(format!("Failed to get commit for [{filepath}]"))
+    get_file_modification(self.inner()?, &filepath)
+      .convert_without_message()?
+      .map(|m| m.committer_time.timestamp_millis())
+      .ok_or_else(|| {
+        napi::Error::new(
+          GitErrorCode::GenericError,
+          format!("Failed to get commit for [{filepath}]"),
+        )
       })
   }
 
   #[napi]
+  /// Asynchronous variant of `getFileLatestModifiedDate`, computed off the main
+  /// thread. Rejects when no commit in history touched `filepath`.
   pub fn get_file_latest_modified_date_async(
     &self,
-    self_ref: Reference<Repository>,
     filepath: String,
     signal: Option<AbortSignal>,
-  ) -> Result<AsyncTask<GitDateTask>> {
+  ) -> Result<AsyncTask<GitLatestModifiedDateTask>> {
+    let repo = self.inner()?;
     Ok(AsyncTask::with_optional_signal(
-      GitDateTask {
-        repo: RwLock::new(self_ref),
+      GitLatestModifiedDateTask {
+        path: repo.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
+        namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepath,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
   }
 
   #[napi]
-  /// Last commit that modified `filepath`, with author/committer identity.
-  /// Returns `null` when no commit in history touched the path.
-  pub fn get_file_latest_modification(&self, filepath: String) -> Result<Option<FileModification>> {
-    get_file_modification(&self.inner, &filepath).convert_without_message()
+  /// Last-modified commit time of `filepath` as a `Date`, or `null` when no
+  /// commit in history touched the path (never throws for the missing case).
+  /// Equals `FileModification.committerTime` from `getFileLatestModified`. Only
+  /// real errors throw (unborn/empty HEAD, corrupt object, out-of-range
+  /// timestamp). For milliseconds-since-epoch, use `getFileLatestModifiedDate`.
+  pub fn get_file_last_modified_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
+    get_file_modification(self.inner()?, &filepath)
+      .convert_without_message()
+      .map(|value| value.map(|m| m.committer_time))
   }
 
   #[napi]
-  pub fn get_file_latest_modification_async(
+  /// Asynchronous variant of `getFileLastModifiedDate`, computed off the main
+  /// thread. Resolves to `null` when no commit in history touched `filepath`.
+  pub fn get_file_last_modified_date_async(
     &self,
-    self_ref: Reference<Repository>,
+    filepath: String,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitLastModifiedDateTask>> {
+    let repo = self.inner()?;
+    Ok(AsyncTask::with_optional_signal(
+      GitLastModifiedDateTask {
+        path: repo.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
+        namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
+        filepath,
+        code: GitErrorCode::GenericError,
+      },
+      signal,
+    ))
+  }
+
+  #[napi]
+  /// Last commit that modified `filepath` (author/committer identity, summary,
+  /// OID), or `null` when no commit in history touched the path.
+  ///
+  /// Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
+  /// diffing each non-merge commit against its parent under a libgit2 pathspec
+  /// (so `filepath` may be a directory or glob that matches a file); merge
+  /// commits are skipped. `committerTime` equals `getFileLastModifiedDate`.
+  /// Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
+  /// timestamp).
+  pub fn get_file_latest_modified(&self, filepath: String) -> Result<Option<FileModification>> {
+    get_file_modification(self.inner()?, &filepath).convert_without_message()
+  }
+
+  #[napi]
+  /// Asynchronous variant of `getFileLatestModified`, computed off the main
+  /// thread. Resolves to `null` when no commit in history touched `filepath`.
+  pub fn get_file_latest_modified_async(
+    &self,
     filepath: String,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitModificationTask>> {
+    let repo = self.inner()?;
     Ok(AsyncTask::with_optional_signal(
       GitModificationTask {
-        repo: RwLock::new(self_ref),
+        path: repo.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
+        namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepath,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
   }
 
-  #[napi]
+  #[napi(ts_return_type = "Record<string, FileModification | null>")]
   /// Resolve the last commit that modified each of `filepaths` in a single
-  /// history walk. Every input path is a key; never-committed paths map to `null`.
-  pub fn get_files_latest_modification(
-    &self,
-    filepaths: Vec<String>,
-  ) -> Result<HashMap<String, Option<FileModification>>> {
-    get_files_modification(&self.inner, &filepaths).convert_without_message()
+  /// history walk (early-exits once every path is resolved).
+  ///
+  /// Unlike the single-file methods, each input is matched by EXACT
+  /// repo-root-relative file-path string, NOT libgit2 pathspec/glob semantics:
+  /// inputs must be file paths (a directory or glob will not match). Every input
+  /// path is present as a key in the result; a never-committed path maps to
+  /// `null`. Merge commits are skipped; only real errors throw.
+  pub fn get_files_latest_modified(&self, filepaths: Vec<String>) -> Result<FileModMap> {
+    // Wrap in `FileModMap` so the result object is built with own-property
+    // define semantics (a path literally named `__proto__` becomes an own key,
+    // not a prototype mutation). The TS type stays `Record<..>` via the
+    // `ts_return_type` override above.
+    get_files_modification(self.inner()?, &filepaths)
+      .map(FileModMap)
+      .convert_without_message()
   }
 
-  #[napi]
-  pub fn get_files_latest_modification_async(
+  #[napi(ts_return_type = "Promise<Record<string, FileModification | null>>")]
+  /// Asynchronous variant of `getFilesLatestModified`, computed off the main
+  /// thread. Every input path is a key; never-committed paths map to `null`.
+  pub fn get_files_latest_modified_async(
     &self,
-    self_ref: Reference<Repository>,
     filepaths: Vec<String>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitBulkModificationTask>> {
+    let repo = self.inner()?;
     Ok(AsyncTask::with_optional_signal(
       GitBulkModificationTask {
-        repo: RwLock::new(self_ref),
+        path: repo.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
+        namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepaths,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -1382,7 +2160,7 @@ impl Repository {
   /// files are not; pass `options` to tune the scan. Each returned `FileStatus`
   /// decodes the `git2::Status` flags into booleans plus the raw `bits`.
   pub fn statuses(&self, options: Option<StatusOptions>) -> Result<Vec<FileStatus>> {
-    collect_statuses(&self.inner, options)
+    collect_statuses(self.inner()?, options)
   }
 
   #[napi]
@@ -1392,7 +2170,7 @@ impl Repository {
   /// of interest. Errors (e.g. an ambiguous path) surface as a napi error.
   pub fn status_file(&self, path: String) -> Result<FileStatus> {
     let status = self
-      .inner
+      .inner()?
       .status_file(Path::new(&path))
       .convert_without_message()?;
     Ok(status_from_bits(status, Some(path)))
@@ -1402,14 +2180,18 @@ impl Repository {
   /// Asynchronous variant of `statuses`, computed off the main thread.
   pub fn statuses_async(
     &self,
-    self_ref: Reference<Repository>,
     options: Option<StatusOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitStatusTask>> {
+    let repo = self.inner()?;
     Ok(AsyncTask::with_optional_signal(
       GitStatusTask {
-        repo: RwLock::new(self_ref),
+        path: repo.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
+        namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         options,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -1423,7 +2205,7 @@ impl Repository {
   /// range or enable copy tracking. Each `BlameHunk` is eagerly materialized
   /// so it outlives the underlying libgit2 blame.
   pub fn blame_file(&self, path: String, options: Option<BlameOptions>) -> Result<Vec<BlameHunk>> {
-    collect_blame(&self.inner, &path, options)
+    collect_blame(self.inner()?, &path, options)
   }
 
   #[napi]
@@ -1435,52 +2217,104 @@ impl Repository {
     line_no: u32,
     options: Option<BlameOptions>,
   ) -> Result<Option<BlameHunk>> {
-    blame_single_line(&self.inner, &path, line_no, options)
+    blame_single_line(self.inner()?, &path, line_no, options)
   }
 
   #[napi]
   /// Asynchronous variant of `blame_file`, computed off the main thread.
   pub fn blame_file_async(
     &self,
-    self_ref: Reference<Repository>,
     path: String,
     options: Option<BlameOptions>,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitBlameTask>> {
+    let repo = self.inner()?;
     Ok(AsyncTask::with_optional_signal(
       GitBlameTask {
-        repo: RwLock::new(self_ref),
+        path: repo.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
+        namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepath: path,
         options,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
   }
 
   #[napi]
+  /// Commit (committer) time in **milliseconds since the Unix epoch** of the
+  /// earliest commit whose tree contains `filepath`. Throws when no commit in
+  /// history contains the path.
+  ///
+  /// Walks all history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`)
+  /// and keeps the last-visited commit whose tree contains `filepath` (matched
+  /// by exact tree path, not pathspec) — i.e. the oldest containing commit;
+  /// merge commits are included in this walk. Rename detection is NOT performed
+  /// (no `git log --follow`), so history is not traced across renames. Also
+  /// throws on real errors (unborn/empty HEAD, corrupt object, out-of-range
+  /// timestamp).
   pub fn get_file_created_date(&self, filepath: String) -> Result<i64> {
-    get_file_created_date(&self.inner, &filepath)
-      .convert_without_message()
-      .and_then(|value| {
-        value.expect_not_null(format!("Failed to get created date for [{filepath}]"))
+    get_file_created_date(self.inner()?, &filepath)
+      .convert_without_message()?
+      .map(|d| d.timestamp_millis())
+      .ok_or_else(|| {
+        napi::Error::new(
+          GitErrorCode::GenericError,
+          format!("Failed to get created date for [{filepath}]"),
+        )
       })
   }
 
   #[napi]
+  /// Asynchronous variant of `getFileCreatedDate`, computed off the main thread.
+  /// Rejects when no commit in history contains `filepath`.
   pub fn get_file_created_date_async(
     &self,
-    self_ref: Reference<Repository>,
     filepath: String,
     signal: Option<AbortSignal>,
   ) -> Result<AsyncTask<GitCreatedDateTask>> {
+    let repo = self.inner()?;
     Ok(AsyncTask::with_optional_signal(
       GitCreatedDateTask {
-        repo: RwLock::new(self_ref),
+        path: repo.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
+        namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepath,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
   }
+}
+
+#[napi(object)]
+/// A single tag visited during `Repository.tagForeach`.
+pub struct TagForeachItem {
+  /// The tag's OID as a 40-char hex string.
+  pub id: String,
+  /// The tag's raw reference name (e.g. `refs/tags/v1.0.0`) as bytes, since it
+  /// is not guaranteed to be valid UTF-8.
+  pub name_bytes: Buffer,
+}
+
+/// Translate the JS-facing `DiffOptions` into a configured `git2::DiffOptions`.
+fn build_diff_options(options: Option<DiffOptions>) -> git2::DiffOptions {
+  let mut diff_options = git2::DiffOptions::default();
+  if let Some(options) = options
+    && options.show_unmodified.unwrap_or(false)
+  {
+    // libgit2's `SHOW_UNMODIFIED` only affects formatted output and only for
+    // unmodified entries that are already part of the diff; on its own it never
+    // adds them. To make unmodified files actually observable (e.g. via
+    // `Diff.deltas()`) we must also turn on `INCLUDE_UNMODIFIED`, which is what
+    // pulls those records into the diff in the first place.
+    diff_options.include_unmodified(true);
+    diff_options.show_unmodified(true);
+  }
+  diff_options
 }
 
 /// Run a status scan and eagerly materialize the borrowed `Statuses<'repo>`
@@ -1505,7 +2339,7 @@ fn collect_statuses(
 fn get_file_created_date(
   repo: &git2::Repository,
   filepath: &str,
-) -> std::result::Result<Option<i64>, git2::Error> {
+) -> std::result::Result<Option<DateTime<Utc>>, git2::Error> {
   // TODO: Add rename detection support using git2::DiffFindOptions for full `git log --follow` semantics
   let mut rev_walk = repo.revwalk()?;
   rev_walk.push_head()?;
@@ -1515,17 +2349,26 @@ fn get_file_created_date(
   rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
   let path = PathBuf::from(filepath);
 
-  let mut earliest_commit_time: Option<i64> = None;
+  let mut earliest_commit_time: Option<DateTime<Utc>> = None;
 
   // Traverse all commits to find the earliest one that contains the file
-  for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
-    if let Ok(commit) = repo.find_commit(oid)
-      && let Ok(tree) = commit.tree()
-    {
-      // Check if the file exists in this commit's tree
-      if tree.get_path(&path).is_ok() {
-        earliest_commit_time = Some(commit.time().seconds() * 1000);
+  for oid in rev_walk.by_ref() {
+    // Propagate revwalk iterator + object-read failures; only a genuine
+    // "file absent from this commit" (NotFound) is a non-error skip.
+    let oid = oid?;
+    let commit = repo.find_commit(oid)?;
+    let tree = commit.tree()?;
+    // Check if the file exists in this commit's tree.
+    match tree.get_path(&path) {
+      // Present: record its time. Newest-first order means the last write wins,
+      // i.e. the oldest containing commit (the creation commit).
+      Ok(_entry) => {
+        earliest_commit_time = Some(time_to_date(commit.time().seconds())?);
       }
+      // Absent from this commit's tree: not an error, keep walking.
+      Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+      // Any other lookup error is real and must propagate.
+      Err(e) => return Err(e),
     }
   }
 

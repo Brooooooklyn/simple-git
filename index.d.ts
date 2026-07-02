@@ -6,9 +6,9 @@ export declare class Blob {
   /** Determine if the blob content is most certainly binary or not. */
   isBinary(): boolean
   /** Get the content of this blob. */
-  content(): Uint8Array
+  content(): Buffer
   /** Get the size in bytes of the contents of this blob. */
-  size(): bigint
+  size(): number
 }
 
 /**
@@ -63,6 +63,8 @@ export declare class Commit {
   /** Get the tree pointed to by this commit. */
   tree(): Tree
   /**
+   * Get the full message of a commit.
+   *
    * The returned message will be slightly prettified by removing any
    * potential leading newlines.
    *
@@ -144,9 +146,8 @@ export declare class Commit {
   /**
    * Get the commit time (i.e. committer time) of a commit.
    *
-   * The first element of the tuple is the time, in seconds, since the epoch.
-   * The second element is the offset, in minutes, of the time zone of the
-   * committer's preferred time zone.
+   * Returns the committer time as a UTC `Date`; the committer's timezone
+   * offset is not preserved (the value is normalized to UTC).
    */
   time(): Date
   /** Get the author of this commit. */
@@ -170,7 +171,7 @@ export declare class Commit {
    *
    * Use the `parents` iterator to return an iterator over all parents.
    */
-  parentCount(): bigint
+  parentCount(): number
   /**
    * Get the specified parent of the commit.
    *
@@ -210,33 +211,51 @@ export declare class Config {
    * first) and the first occurrence is returned. Errors if the value is not
    * valid utf-8 or the key is missing.
    */
-  getStringValue(name: string): string
+  getString(name: string): string
   /** Get the value of a boolean config variable. */
-  getBool(name: string): boolean
-  /** Get the value of an i32 config variable. */
-  getI32(name: string): number
-  /** Get the value of an i64 config variable. */
-  getI64(name: string): number
+  getBoolean(name: string): boolean
+  /**
+   * Get the value of an integer config variable, as a JS `number`.
+   *
+   * Reads the value as a 64-bit integer. Errors with `InvalidArg` when it lies
+   * outside the JS safe-integer range (±(2^53 − 1)), where a `number` would lose
+   * precision — use `getBigInt` for those.
+   */
+  getNumber(name: string): number
+  /**
+   * Get the value of an i64 config variable, as a JS `bigint`.
+   *
+   * Returns a `bigint` rather than a `number` so values beyond
+   * `Number.MAX_SAFE_INTEGER` (2^53 - 1) survive without truncation.
+   */
+  getBigInt(name: string): bigint
   /**
    * Set the value of a string config variable in the config file with the
    * highest level (usually the local one).
    */
-  setStr(name: string, value: string): void
+  setString(name: string, value: string): void
   /**
    * Set the value of a boolean config variable in the config file with the
    * highest level (usually the local one).
    */
-  setBool(name: string, value: boolean): void
+  setBoolean(name: string, value: boolean): void
   /**
-   * Set the value of an i32 config variable in the config file with the
-   * highest level (usually the local one).
+   * Set the value of an integer config variable in the config file with the
+   * highest level (usually the local one). Takes a JS `number`.
+   *
+   * Errors with `InvalidArg` when `value` is not an integer or lies outside the
+   * JS safe-integer range (±(2^53 − 1)) — use `setBigInt` for larger magnitudes
+   * rather than silently truncating.
    */
-  setI32(name: string, value: number): void
+  setNumber(name: string, value: number): void
   /**
    * Set the value of an i64 config variable in the config file with the
-   * highest level (usually the local one).
+   * highest level (usually the local one). Takes a JS `bigint`.
+   *
+   * Errors with `InvalidArg` if the `bigint` does not fit losslessly in an
+   * i64 rather than silently truncating it.
    */
-  setI64(name: string, value: number): void
+  setBigInt(name: string, value: bigint): void
   /**
    * Delete a config variable from the config file with the highest level
    * (usually the local one).
@@ -286,8 +305,13 @@ export declare class Cred {
   static username(username: string): Cred
   /** Check whether a credential object contains username information. */
   hasUsername(): boolean
-  /** Return the type of credentials that this object represents. */
-  credtype(): CredentialType
+  /**
+   * Return the type of credentials that this object represents.
+   *
+   * The value is the raw `CredentialType` bitset (an OR-able `number`); test
+   * individual bits with `credTypeContains` and the `CredentialType` constants.
+   */
+  credType(): number
 }
 
 /**
@@ -326,9 +350,10 @@ export declare class DiffDelta {
   /**
    * Returns the flags on the delta.
    *
-   * For more information, see `DiffFlags`'s documentation.
+   * The value is the raw `git2::DiffFlags` bitset (an OR-able `number`); test
+   * individual bits with `diffFlagsContains` and the `DiffFlags` constants.
    */
-  flags(): DiffFlags
+  flags(): number
   /** Returns the number of files in this delta. */
   numFiles(): number
   /** Returns the status of this entry */
@@ -358,12 +383,14 @@ export declare class DiffFile {
    */
   id(): string
   /**
-   * Returns the path, in bytes, of the entry relative to the working
-   * directory of the repository.
+   * Returns the path of the entry relative to the working directory of the
+   * repository, as a lossily-decoded (UTF-8) string.
+   *
+   * Returns `null` when the path is absent or not representable.
    */
   path(): string | null
   /** Returns the size of this entry, in bytes */
-  size(): bigint
+  size(): number
   /** Returns `true` if file(s) are treated as binary data. */
   isBinary(): boolean
   /** Returns `true` if file(s) are treated as text data. */
@@ -376,6 +403,12 @@ export declare class DiffFile {
   mode(): FileMode
 }
 
+/**
+ * @remarks Single-use: consumed by the first `fetch()` or `fetchAsync()` call.
+ * Reusing the same instance throws (`InvalidArg`, "FetchOptions can only be used
+ * once") — synchronously at the call site even for `fetchAsync` (it does NOT
+ * reject the returned Promise). Construct a fresh instance per call.
+ */
 export declare class FetchOptions {
   constructor()
   /** Set the callbacks to use for the fetch operation. */
@@ -410,7 +443,11 @@ export declare class FetchOptions {
    * (`/info/refs`), but not subsequent requests.
    */
   followRedirects(opt: RemoteRedirect): this
-  /** Set extra headers for this fetch operation. */
+  /**
+   * Set extra headers for this fetch operation.
+   *
+   * Throws if any header contains an interior NUL byte.
+   */
   customHeaders(headers: Array<string>): this
 }
 
@@ -467,7 +504,7 @@ export declare class Index {
   /** Remove an index entry corresponding to a file on disk. */
   removePath(path: string): void
   /** Get the count of entries currently in the index. */
-  count(): number
+  size(): number
   /** Write the in-memory index back to disk using an atomic file lock. */
   write(): void
   /**
@@ -496,6 +533,12 @@ export declare class ProxyOptions {
   url(url: string): this
 }
 
+/**
+ * @remarks Single-use: consumed by the first `push()` or `pushAsync()` call.
+ * Reusing the same instance throws (`InvalidArg`, "PushOptions can only be used
+ * once") — synchronously at the call site even for `pushAsync` (it does NOT
+ * reject the returned Promise). Construct a fresh instance per call.
+ */
 export declare class PushOptions {
   constructor()
   /** Set the callbacks to use for the push operation. */
@@ -544,13 +587,13 @@ export declare class Reference {
    * ```ts
    * import { Reference } from '@napi-rs/simple-git'
    *
-   * console.assert(Reference.is_valid_name("HEAD"));
-   * console.assert(Reference.is_valid_name("refs/heads/main"));
+   * console.assert(Reference.isValidName("HEAD"));
+   * console.assert(Reference.isValidName("refs/heads/main"));
    *
    * // But:
-   * console.assert(!Reference.is_valid_name("main"));
-   * console.assert(!Reference.is_valid_name("refs/heads/*"));
-   * console.assert(!Reference.is_valid_name("foo//bar"));
+   * console.assert(!Reference.isValidName("main"));
+   * console.assert(!Reference.isValidName("refs/heads/*"));
+   * console.assert(!Reference.isValidName("foo//bar"));
    * ```
    */
   static isValidName(name: string): boolean
@@ -648,7 +691,7 @@ export declare class Remote {
    *
    * Returns `None` if the pushurl is not valid utf-8
    */
-  pushurl(): string | null
+  pushUrl(): string | null
   /**
    * Get the remote's default branch.
    *
@@ -686,10 +729,100 @@ export declare class Remote {
    * rejections, set a `pushUpdateReference` callback on the `RemoteCallbacks`.
    */
   push(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null): void
-  /** Update the tips to the new state */
-  updateTips(updateFetchhead: RemoteUpdateFlags, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
+  /**
+   * Asynchronous variant of `fetch`, performed off the main thread.
+   *
+   * `fetchOptions` may carry data-only settings (depth, prune, proxy url,
+   * headers, ...). It must NOT carry `RemoteCallbacks`: those hold JS-backed
+   * callbacks bound to the main JS thread and cannot be invoked safely from a
+   * worker thread. If callbacks are required, use the synchronous `fetch`.
+   *
+   * Resolves the remote by name against the repository's CURRENT on-disk
+   * configuration at the moment this async operation actually runs, not
+   * against a snapshot of the `Remote` object's state when it was loaded.
+   * If `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` mutate this remote's
+   * config after it was loaded but before this call completes, the
+   * mutation IS observed here — unlike the synchronous `fetch()`, which
+   * operates on the already-loaded snapshot and is documented as
+   * unaffected by later config changes. Use the synchronous `fetch()`
+   * when strict snapshot isolation from concurrent config changes matters.
+   *
+   * Safety: do not use the same `Remote` from the main thread while this async
+   * operation is pending; the underlying git2 handle is not `Sync`.
+   *
+   * Synchronous pre-throw: although the declared return is `Promise<void>`,
+   * argument/state validation runs synchronously on the calling thread and
+   * THROWS synchronously (the CALL throws — it does NOT return a rejected
+   * Promise) when `fetchOptions` has already been consumed by a prior async
+   * call or carries `RemoteCallbacks`. Wrap the CALL itself
+   * (`try { await remote.fetchAsync(...) }`), not just the awaited Promise.
+   */
+  fetchAsync(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<void>
+  /**
+   * Asynchronous variant of `push`, performed off the main thread.
+   *
+   * `pushOptions` may carry data-only settings (packbuilder parallelism,
+   * proxy url, headers, ...). It must NOT carry `RemoteCallbacks`: those hold
+   * JS-backed callbacks bound to the main JS thread and cannot be invoked
+   * safely from a worker thread. If callbacks (e.g. `pushUpdateReference`) are
+   * required, use the synchronous `push`.
+   *
+   * Resolves against a URL/refspec snapshot captured from this loaded
+   * `Remote` at call time (using the configured `pushurl` when set, else
+   * `url`), rather than re-resolving the remote by name against live
+   * on-disk config the way `fetchAsync` does. This asymmetry with
+   * `fetchAsync` is intentional and is not merely a config-drift
+   * optimization: libgit2's local transport ignores a configured `pushurl`
+   * for the actual push — it re-derives the destination directly from the
+   * remote's fetch `url` (see `transports/local.c`'s `local_push()`,
+   * `push->remote->url`), even though `pushurl` is correctly used during
+   * the connection handshake (`remote.c`'s `git_remote__urlfordirection`).
+   * Re-resolving by name here, like `fetchAsync` does, would silently push
+   * to the wrong destination for any local/file-path remote with a
+   * configured `pushurl`. Capturing the effective push URL up front and
+   * handing it to an anonymous remote sidesteps the bug, because that
+   * remote's SOLE url is already the pushurl-resolved value. Trade-off: a
+   * later `remoteSetUrl`/`remoteSetPushUrl`/`remoteAddPush` on the same name
+   * after this `Remote` was loaded is NOT observed by an already-scheduled
+   * `pushAsync`, matching the synchronous `push()` contract ("no loaded
+   * remote instances will be affected"). Also note: pushurl + refspecs are
+   * the config properties this snapshot captures, not the complete set that
+   * can diverge between named and anonymous remote resolution — libgit2's
+   * HTTP proxy auto-detection also consults `remote.<name>.proxy`, so
+   * `pushAsync(...)` combined with `PushOptions.proxyOptions(new
+   * ProxyOptions().auto())` will not pick up that per-remote proxy config
+   * the way the synchronous, named-remote `push()` does. This is a known,
+   * accepted gap (see the `remote_url` field doc on `RemotePushTask`), not
+   * chased further here.
+   *
+   * Safety: do not use the same `Remote` from the main thread while this async
+   * operation is pending; the underlying git2 handle is not `Sync`.
+   *
+   * Synchronous pre-throw: although the declared return is `Promise<void>`,
+   * argument/state validation runs synchronously on the calling thread and
+   * THROWS synchronously (the CALL throws — it does NOT return a rejected
+   * Promise) when `pushOptions` has already been consumed by a prior async
+   * call or carries `RemoteCallbacks`, or when this remote's push URL is
+   * unreadable/absent or its configured push refspecs cannot be read. Wrap the
+   * CALL itself (`try { await remote.pushAsync(...) }`), not just the awaited
+   * Promise.
+   */
+  pushAsync(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<void>
+  /**
+   * Update the tips to the new state
+   *
+   * `update_flags` is a raw bitset of `RemoteUpdateFlags` OR-ed together
+   * (e.g. `RemoteUpdateFlags.UpdateFetchHead`). Unknown bits are ignored.
+   */
+  updateTips(updateFlags: number, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
 }
 
+/**
+ * @remarks Single-use: attaching this to a `FetchOptions`/`PushOptions` via
+ * `remoteCallback()` consumes it; a second attach throws (`InvalidArg`,
+ * "RemoteCallbacks can only be used once"). Construct a fresh instance per
+ * attach. (`updateTips` does NOT consume it and may reuse the same instance.)
+ */
 export declare class RemoteCallbacks {
   constructor()
   /**
@@ -723,16 +856,21 @@ export declare class RemoteCallbacks {
   credentials(callback: (arg: CredInfo) => Cred): this
   /** The callback through which progress is monitored. */
   transferProgress(callback: (arg: Progress) => void): this
-  /** The callback through which progress of push transfer is monitored */
-  pushTransferProgress(callback: (current: number, total: number, bytes: number) => void): this
+  /**
+   * The callback through which progress of push transfer is monitored.
+   *
+   * The callback receives a single `PushTransferProgress` object describing how
+   * many objects have been processed and how many bytes have been sent.
+   */
+  pushTransferProgress(callback: (arg: PushTransferProgress) => void): this
   /**
    * Set a callback to get invoked for each updated reference on a push.
    *
-   * The callback is invoked once per reference with the reference name and a
-   * status message sent by the server. `status` is `null` when the reference
-   * was updated successfully; otherwise it is the server's rejection reason.
+   * The callback is invoked once per reference with a single
+   * `PushUpdateReference` object. `status` is `null` when the reference was
+   * updated successfully; otherwise it is the server's rejection reason.
    */
-  pushUpdateReference(callback: (refname: string, status: string | null) => void): this
+  pushUpdateReference(callback: (arg: PushUpdateReference) => void): this
 }
 
 export declare class RepoBuilder {
@@ -767,36 +905,81 @@ export declare class RepoBuilder {
 }
 
 export declare class Repository {
+  /**
+   * Eagerly release the underlying git2 repository handle
+   * (`git_repository_free`), closing any open packfile file descriptors and
+   * memory-mapped indexes without waiting for JavaScript garbage collection.
+   *
+   * This is idempotent: calling it more than once (or calling `free()`
+   * afterwards) is a no-op.
+   *
+   * After disposal, every throwing method throws
+   * `"Repository has been disposed"`; the `Option`-returning methods
+   * (`workdir()`, `namespace()`, `findRemote()`, `findTree()`,
+   * `findCommit()`, `findTag()`, `findTagByPrefix()`) return `null` instead.
+   * Any handle previously derived from
+   * this repository — `Remote`, `Reference`, `Tree`, `TreeEntry`, `Commit`,
+   * `Tag`, `Branch`, `GitObject`, `Diff`, `RevWalk` and their descendants —
+   * throws the same `"Repository has been disposed"` error on use, whether it
+   * is the receiver or an argument passed to another method. This is
+   * machine-enforced (mirroring better-sqlite3's `db.close()`), not merely a
+   * documented contract.
+   *
+   * Disposal does NOT cancel `*Async` operations already in flight: a worker
+   * scheduled before `dispose()` reopens the repository from its path on its
+   * own thread and runs to completion (its promise still resolves and refs or
+   * objects may change on disk), because it never touches this freed handle.
+   * New `*Async` calls made after disposal throw synchronously. To cancel a
+   * pending async operation, pass an `AbortSignal` to the `*Async` method
+   * rather than relying on `dispose()`.
+   *
+   * `Symbol.dispose` cannot be generated by napi, so `using` support is
+   * opt-in via a single line at startup:
+   *
+   * ```js
+   * Repository.prototype[Symbol.dispose] ??= Repository.prototype.dispose
+   * ```
+   */
+  dispose(): void
+  /**
+   * Alias for `dispose()`. Eagerly releases the underlying git2 repository
+   * handle; idempotent. See `dispose()` for the full disposal contract.
+   */
+  free(): void
   static init(p: string): Repository
   /**
    * Find and open an existing repository, with additional options.
    *
-   * If flags contains REPOSITORY_OPEN_NO_SEARCH, the path must point
-   * directly to a repository; otherwise, this may point to a subdirectory
-   * of a repository, and `open_ext` will search up through parent
-   * directories.
+   * `flags` is a raw bitset of `RepositoryOpenFlags` OR-ed together (e.g.
+   * `RepositoryOpenFlags.NoSearch | RepositoryOpenFlags.CrossFS`). Unknown
+   * bits are ignored.
    *
-   * If flags contains REPOSITORY_OPEN_CROSS_FS, the search through parent
-   * directories will not cross a filesystem boundary (detected when the
-   * stat st_dev field changes).
+   * - `RepositoryOpenFlags.NoSearch`: only open the repository at `path`; do
+   *   not walk upward through parent directories searching for one.
+   * - `RepositoryOpenFlags.CrossFS`: when searching upward, allow crossing
+   *   filesystem boundaries.
+   * - `RepositoryOpenFlags.Bare`: force opening as a bare repository (ignore
+   *   any working directory) and defer loading its config.
+   * - `RepositoryOpenFlags.NoDotGit`: don't try appending `/.git` to `path`.
+   * - `RepositoryOpenFlags.FromEnv`: resolve the repository from the same
+   *   environment variables git honors (ignores the other flags and
+   *   `ceilingDirs`).
    *
-   * If flags contains REPOSITORY_OPEN_BARE, force opening the repository as
-   * bare even if it isn't, ignoring any working directory, and defer
-   * loading the repository configuration for performance.
+   *   Note: a `FromEnv` handle re-consults the environment when an `*Async`
+   *   method reopens it on a worker thread. The git directory, working
+   *   directory, and namespace are re-pinned to this handle's resolved
+   *   values, but environment-derived index/object inputs (notably
+   *   `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, and
+   *   `GIT_ALTERNATE_OBJECT_DIRECTORIES`) are re-read from the *current*
+   *   process environment at reopen time. Mutating those variables between a
+   *   synchronous call and a later `*Async` call on the same handle can make
+   *   the two observe different index/object state. For stable results, do
+   *   not change those variables mid-flight, or open without `FromEnv`.
    *
-   * If flags contains REPOSITORY_OPEN_NO_DOTGIT, don't try appending
-   * `/.git` to `path`.
-   *
-   * If flags contains REPOSITORY_OPEN_FROM_ENV, `open_ext` will ignore
-   * other flags and `ceiling_dirs`, and respect the same environment
-   * variables git does. Note, however, that `path` overrides `$GIT_DIR`; to
-   * respect `$GIT_DIR` as well, use `open_from_env`.
-   *
-   * ceiling_dirs specifies a list of paths that the search through parent
-   * directories will stop before entering.  Use the functions in std::env
-   * to construct or manipulate such a path list.
+   * `ceilingDirs` is a list of absolute paths at which the upward search stops
+   * (ignored when `RepositoryOpenFlags.FromEnv` is set).
    */
-  static openExt(path: string, flags: RepositoryOpenFlags, ceilingDirs: Array<string>): Repository
+  static openExt(path: string, flags: number, ceilingDirs: Array<string>): Repository
   /**
    * Attempt to open an already-existing repository at or above `path`
    *
@@ -817,6 +1000,16 @@ export declare class Repository {
    * delegate to a fresh `RepoBuilder`
    */
   static clone(url: string, path: string): Repository
+  /**
+   * Asynchronous variant of `clone`, performed off the main thread.
+   *
+   * The network/clone work runs on a worker thread and the resulting
+   * `Repository` is constructed on the main thread once the clone completes.
+   *
+   * Safety: the resulting `Repository` only exists once the promise resolves; the
+   * underlying git2 handle is not `Sync`, so use it only from the main thread.
+   */
+  static cloneAsync(url: string, path: string, signal?: AbortSignal | undefined | null): Promise<Repository>
   /**
    * Clone a remote repository, initialize and update its submodules
    * recursively.
@@ -886,12 +1079,12 @@ export declare class Repository {
   /** Remove the active namespace for this repository. */
   removeNamespace(): void
   /**
-   * Retrieves the Git merge message.
+   * Retrieves the Git merge message (the contents of `.git/MERGE_MSG`).
    * Remember to remove the message when finished.
    */
-  message(): string
-  /** Remove the Git merge message. */
-  removeMessage(): void
+  mergeMessage(): string
+  /** Remove the Git merge message (`.git/MERGE_MSG`). */
+  removeMergeMessage(): void
   /** List all remotes for a given repository */
   remotes(): Array<string>
   /** Get the information for a particular remote */
@@ -905,7 +1098,7 @@ export declare class Repository {
    * Add a remote with the provided fetch refspec to the repository's
    * configuration.
    */
-  remoteWithFetch(name: string, url: string, refspect: string): Remote
+  remoteWithFetch(name: string, url: string, refspec: string): Remote
   /**
    * Create an anonymous remote
    *
@@ -940,7 +1133,9 @@ export declare class Repository {
   /**
    * Add a fetch refspec to the remote's configuration
    *
-   * Add the given refspec to the fetch list in the configuration. No loaded
+   * Add the given refspec to the fetch list in the configuration for the
+   * named remote, without loading it. No loaded remote instances will be
+   * affected.
    */
   remoteAddFetch(name: string, refspec: string): this
   /**
@@ -951,10 +1146,10 @@ export declare class Repository {
    */
   remoteAddPush(name: string, refspec: string): this
   /**
-   * Add a push refspec to the remote's configuration.
+   * Set the URL of a remote in the repository's configuration.
    *
-   * Add the given refspec to the push list in the configuration. No
-   * loaded remote instances will be affected.
+   * Updates the configured fetch URL for the named remote. No loaded
+   * remote instances will be affected.
    */
   remoteSetUrl(name: string, url: string): this
   /**
@@ -966,7 +1161,7 @@ export declare class Repository {
    *
    * `None` indicates that it should be cleared.
    */
-  remoteSetPushurl(name: string, url?: string | undefined | null): this
+  remoteSetPushUrl(name: string, url?: string | undefined | null): this
   /** Lookup a reference to one of the objects in a repository. */
   findTree(oid: string): Tree | null
   findCommit(oid: string): Commit | null
@@ -1070,7 +1265,7 @@ export declare class Repository {
    * '~', '^', ':', ' \ ', '?', '[', and '*', and the sequences ".." and " @
    * {" which have special meaning to revparse.
    */
-  tagAnnotationCreate(name: string, target: GitObject, tagger: Signature, message: string): string
+  tagAnnotation(name: string, target: GitObject, tagger: Signature, message: string): string
   /**
    * Create a new lightweight tag pointing at a target object
    *
@@ -1079,10 +1274,18 @@ export declare class Repository {
    * it'll be replaced.
    */
   tagLightweight(name: string, target: GitObject, force: boolean): string
-  /** Lookup a tag object from the repository. */
-  findTag(oid: string): Tag
-  /** Lookup a tag object by prefix hash from the repository. */
-  findTagByPrefix(prefixHash: string): Tag
+  /**
+   * Lookup a tag object from the repository.
+   *
+   * Returns `null` when no tag object with that OID exists.
+   */
+  findTag(oid: string): Tag | null
+  /**
+   * Lookup a tag object by prefix hash from the repository.
+   *
+   * Returns `null` when no tag object matches the prefix.
+   */
+  findTagByPrefix(prefixHash: string): Tag | null
   /**
    * Delete an existing tag reference.
    *
@@ -1098,9 +1301,12 @@ export declare class Repository {
   tagNames(pattern?: string | undefined | null): Array<string>
   /**
    * iterate over all tags calling `cb` on each.
-   * the callback is provided the tag id and name
+   *
+   * The callback receives a single `TagForeachItem` object carrying the tag's
+   * OID (`id`, a 40-char hex string) and its raw reference name (`nameBytes`,
+   * a `Buffer`). Return `true` to continue iteration, `false` to stop.
    */
-  tagForeach(cb: (arg: [string, Buffer]) => boolean): void
+  tagForeach(cb: (arg: TagForeachItem) => boolean): void
   /**
    * Create a diff between a tree and the working directory.
    *
@@ -1121,7 +1327,7 @@ export declare class Repository {
    *
    * If `None` is passed for `tree`, then an empty tree is used.
    */
-  diffTreeToWorkdir(oldTree?: Tree | undefined | null): Diff
+  diffTreeToWorkdir(oldTree?: Tree | undefined | null, options?: DiffOptions | undefined | null): Diff
   /**
    * Create a diff between a tree and the working directory using index data
    * to account for staged deletes, tracked files, etc.
@@ -1130,8 +1336,7 @@ export declare class Repository {
    * the index to the working directory and blending the results into a
    * single diff that includes staged deleted, etc.
    */
-  diffTreeToWorkdirWithIndex(oldTree?: Tree | undefined | null): Diff
-  treeEntryToObject(treeEntry: TreeEntry): GitObject
+  diffTreeToWorkdirWithIndex(oldTree?: Tree | undefined | null, options?: DiffOptions | undefined | null): Diff
   /**
    * Create new commit in the repository
    *
@@ -1148,6 +1353,17 @@ export declare class Repository {
    * be the current tip of `update_ref`).
    */
   commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null): string
+  /**
+   * Asynchronous variant of `commit`, performed off the main thread.
+   *
+   * Resolves with the new commit's OID hex string. Arguments mirror `commit`:
+   * the `author`/`committer` signatures are copied and the `tree` is captured
+   * by OID, so the work can be moved to a worker thread safely.
+   *
+   * Safety: do not use the same `Repository` from the main thread while this
+   * async operation is pending; the underlying git2 handle is not `Sync`.
+   */
+  commitAsync(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null, signal?: AbortSignal | undefined | null): Promise<string>
   /**
    * Get the index (staging area) file for this repository.
    *
@@ -1167,20 +1383,63 @@ export declare class Repository {
   blobPath(path: string): string
   /** Create a revwalk that can be used to traverse the commit graph. */
   revWalk(): RevWalk
+  /**
+   * Last-modified commit time of `filepath` in **milliseconds since the Unix
+   * epoch**. Throws when no commit in history touched the path. For a
+   * `null`-on-missing `Date`, use `getFileLastModifiedDate`.
+   */
   getFileLatestModifiedDate(filepath: string): number
+  /**
+   * Asynchronous variant of `getFileLatestModifiedDate`, computed off the main
+   * thread. Rejects when no commit in history touched `filepath`.
+   */
   getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
   /**
-   * Last commit that modified `filepath`, with author/committer identity.
-   * Returns `null` when no commit in history touched the path.
+   * Last-modified commit time of `filepath` as a `Date`, or `null` when no
+   * commit in history touched the path (never throws for the missing case).
+   * Equals `FileModification.committerTime` from `getFileLatestModified`. Only
+   * real errors throw (unborn/empty HEAD, corrupt object, out-of-range
+   * timestamp). For milliseconds-since-epoch, use `getFileLatestModifiedDate`.
    */
-  getFileLatestModification(filepath: string): FileModification | null
-  getFileLatestModificationAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
+  getFileLastModifiedDate(filepath: string): Date | null
+  /**
+   * Asynchronous variant of `getFileLastModifiedDate`, computed off the main
+   * thread. Resolves to `null` when no commit in history touched `filepath`.
+   */
+  getFileLastModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
+  /**
+   * Last commit that modified `filepath` (author/committer identity, summary,
+   * OID), or `null` when no commit in history touched the path.
+   *
+   * Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
+   * diffing each non-merge commit against its parent under a libgit2 pathspec
+   * (so `filepath` may be a directory or glob that matches a file); merge
+   * commits are skipped. `committerTime` equals `getFileLastModifiedDate`.
+   * Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
+   * timestamp).
+   */
+  getFileLatestModified(filepath: string): FileModification | null
+  /**
+   * Asynchronous variant of `getFileLatestModified`, computed off the main
+   * thread. Resolves to `null` when no commit in history touched `filepath`.
+   */
+  getFileLatestModifiedAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
   /**
    * Resolve the last commit that modified each of `filepaths` in a single
-   * history walk. Every input path is a key; never-committed paths map to `null`.
+   * history walk (early-exits once every path is resolved).
+   *
+   * Unlike the single-file methods, each input is matched by EXACT
+   * repo-root-relative file-path string, NOT libgit2 pathspec/glob semantics:
+   * inputs must be file paths (a directory or glob will not match). Every input
+   * path is present as a key in the result; a never-committed path maps to
+   * `null`. Merge commits are skipped; only real errors throw.
    */
-  getFilesLatestModification(filepaths: Array<string>): Record<string, FileModification | undefined | null>
-  getFilesLatestModificationAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
+  getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | null>
+  /**
+   * Asynchronous variant of `getFilesLatestModified`, computed off the main
+   * thread. Every input path is a key; never-committed paths map to `null`.
+   */
+  getFilesLatestModifiedAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | null>>
   /**
    * List the working-tree and index status of files in the repository.
    *
@@ -1214,7 +1473,24 @@ export declare class Repository {
   blameLine(path: string, lineNo: number, options?: BlameOptions | undefined | null): BlameHunk | null
   /** Asynchronous variant of `blame_file`, computed off the main thread. */
   blameFileAsync(path: string, options?: BlameOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<BlameHunk>>
+  /**
+   * Commit (committer) time in **milliseconds since the Unix epoch** of the
+   * earliest commit whose tree contains `filepath`. Throws when no commit in
+   * history contains the path.
+   *
+   * Walks all history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`)
+   * and keeps the last-visited commit whose tree contains `filepath` (matched
+   * by exact tree path, not pathspec) — i.e. the oldest containing commit;
+   * merge commits are included in this walk. Rename detection is NOT performed
+   * (no `git log --follow`), so history is not traced across renames. Also
+   * throws on real errors (unborn/empty HEAD, corrupt object, out-of-range
+   * timestamp).
+   */
   getFileCreatedDate(filepath: string): number
+  /**
+   * Asynchronous variant of `getFileCreatedDate`, computed off the main thread.
+   * Rejects when no commit in history contains `filepath`.
+   */
   getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }
 
@@ -1233,8 +1509,13 @@ export declare class RevWalk extends Iterator<string, void, void> {
    * completes.
    */
   reset(): this
-  /** Set the sorting mode for a revwalk. */
-  setSorting(sorting: Sort): this
+  /**
+   * Set the sorting mode for a revwalk.
+   *
+   * `sorting` is a raw bitset of `Sort` flags OR-ed together (e.g.
+   * `Sort.Time | Sort.Reverse`). Unknown bits are ignored.
+   */
+  setSorting(sorting: number): this
   /**
    * Simplify the history by first-parent
    *
@@ -1335,12 +1616,12 @@ export declare class Signature {
   /**
    * Create a new action signature.
    *
-   * The `time` specified is in seconds since the epoch, and the `offset` is
-   * the time zone offset in minutes.
+   * The `time` is a JS `Date`; it is recorded at whole-second resolution with a
+   * zero time-zone offset (UTC).
    *
    * Returns error if either `name` or `email` contain angle brackets.
    */
-  constructor(name: string, email: string, time: number)
+  constructor(name: string, email: string, time: Date)
   /**
    * Gets the name on the signature.
    *
@@ -1353,8 +1634,8 @@ export declare class Signature {
    * Returns `None` if the email is not valid utf-8
    */
   email(): string | null
-  /** Return the time, in seconds, from epoch */
-  when(): number
+  /** Return the time the signature was recorded, as a `Date`. */
+  when(): Date
 }
 
 export declare class Tag {
@@ -1394,18 +1675,31 @@ export declare class Tree {
   /** Get the id (SHA1) of a repository object */
   id(): string
   /** Get the number of entries listed in a tree. */
-  len(): bigint
+  size(): number
   /** Return `true` if there is not entry */
   isEmpty(): boolean
   /** Returns an iterator over the entries in this tree. */
-  iter(): TreeIter
+  entries(): TreeIter
   /** Lookup a tree entry by SHA value */
   getId(id: string): TreeEntry | null
   /** Lookup a tree entry by its position in the tree */
   get(index: number): TreeEntry | null
-  /** Lookup a tree entry by its filename */
+  /**
+   * Lookup a direct child entry of this tree by its name.
+   *
+   * `name` is a single path component (a filename), not a multi-component
+   * path; this does not descend into subtrees. To follow a relative path
+   * through nested subtrees, use `getPath`.
+   */
   getName(name: string): TreeEntry | null
-  /** Lookup a tree entry by its filename */
+  /**
+   * Lookup a tree entry by a relative path, descending through subtrees.
+   *
+   * `name` is a path relative to this tree and may contain multiple
+   * components (e.g. `src/lib.rs`); each component is resolved in turn,
+   * walking into nested subtrees. To look up a direct child by its name,
+   * use `getName`.
+   */
   getPath(name: string): TreeEntry | null
 }
 
@@ -1415,7 +1709,7 @@ export declare class TreeEntry {
   /** Get the name of a tree entry */
   name(): string
   /** Get the filename of a tree entry */
-  nameBytes(): Uint8Array
+  nameBytes(): Buffer
   /** Convert a tree entry to the object it points to. */
   toObject(repo: Repository): GitObject
 }
@@ -1461,8 +1755,8 @@ export interface BlameHunk {
   finalAuthorName?: string
   /** Author email of the final commit. Undefined if absent or not valid UTF-8. */
   finalAuthorEmail?: string
-  /** Author time of the final commit, ms since epoch. `0` if no signature. */
-  finalTime: number
+  /** Author time of the final commit, as a `Date`. The Unix epoch if no signature. */
+  finalTime: Date
   /** 40-char lowercase hex OID of the commit where this hunk was found. */
   origCommitId: string
   /** Line number where this hunk begins in the original file (1-based). */
@@ -1480,9 +1774,21 @@ export interface BlameHunk {
  * (no copy tracking, the whole file, starting from the current HEAD).
  */
 export interface BlameOptions {
-  /** Track lines that have moved within a file. Defaults to `false`. */
+  /**
+   * Track lines that have moved within a file. Defaults to `false`.
+   *
+   * Note: libgit2 1.9.4 does not implement blame copy/move tracking, so
+   * setting this flag has no effect today (accepted for forward-compat;
+   * effectively a no-op).
+   */
   trackCopiesSameFile?: boolean
-  /** Track lines that have moved across files in the same commit. Defaults to `false`. */
+  /**
+   * Track lines that have moved across files in the same commit. Defaults to `false`.
+   *
+   * Note: libgit2 1.9.4 does not implement blame copy/move tracking, so
+   * setting this flag has no effect today (accepted for forward-compat;
+   * effectively a no-op).
+   */
   trackCopiesSameCommitMoves?: boolean
   /** 40-char hex OID of the newest commit to consider (the blame starts here). */
   newestCommit?: string
@@ -1609,13 +1915,24 @@ export declare const enum CredentialType {
 }
 
 export interface CredInfo {
-  credType: CredentialType
+  /**
+   * Raw `CredentialType` bitset of the credential types the server will
+   * accept. OR-able; test bits with `credTypeContains`.
+   */
+  credType: number
   url: string
   username: string
 }
 
-/** Check whether a cred_type contains another credential type. */
-export declare function credTypeContains(credType: CredentialType, another: CredentialType): boolean
+/**
+ * Check whether a raw credential-type bitset contains a given `CredentialType`
+ * bit.
+ *
+ * `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credType()`);
+ * `flag` is one of the `CredentialType` constants. Returns
+ * `(cred_type & flag) === flag`.
+ */
+export declare function credTypeContains(credType: number, flag: CredentialType): boolean
 
 export declare const enum Delta {
   /** No changes */
@@ -1665,12 +1982,21 @@ export declare const enum DiffFlags {
   Exists = 8
 }
 
+/**
+ * Check whether a raw diff-flags bitset contains a given `DiffFlags` bit.
+ *
+ * `flags` is the raw value returned by `DiffDelta.flags()`; `flag` is one of
+ * the `DiffFlags` constants. Returns `(flags & flag) === flag`.
+ */
+export declare function diffFlagsContains(flags: number, flag: DiffFlags): boolean
+
 export interface DiffOptions {
   /**
-   * When generating output, include the names of unmodified files if they
-   * are included in the `Diff`. Normally these are skipped in the formats
-   * that list files (e.g. name-only, name-status, raw). Even with this these
-   * will not be included in the patch format.
+   * Include unmodified files in the diff. Normally unmodified entries are
+   * skipped entirely; when this is `true` they are pulled into the diff (so
+   * they appear in `Diff.deltas()` with an `Unmodified` status) and are also
+   * shown in the listing output formats (name-only, name-status, raw). They
+   * are still never emitted in the patch format.
    */
   showUnmodified?: boolean
 }
@@ -1713,11 +2039,9 @@ export declare const enum FileMode {
 
 /**
  * Last commit that modified a file, with author/committer identity.
- * All times are ms since epoch (UTC; timezone offset ignored).
+ * All times are `Date`s (UTC; timezone offset ignored).
  */
 export interface FileModification {
-  /** Committer time, ms since epoch. Identical to `getFileLatestModifiedDate`. Equals `committerTime`. */
-  timestamp: number
   /** 40-char lowercase hex OID of the last commit that modified the file. */
   commitId: string
   /** Commit summary (first line). Undefined if absent or not valid UTF-8. */
@@ -1726,14 +2050,14 @@ export interface FileModification {
   authorName?: string
   /** Author email. Undefined if not valid UTF-8. */
   authorEmail?: string
-  /** Author time, ms since epoch. */
-  authorTime: number
+  /** Author time, as a `Date`. */
+  authorTime: Date
   /** Committer name. Undefined if not valid UTF-8. */
   committerName?: string
   /** Committer email. Undefined if not valid UTF-8. */
   committerEmail?: string
-  /** Committer time, ms since epoch. Equals `timestamp`. */
-  committerTime: number
+  /** Committer time, as a `Date`. Identical to `getFileLastModifiedDate`. */
+  committerTime: Date
 }
 
 /**
@@ -1743,7 +2067,7 @@ export interface FileModification {
  * value as a forward-compatible escape hatch for flags not surfaced here.
  */
 export interface FileStatus {
-  /** Workdir-relative path. `null` if the path is not valid UTF-8. */
+  /** Workdir-relative path. Undefined if the path is not valid UTF-8. */
   path?: string
   /** Raw `git2::Status` bits — forward-compat escape hatch. */
   bits: number
@@ -1772,6 +2096,69 @@ export interface FileStatus {
   /** The file has merge conflicts. */
   isConflicted: boolean
 }
+
+/**
+ * Stable string tokens surfaced to JS as `error.code`. The first 28 variants
+ * mirror `git2::ErrorCode` (verbatim names); `InvalidArg` is the napi-level
+ * token. `GenericError` doubles as the catch-all. `GitErrorCode: Copy` ⇒ it is
+ * `Send + Sync`, which is required so it can ride along as an async carrier
+ * field on `napi::Error<GitErrorCode>`.
+ */
+export declare const enum GitErrorCode {
+  GenericError = 'GenericError',
+  NotFound = 'NotFound',
+  Exists = 'Exists',
+  Ambiguous = 'Ambiguous',
+  BufSize = 'BufSize',
+  User = 'User',
+  BareRepo = 'BareRepo',
+  UnbornBranch = 'UnbornBranch',
+  Unmerged = 'Unmerged',
+  NotFastForward = 'NotFastForward',
+  InvalidSpec = 'InvalidSpec',
+  Conflict = 'Conflict',
+  Locked = 'Locked',
+  Modified = 'Modified',
+  Auth = 'Auth',
+  Certificate = 'Certificate',
+  Applied = 'Applied',
+  Peel = 'Peel',
+  Eof = 'Eof',
+  Invalid = 'Invalid',
+  Uncommitted = 'Uncommitted',
+  Directory = 'Directory',
+  MergeConflict = 'MergeConflict',
+  HashsumMismatch = 'HashsumMismatch',
+  IndexDirty = 'IndexDirty',
+  ApplyFail = 'ApplyFail',
+  Owner = 'Owner',
+  Timeout = 'Timeout',
+  InvalidArg = 'InvalidArg'
+}
+
+/**
+ * Runtime type guard for the coded errors this addon throws.
+ *
+ * Returns `true` iff `e` is a genuine `Error` object — tested with the
+ * Node-API native-error check (`napi_is_error`, a pure V8 `IsNativeError`
+ * test) — whose `code` is a real member of the `GitErrorCode` enum. The
+ * native check recognizes cross-realm and subclassed errors while rejecting
+ * look-alike proxies and plain objects. Membership is validated against that
+ * generated enum (the single source of truth), so a non-git `Error` (e.g.
+ * Node's `ENOENT`) or an `AbortSignal` cancellation (`code: 'Cancelled'`,
+ * which is a napi-level token, NOT a `GitErrorCode`) returns `false`.
+ * Non-errors, plain objects, `null`/`undefined`, and `Error`s without a
+ * member `code` all return `false`.
+ *
+ * The guard is TOTAL: it never throws for any input. Because the `Error`
+ * check is the native `napi_is_error` (which runs NO JS callbacks), a hostile
+ * value cannot hijack it — a throwing `[[GetPrototypeOf]]`/proxy trap or a
+ * throwing `Error[Symbol.hasInstance]` yields `false`, not a thrown error. An
+ * `Error` whose `code` is a throwing getter likewise yields `false` (the
+ * pending exception is cleared), so it is always safe to call inside a
+ * `catch`.
+ */
+export declare function isGitError(e: unknown): e is Error & { code: GitErrorCode }
 
 export declare const enum ObjectType {
   /** Any kind of git object */
@@ -1802,6 +2189,20 @@ export interface PushTransferProgress {
   bytes: number
 }
 
+/** A single reference update reported during a push. */
+export interface PushUpdateReference {
+  /**
+   * The full name of the reference that was updated (e.g.
+   * `refs/heads/main`).
+   */
+  refname: string
+  /**
+   * `null` when the reference was updated successfully; otherwise the
+   * server's rejection reason.
+   */
+  status: string | null
+}
+
 /** An enumeration of all possible kinds of references. */
 export declare const enum ReferenceType {
   /** A reference which points at an object id. */
@@ -1830,22 +2231,45 @@ export declare const enum RemoteRedirect {
   All = 2
 }
 
+/**
+ * OR-able flags for `Remote.updateTips`. Each discriminant is the real libgit2
+ * `GIT_REMOTE_UPDATE_*` bit, so they can be combined with `|`.
+ */
 export declare const enum RemoteUpdateFlags {
   UpdateFetchHead = 1,
   ReportUnchanged = 2
 }
 
+/**
+ * OR-able flags for `Repository.openExt`. Each discriminant is the real
+ * libgit2 `GIT_REPOSITORY_OPEN_*` bit, so they can be combined with `|`.
+ */
 export declare const enum RepositoryOpenFlags {
-  /** Only open the specified path; don't walk upward searching. */
-  NoSearch = 0,
-  /** Search across filesystem boundaries. */
-  CrossFS = 1,
-  /** Force opening as bare repository, and defer loading its config. */
-  Bare = 2,
-  /** Don't try appending `/.git` to the specified repository path. */
-  NoDotGit = 3,
-  /** Respect environment variables like `$GIT_DIR`. */
-  FromEnv = 4
+  /**
+   * Only open the specified path; don't walk upward searching.
+   * 1 << 0
+   */
+  NoSearch = 1,
+  /**
+   * Search across filesystem boundaries.
+   * 1 << 1
+   */
+  CrossFS = 2,
+  /**
+   * Force opening as bare repository, and defer loading its config.
+   * 1 << 2
+   */
+  Bare = 4,
+  /**
+   * Don't try appending `/.git` to the specified repository path.
+   * 1 << 3
+   */
+  NoDotGit = 8,
+  /**
+   * Respect environment variables like `$GIT_DIR`.
+   * 1 << 4
+   */
+  FromEnv = 16
 }
 
 export declare const enum RepositoryState {
@@ -1922,4 +2346,15 @@ export interface StatusOptions {
   renamesIndexToWorkdir?: boolean
   /** Restrict the scan to the given pathspecs. */
   pathspec?: Array<string>
+}
+
+/** A single tag visited during `Repository.tagForeach`. */
+export interface TagForeachItem {
+  /** The tag's OID as a 40-char hex string. */
+  id: string
+  /**
+   * The tag's raw reference name (e.g. `refs/tags/v1.0.0`) as bytes, since it
+   * is not guaranteed to be valid UTF-8.
+   */
+  nameBytes: Buffer
 }

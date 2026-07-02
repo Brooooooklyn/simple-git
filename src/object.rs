@@ -1,10 +1,14 @@
 use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::{
+  CodeInto, Result,
   blob::{Blob, BlobParent},
+  ensure_alive,
   error::IntoNapiError,
   repo::Repository,
 };
@@ -66,20 +70,26 @@ impl Deref for ObjectParent {
 #[napi]
 pub struct GitObject {
   pub(crate) inner: ObjectParent,
+  /// Liveness flag shared with the owning `Repository` (see `Repository::alive`).
+  /// Both the `Repository` and owned `Object` variants point into the repo's
+  /// odb, so both are guarded by this flag.
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 #[napi]
 impl GitObject {
   #[napi]
   /// Get the id (SHA1) of a repository object
-  pub fn id(&self) -> String {
-    self.inner.id().to_string()
+  pub fn id(&self) -> Result<String> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.id().to_string())
   }
 
   #[napi]
   /// Get the type of the object.
-  pub fn kind(&self) -> Option<ObjectType> {
-    self.inner.kind().map(|k| k.into())
+  pub fn kind(&self) -> Result<Option<ObjectType>> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.kind().map(|k| k.into()))
   }
 
   #[napi]
@@ -89,19 +99,27 @@ impl GitObject {
   /// peeled until the type changes (e.g. a tag will be chased until the
   /// referenced object is no longer a tag).
   pub fn peel(&self, kind: ObjectType) -> Result<GitObject> {
+    ensure_alive(&self.alive)?;
     Ok(GitObject {
       inner: ObjectParent::Object(self.inner.peel(kind.into()).convert("Peel object failed")?),
+      alive: self.alive.clone(),
     })
   }
 
   #[napi]
   /// Recursively peel an object until a blob is found
-  pub fn peel_to_blob(&self, env: Env, self_ref: Reference<GitObject>) -> Result<Blob> {
+  pub fn peel_to_blob(&self, env: Env, self_ref: Reference<GitObject>) -> napi::Result<Blob> {
+    ensure_alive(&self.alive).code_into(env)?;
     let blob = self_ref.share_with(env, |obj| {
-      obj.inner.peel_to_blob().convert_without_message()
+      obj
+        .inner
+        .peel_to_blob()
+        .convert_without_message()
+        .code_into(env)
     })?;
     Ok(Blob {
       inner: BlobParent::GitObject(blob),
+      alive: self.alive.clone(),
     })
   }
 }

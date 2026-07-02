@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
+use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 /// Last commit that modified a file, with author/committer identity.
-/// All times are ms since epoch (UTC; timezone offset ignored).
+/// All times are `Date`s (UTC; timezone offset ignored).
 #[napi(object)]
 pub struct FileModification {
-  /// Committer time, ms since epoch. Identical to `getFileLatestModifiedDate`. Equals `committerTime`.
-  pub timestamp: i64,
   /// 40-char lowercase hex OID of the last commit that modified the file.
   pub commit_id: String,
   /// Commit summary (first line). Undefined if absent or not valid UTF-8.
@@ -17,32 +17,42 @@ pub struct FileModification {
   pub author_name: Option<String>,
   /// Author email. Undefined if not valid UTF-8.
   pub author_email: Option<String>,
-  /// Author time, ms since epoch.
-  pub author_time: i64,
+  /// Author time, as a `Date`.
+  pub author_time: DateTime<Utc>,
   /// Committer name. Undefined if not valid UTF-8.
   pub committer_name: Option<String>,
   /// Committer email. Undefined if not valid UTF-8.
   pub committer_email: Option<String>,
-  /// Committer time, ms since epoch. Equals `timestamp`.
-  pub committer_time: i64,
+  /// Committer time, as a `Date`. Identical to `getFileLastModifiedDate`.
+  pub committer_time: DateTime<Utc>,
 }
 
-pub(crate) fn build_modification(commit: &git2::Commit) -> FileModification {
+/// Convert git2 epoch seconds into a UTC `Date`. Errors (as a `git2::Error`, to
+/// fit the surrounding history walk's `Result<_, git2::Error>`) only on the
+/// practically unreachable out-of-range case.
+pub(crate) fn time_to_date(seconds: i64) -> std::result::Result<DateTime<Utc>, git2::Error> {
+  DateTime::from_timestamp(seconds, 0)
+    .ok_or_else(|| git2::Error::from_str(&format!("Invalid commit timestamp: {seconds}")))
+}
+
+pub(crate) fn build_modification(
+  commit: &git2::Commit,
+) -> std::result::Result<FileModification, git2::Error> {
   let author = commit.author();
   let committer = commit.committer();
-  // Byte-identical to the legacy value (repo.rs get_file_modified_date): commit.time(), NOT committer.when().
-  let committer_time = commit.time().seconds() * 1000;
-  FileModification {
-    timestamp: committer_time,
+  // Mirrors the legacy value (repo.rs get_file_modified_date): commit.time(), NOT committer.when().
+  let committer_time = time_to_date(commit.time().seconds())?;
+  let author_time = time_to_date(author.when().seconds())?;
+  Ok(FileModification {
     commit_id: commit.id().to_string(),
     summary: commit.summary().ok().flatten().map(|s| s.to_owned()),
     author_name: author.name().ok().map(|s| s.to_owned()),
     author_email: author.email().ok().map(|s| s.to_owned()),
-    author_time: author.when().seconds() * 1000,
+    author_time,
     committer_name: committer.name().ok().map(|s| s.to_owned()),
     committer_email: committer.email().ok().map(|s| s.to_owned()),
     committer_time,
-  }
+  })
 }
 
 /// Single-file walk: find the most recent commit that modified `filepath`.
@@ -63,39 +73,43 @@ pub(crate) fn get_file_modification(
   // first commit whose diff touches the path is its latest modification.
   rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
   let path = PathBuf::from(filepath);
-  Ok(
-    rev_walk
-      .by_ref()
-      .filter_map(|oid| oid.ok())
-      .find_map(|oid| {
-        let commit = repo.find_commit(oid).ok()?;
-        match commit.parent_count() {
-          // commit with parent
-          1 => {
-            let tree = commit.tree().ok()?;
-            if let Ok(parent) = commit.parent(0) {
-              let parent_tree = parent.tree().ok()?;
-              if let Ok(diff) =
-                repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))
-                && diff.deltas().len() > 0
-              {
-                return Some(build_modification(&commit));
-              }
-            }
-          }
-          // root commit
-          0 => {
-            let tree = commit.tree().ok()?;
-            if tree.get_path(&path).is_ok() {
-              return Some(build_modification(&commit));
-            }
-          }
-          // ignore merge commits
-          _ => {}
-        };
-        None
-      }),
-  )
+  for oid in rev_walk.by_ref() {
+    // Propagate revwalk iterator errors instead of silently skipping them.
+    let oid = oid?;
+    // A real object-read failure is an error, not a "no match" -- propagate it.
+    let commit = repo.find_commit(oid)?;
+    match commit.parent_count() {
+      // commit with parent
+      1 => {
+        let tree = commit.tree()?;
+        // parent_count() == 1 guarantees a parent exists; a read failure here is
+        // a genuine error, so propagate rather than treating it as "no match".
+        let parent = commit.parent(0)?;
+        let parent_tree = parent.tree()?;
+        let diff =
+          repo.diff_tree_to_tree(Some(&tree), Some(&parent_tree), Some(&mut diff_options))?;
+        // A successful diff with no delta means this commit didn't touch the
+        // path -- that is a genuine "no match", so keep walking.
+        if diff.deltas().len() > 0 {
+          return Ok(Some(build_modification(&commit)?));
+        }
+      }
+      // root commit
+      0 => {
+        let tree = commit.tree()?;
+        // NotFound == "file absent from this root commit's tree" (no match); any
+        // other lookup error is real and must propagate.
+        match tree.get_path(&path) {
+          Ok(_) => return Ok(Some(build_modification(&commit)?)),
+          Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+          Err(e) => return Err(e),
+        }
+      }
+      // ignore merge commits (documented semantic, not an error)
+      _ => {}
+    }
+  }
+  Ok(None)
 }
 
 /// Bulk walk: resolve the last commit that modified each of `filepaths` in a
@@ -128,57 +142,53 @@ pub(crate) fn get_files_modification(
   // Same newest-first (time-topological) order as the single-file walk.
   rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
 
-  for oid in rev_walk.by_ref().filter_map(|oid| oid.ok()) {
+  for oid in rev_walk.by_ref() {
     if unresolved.is_empty() {
       break; // early-exit: nothing left to resolve
     }
-    let commit = match repo.find_commit(oid) {
-      Ok(c) => c,
-      Err(_) => continue,
-    };
+    // Propagate revwalk iterator errors instead of silently skipping them.
+    let oid = oid?;
+    // A real object-read failure is an error, not a "no match" -- propagate it.
+    let commit = repo.find_commit(oid)?;
     match commit.parent_count() {
       // commit with parent: diff (parent=old, commit=new) so added/modified
       // paths surface as new_file().path(); fall back to old_file() for deletes.
       1 => {
-        let tree = match commit.tree() {
-          Ok(t) => t,
-          Err(_) => continue,
-        };
-        let parent = match commit.parent(0) {
-          Ok(p) => p,
-          Err(_) => continue,
-        };
-        let parent_tree = match parent.tree() {
-          Ok(t) => t,
-          Err(_) => continue,
-        };
-        if let Ok(diff) =
-          repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), Some(&mut diff_options))
-        {
-          for delta in diff.deltas() {
-            let path = delta
-              .new_file()
-              .path()
-              .or_else(|| delta.old_file().path())
-              .and_then(|p| p.to_str());
-            if let Some(p) = path
-              && unresolved.contains(p)
-            {
-              let key = p.to_owned();
-              result.insert(key.clone(), Some(build_modification(&commit)));
-              unresolved.remove(&key);
-            }
+        let tree = commit.tree()?;
+        // parent_count() == 1 guarantees a parent exists; propagate a real read
+        // failure rather than treating it as "no match".
+        let parent = commit.parent(0)?;
+        let parent_tree = parent.tree()?;
+        let diff =
+          repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), Some(&mut diff_options))?;
+        for delta in diff.deltas() {
+          let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .and_then(|p| p.to_str());
+          if let Some(p) = path
+            && unresolved.contains(p)
+          {
+            let key = p.to_owned();
+            result.insert(key.clone(), Some(build_modification(&commit)?));
+            unresolved.remove(&key);
           }
         }
       }
       // root commit: probe each still-unresolved path in the tree
       0 => {
-        if let Ok(tree) = commit.tree() {
-          for p in unresolved.clone() {
-            if tree.get_path(Path::new(&p)).is_ok() {
-              result.insert(p.clone(), Some(build_modification(&commit)));
+        let tree = commit.tree()?;
+        for p in unresolved.clone() {
+          // NotFound == path absent from this root tree (no match); any other
+          // lookup error is real and must propagate.
+          match tree.get_path(Path::new(&p)) {
+            Ok(_) => {
+              result.insert(p.clone(), Some(build_modification(&commit)?));
               unresolved.remove(&p);
             }
+            Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+            Err(e) => return Err(e),
           }
         }
       }
@@ -187,4 +197,60 @@ pub(crate) fn get_files_modification(
     }
   }
   Ok(result)
+}
+
+/// Newtype over the bulk file-modification map. Its `ToNapiValue` builds the
+/// result object with own-property DEFINE semantics (`[[DefineOwnProperty]]` via
+/// `napi_define_properties`), NOT `[[Set]]`.
+///
+/// napi's default `HashMap` serialization uses `napi_set_named_property`
+/// (`[[Set]]`), so a valid path key literally named `__proto__` would fire
+/// `Object.prototype`'s `__proto__` setter and mutate the RESULT object's
+/// prototype instead of creating an own key (present `__proto__` -> its value
+/// becomes the prototype; missing -> prototype set to `null`, losing
+/// `hasOwnProperty`). Defining each entry as an own enumerable data property
+/// bypasses that setter, so EVERY path (including `__proto__`) becomes an own
+/// key mapping to its `FileModification` or `null` while the object keeps the
+/// normal `Object.prototype`. Surfaces to TS as
+/// `Record<string, FileModification | null>` (via the method `ts_return_type`).
+pub struct FileModMap(pub(crate) HashMap<String, Option<FileModification>>);
+
+impl TypeName for FileModMap {
+  fn type_name() -> &'static str {
+    "Object"
+  }
+
+  fn value_type() -> ValueType {
+    ValueType::Object
+  }
+}
+
+impl ToNapiValue for FileModMap {
+  unsafe fn to_napi_value(
+    raw_env: napi::sys::napi_env,
+    val: Self,
+  ) -> napi::Result<napi::sys::napi_value> {
+    let env = Env::from_raw(raw_env);
+    let mut obj = Object::new(&env)?;
+    let attributes = PropertyAttributes::Enumerable
+      | PropertyAttributes::Writable
+      | PropertyAttributes::Configurable;
+    let properties = val
+      .0
+      .into_iter()
+      .map(|(key, value)| {
+        // `Option<FileModification>` ToNapiValue: `None` -> JS `null`,
+        // `Some(fm)` -> the FileModification object. `with_utf8_name` errors
+        // only on an interior NUL (git paths never contain one).
+        Ok(
+          Property::new()
+            .with_utf8_name(&key)?
+            .with_napi_value(&env, value)?
+            .with_property_attributes(attributes),
+        )
+      })
+      .collect::<napi::Result<Vec<Property>>>()?;
+    obj.define_properties(&properties)?;
+    Ok(obj.raw())
+  }
 }

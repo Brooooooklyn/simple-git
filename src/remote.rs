@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::{mem, path::Path};
 
 use git2::{ErrorClass, ErrorCode};
@@ -5,6 +7,8 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
+use crate::repo::reopen_worker_repo;
+use crate::{CodeInto, GitErrorCode, Result, coded_error, ensure_alive};
 
 #[napi]
 /// An enumeration of the possible directions for a remote.
@@ -114,36 +118,6 @@ pub enum CredentialType {
   Username = 32,
 }
 
-impl From<libgit2_sys::git_credtype_t> for CredentialType {
-  fn from(value: libgit2_sys::git_credtype_t) -> Self {
-    match value {
-      libgit2_sys::GIT_CREDTYPE_USERPASS_PLAINTEXT => CredentialType::UserPassPlaintext,
-      libgit2_sys::GIT_CREDTYPE_SSH_KEY => CredentialType::SshKey,
-      libgit2_sys::GIT_CREDTYPE_SSH_MEMORY => CredentialType::SshMemory,
-      libgit2_sys::GIT_CREDTYPE_SSH_CUSTOM => CredentialType::SshCustom,
-      libgit2_sys::GIT_CREDTYPE_DEFAULT => CredentialType::Default,
-      libgit2_sys::GIT_CREDTYPE_SSH_INTERACTIVE => CredentialType::SshInteractive,
-      libgit2_sys::GIT_CREDTYPE_USERNAME => CredentialType::Username,
-      _ => CredentialType::Default,
-    }
-  }
-}
-
-impl From<git2::CredentialType> for CredentialType {
-  fn from(value: git2::CredentialType) -> Self {
-    match value {
-      git2::CredentialType::USER_PASS_PLAINTEXT => CredentialType::UserPassPlaintext,
-      git2::CredentialType::SSH_KEY => CredentialType::SshKey,
-      git2::CredentialType::SSH_MEMORY => CredentialType::SshMemory,
-      git2::CredentialType::SSH_CUSTOM => CredentialType::SshCustom,
-      git2::CredentialType::DEFAULT => CredentialType::Default,
-      git2::CredentialType::SSH_INTERACTIVE => CredentialType::SshInteractive,
-      git2::CredentialType::USERNAME => CredentialType::Username,
-      _ => CredentialType::Default,
-    }
-  }
-}
-
 impl From<CredentialType> for git2::CredentialType {
   fn from(value: CredentialType) -> Self {
     match value {
@@ -160,30 +134,41 @@ impl From<CredentialType> for git2::CredentialType {
 
 #[napi(object)]
 pub struct CredInfo {
-  pub cred_type: CredentialType,
+  /// Raw `CredentialType` bitset of the credential types the server will
+  /// accept. OR-able; test bits with `credTypeContains`.
+  pub cred_type: u32,
   pub url: String,
   pub username: String,
 }
 
 #[napi]
 #[repr(u32)]
+/// OR-able flags for `Remote.updateTips`. Each discriminant is the real libgit2
+/// `GIT_REMOTE_UPDATE_*` bit, so they can be combined with `|`.
 pub enum RemoteUpdateFlags {
   UpdateFetchHead = 1,
   ReportUnchanged = 2,
 }
 
-impl From<RemoteUpdateFlags> for git2::RemoteUpdateFlags {
-  fn from(value: RemoteUpdateFlags) -> Self {
-    match value {
-      RemoteUpdateFlags::UpdateFetchHead => git2::RemoteUpdateFlags::UPDATE_FETCHHEAD,
-      RemoteUpdateFlags::ReportUnchanged => git2::RemoteUpdateFlags::REPORT_UNCHANGED,
-    }
-  }
-}
-
 #[napi]
 pub struct Remote {
   pub(crate) inner: SharedReference<crate::repo::Repository, git2::Remote<'static>>,
+  /// Gitdir of the owning repository (`Repository::path()`), captured on the JS
+  /// thread. `git2::Remote` exposes no owning-repo/path accessor, so the async
+  /// `fetch`/`push` workers reopen the repository from this path and re-resolve
+  /// the remote there instead of moving the JS-visible handle off-thread. Not a
+  /// `#[napi]` field, so it is invisible to the JS surface.
+  pub(crate) repo_path: String,
+  /// The raw `RepositoryOpenFlags` bits the owning `Repository` was opened
+  /// with via `openExt`, if any (see `Repository::open_flags`). Threaded into
+  /// the async fetch/push tasks so a worker reopening `repo_path` replays the
+  /// same `Bare`/`FromEnv` behavior as the JS-visible handle this `Remote` was
+  /// derived from.
+  pub(crate) open_flags: Option<u32>,
+  /// Liveness flag shared with the owning `Repository` (see `Repository::alive`).
+  /// Flipped to `false` on `dispose()`; every method that touches the underlying
+  /// `git2::Remote` (which borrows the now-freed repo) guards on it first.
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -199,24 +184,27 @@ impl Remote {
   ///
   /// Returns `None` if this remote has not yet been named or if the name is
   /// not valid utf-8
-  pub fn name(&self) -> Option<&str> {
-    self.inner.name().ok().flatten()
+  pub fn name(&self) -> Result<Option<&str>> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.name().ok().flatten())
   }
 
   #[napi]
   /// Get the remote's url.
   ///
   /// Returns `None` if the url is not valid utf-8
-  pub fn url(&self) -> Option<&str> {
-    self.inner.url().ok()
+  pub fn url(&self) -> Result<Option<&str>> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.url().ok())
   }
 
   #[napi]
   /// Get the remote's pushurl.
   ///
   /// Returns `None` if the pushurl is not valid utf-8
-  pub fn pushurl(&self) -> Option<&str> {
-    self.inner.pushurl().ok().flatten()
+  pub fn push_url(&self) -> Result<Option<&str>> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.pushurl().ok().flatten())
   }
 
   #[napi]
@@ -227,6 +215,7 @@ impl Remote {
   /// connection to the remote is initiated and it remains available after
   /// disconnecting.
   pub fn default_branch(&self) -> Result<String> {
+    ensure_alive(&self.alive)?;
     self
       .inner
       .default_branch()
@@ -234,7 +223,7 @@ impl Remote {
       .and_then(|b| {
         b.as_str().ok().map(|name| name.to_owned()).ok_or_else(|| {
           Error::new(
-            Status::GenericFailure,
+            GitErrorCode::GenericError,
             "Default branch name contains non-utf-8 characters".to_string(),
           )
         })
@@ -244,18 +233,21 @@ impl Remote {
   #[napi]
   /// Open a connection to a remote.
   pub fn connect(&mut self, dir: Direction) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self.inner.connect(dir.into()).convert_without_message()
   }
 
   #[napi]
   /// Check whether the remote is connected
-  pub fn connected(&mut self) -> bool {
-    self.inner.connected()
+  pub fn connected(&mut self) -> Result<bool> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.connected())
   }
 
   #[napi]
   /// Disconnect from the remote
   pub fn disconnect(&mut self) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self.inner.disconnect().convert_without_message()
   }
 
@@ -265,6 +257,7 @@ impl Remote {
   /// At certain points in its operation, the network code checks whether the
   /// operation has been cancelled and if so stops the operation.
   pub fn stop(&mut self) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self.inner.stop().convert_without_message()
   }
 
@@ -279,13 +272,22 @@ impl Remote {
     refspecs: Vec<String>,
     fetch_options: Option<&mut FetchOptions>,
   ) -> Result<()> {
+    ensure_alive(&self.alive)?;
     let mut default_fetch_options = git2::FetchOptions::default();
-    let mut options = fetch_options
-      .map(|o| {
+    let mut options = match fetch_options {
+      Some(o) => {
+        if o.used {
+          return Err(Error::new(
+            GitErrorCode::InvalidArg,
+            "FetchOptions can only be used once".to_string(),
+          ));
+        }
         std::mem::swap(&mut o.inner, &mut default_fetch_options);
+        o.used = true;
         default_fetch_options
-      })
-      .unwrap_or_default();
+      }
+      None => git2::FetchOptions::default(),
+    };
     self
       .inner
       .fetch(refspecs.as_slice(), Some(&mut options), None)
@@ -303,12 +305,13 @@ impl Remote {
     refspecs: Vec<String>,
     push_options: Option<&mut PushOptions>,
   ) -> Result<()> {
+    ensure_alive(&self.alive)?;
     let mut default_push_options = git2::PushOptions::default();
     let mut options = match push_options {
       Some(o) => {
         if o.used {
           return Err(Error::new(
-            Status::GenericFailure,
+            GitErrorCode::InvalidArg,
             "PushOptions can only be used once".to_string(),
           ));
         }
@@ -324,21 +327,239 @@ impl Remote {
       .convert_without_message()
   }
 
+  #[napi(ts_return_type = "Promise<void>")]
+  /// Asynchronous variant of `fetch`, performed off the main thread.
+  ///
+  /// `fetchOptions` may carry data-only settings (depth, prune, proxy url,
+  /// headers, ...). It must NOT carry `RemoteCallbacks`: those hold JS-backed
+  /// callbacks bound to the main JS thread and cannot be invoked safely from a
+  /// worker thread. If callbacks are required, use the synchronous `fetch`.
+  ///
+  /// Resolves the remote by name against the repository's CURRENT on-disk
+  /// configuration at the moment this async operation actually runs, not
+  /// against a snapshot of the `Remote` object's state when it was loaded.
+  /// If `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` mutate this remote's
+  /// config after it was loaded but before this call completes, the
+  /// mutation IS observed here — unlike the synchronous `fetch()`, which
+  /// operates on the already-loaded snapshot and is documented as
+  /// unaffected by later config changes. Use the synchronous `fetch()`
+  /// when strict snapshot isolation from concurrent config changes matters.
+  ///
+  /// Safety: do not use the same `Remote` from the main thread while this async
+  /// operation is pending; the underlying git2 handle is not `Sync`.
+  ///
+  /// Synchronous pre-throw: although the declared return is `Promise<void>`,
+  /// argument/state validation runs synchronously on the calling thread and
+  /// THROWS synchronously (the CALL throws — it does NOT return a rejected
+  /// Promise) when `fetchOptions` has already been consumed by a prior async
+  /// call or carries `RemoteCallbacks`. Wrap the CALL itself
+  /// (`try { await remote.fetchAsync(...) }`), not just the awaited Promise.
+  pub fn fetch_async(
+    &self,
+    env: Env,
+    refspecs: Vec<String>,
+    fetch_options: Option<&mut FetchOptions>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<RemoteFetchTask>> {
+    // Synchronous pre-throw: the underlying `git2::Remote` borrows the owning
+    // repository, so guard on the JS thread before spawning the worker — matches
+    // the method's other synchronous validation (see the doc comment).
+    ensure_alive(&self.alive)?;
+    let namespace = self
+      .inner
+      .clone_owner(env)
+      .map_err(|mut e| Error::new(GitErrorCode::GenericError, core::mem::take(&mut e.reason)))?
+      .namespace();
+    let options = match fetch_options {
+      Some(o) => {
+        if o.used {
+          return Err(Error::new(
+            GitErrorCode::InvalidArg,
+            "FetchOptions can only be used once".to_string(),
+          ));
+        }
+        if o.has_remote_callbacks {
+          return Err(Error::new(
+            GitErrorCode::InvalidArg,
+            "fetchAsync does not support RemoteCallbacks; use the synchronous fetch() instead"
+              .to_string(),
+          ));
+        }
+        let mut taken = git2::FetchOptions::default();
+        mem::swap(&mut o.inner, &mut taken);
+        o.used = true;
+        Some(taken)
+      }
+      None => None,
+    };
+    let remote_name = self.inner.name().ok().flatten().map(|s| s.to_owned());
+    let remote_url = self.inner.url().ok().map(|s| s.to_owned());
+    Ok(AsyncTask::with_optional_signal(
+      RemoteFetchTask {
+        repo_path: self.repo_path.clone(),
+        open_flags: self.open_flags,
+        namespace,
+        remote_name,
+        remote_url,
+        refspecs,
+        options,
+        code: GitErrorCode::GenericError,
+      },
+      signal,
+    ))
+  }
+
+  #[napi(ts_return_type = "Promise<void>")]
+  /// Asynchronous variant of `push`, performed off the main thread.
+  ///
+  /// `pushOptions` may carry data-only settings (packbuilder parallelism,
+  /// proxy url, headers, ...). It must NOT carry `RemoteCallbacks`: those hold
+  /// JS-backed callbacks bound to the main JS thread and cannot be invoked
+  /// safely from a worker thread. If callbacks (e.g. `pushUpdateReference`) are
+  /// required, use the synchronous `push`.
+  ///
+  /// Resolves against a URL/refspec snapshot captured from this loaded
+  /// `Remote` at call time (using the configured `pushurl` when set, else
+  /// `url`), rather than re-resolving the remote by name against live
+  /// on-disk config the way `fetchAsync` does. This asymmetry with
+  /// `fetchAsync` is intentional and is not merely a config-drift
+  /// optimization: libgit2's local transport ignores a configured `pushurl`
+  /// for the actual push — it re-derives the destination directly from the
+  /// remote's fetch `url` (see `transports/local.c`'s `local_push()`,
+  /// `push->remote->url`), even though `pushurl` is correctly used during
+  /// the connection handshake (`remote.c`'s `git_remote__urlfordirection`).
+  /// Re-resolving by name here, like `fetchAsync` does, would silently push
+  /// to the wrong destination for any local/file-path remote with a
+  /// configured `pushurl`. Capturing the effective push URL up front and
+  /// handing it to an anonymous remote sidesteps the bug, because that
+  /// remote's SOLE url is already the pushurl-resolved value. Trade-off: a
+  /// later `remoteSetUrl`/`remoteSetPushUrl`/`remoteAddPush` on the same name
+  /// after this `Remote` was loaded is NOT observed by an already-scheduled
+  /// `pushAsync`, matching the synchronous `push()` contract ("no loaded
+  /// remote instances will be affected"). Also note: pushurl + refspecs are
+  /// the config properties this snapshot captures, not the complete set that
+  /// can diverge between named and anonymous remote resolution — libgit2's
+  /// HTTP proxy auto-detection also consults `remote.<name>.proxy`, so
+  /// `pushAsync(...)` combined with `PushOptions.proxyOptions(new
+  /// ProxyOptions().auto())` will not pick up that per-remote proxy config
+  /// the way the synchronous, named-remote `push()` does. This is a known,
+  /// accepted gap (see the `remote_url` field doc on `RemotePushTask`), not
+  /// chased further here.
+  ///
+  /// Safety: do not use the same `Remote` from the main thread while this async
+  /// operation is pending; the underlying git2 handle is not `Sync`.
+  ///
+  /// Synchronous pre-throw: although the declared return is `Promise<void>`,
+  /// argument/state validation runs synchronously on the calling thread and
+  /// THROWS synchronously (the CALL throws — it does NOT return a rejected
+  /// Promise) when `pushOptions` has already been consumed by a prior async
+  /// call or carries `RemoteCallbacks`, or when this remote's push URL is
+  /// unreadable/absent or its configured push refspecs cannot be read. Wrap the
+  /// CALL itself (`try { await remote.pushAsync(...) }`), not just the awaited
+  /// Promise.
+  pub fn push_async(
+    &self,
+    env: Env,
+    refspecs: Vec<String>,
+    push_options: Option<&mut PushOptions>,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<RemotePushTask>> {
+    // Synchronous pre-throw: guard on the JS thread before spawning the worker,
+    // consistent with this method's other synchronous validation (see doc).
+    ensure_alive(&self.alive)?;
+    let namespace = self
+      .inner
+      .clone_owner(env)
+      .map_err(|mut e| Error::new(GitErrorCode::GenericError, core::mem::take(&mut e.reason)))?
+      .namespace();
+    let options = match push_options {
+      Some(o) => {
+        if o.used {
+          return Err(Error::new(
+            GitErrorCode::InvalidArg,
+            "PushOptions can only be used once".to_string(),
+          ));
+        }
+        if o.has_remote_callbacks {
+          return Err(Error::new(
+            GitErrorCode::InvalidArg,
+            "pushAsync does not support RemoteCallbacks; use the synchronous push() instead"
+              .to_string(),
+          ));
+        }
+        let mut taken = git2::PushOptions::default();
+        mem::swap(&mut o.inner, &mut taken);
+        o.used = true;
+        Some(taken)
+      }
+      None => None,
+    };
+    let remote_url = self
+      .inner
+      .pushurl()
+      .convert("Failed to read remote pushurl")?
+      .map(|s| s.to_owned())
+      .or_else(|| self.inner.url().ok().map(|s| s.to_owned()))
+      .ok_or_else(|| {
+        Error::new(
+          GitErrorCode::GenericError,
+          "Remote has no valid UTF-8 push URL".to_string(),
+        )
+      })?;
+    let refspecs = if refspecs.is_empty() {
+      self
+        .inner
+        .push_refspecs()
+        .convert("Failed to read remote push refspecs")?
+        .iter()
+        .filter_map(|r| r.ok().flatten().map(|s| s.to_owned()))
+        .collect()
+    } else {
+      refspecs
+    };
+    Ok(AsyncTask::with_optional_signal(
+      RemotePushTask {
+        repo_path: self.repo_path.clone(),
+        open_flags: self.open_flags,
+        namespace,
+        remote_url,
+        refspecs,
+        options,
+        code: GitErrorCode::GenericError,
+      },
+      signal,
+    ))
+  }
+
   #[napi]
   /// Update the tips to the new state
+  ///
+  /// `update_flags` is a raw bitset of `RemoteUpdateFlags` OR-ed together
+  /// (e.g. `RemoteUpdateFlags.UpdateFetchHead`). Unknown bits are ignored.
   pub fn update_tips(
     &mut self,
-    update_fetchhead: RemoteUpdateFlags,
+    update_flags: u32,
     download_tags: AutotagOption,
     mut callbacks: Option<&mut RemoteCallbacks>,
     msg: Option<String>,
   ) -> Result<()> {
+    ensure_alive(&self.alive)?;
+    // CHECK-ONLY: reject callbacks whose `used` flag is already set, but do
+    // NOT set it here. `update_tips` borrows `&mut o.inner` (no consuming
+    // `mem::swap`), so a fresh callbacks object may legitimately be reused
+    // across several `update_tips` calls; flipping `used` would break that.
+    if callbacks.as_deref().is_some_and(|cb| cb.used) {
+      return Err(napi::Error::new(
+        GitErrorCode::InvalidArg,
+        "RemoteCallbacks has already been used".to_string(),
+      ));
+    }
     let callbacks = callbacks.as_mut().map(|o| &mut o.inner);
     self
       .inner
       .update_tips(
         callbacks,
-        update_fetchhead.into(),
+        git2::RemoteUpdateFlags::from_bits_truncate(update_flags),
         download_tags.into(),
         msg.as_deref(),
       )
@@ -346,7 +567,214 @@ impl Remote {
   }
 }
 
+pub struct RemoteFetchTask {
+  repo_path: String,
+  /// The owning repo's `RepositoryOpenFlags`, if any (see
+  /// `Repository::open_flags`), replayed on the worker-local reopen so a
+  /// force-bare/`FromEnv`-opened repo behaves the same async as sync.
+  open_flags: Option<u32>,
+  /// Active namespace of the owning repo, queried live at `fetchAsync`
+  /// call time (see Fix A). Re-applied to the reopened worker handle
+  /// before the remote is resolved so fetched refs land in
+  /// `refs/namespaces/<ns>/…`.
+  namespace: Option<String>,
+  remote_name: Option<String>,
+  remote_url: Option<String>,
+  refspecs: Vec<String>,
+  options: Option<git2::FetchOptions<'static>>,
+  /// Carries the `GitErrorCode` of a failed `run()` from the worker thread
+  /// (`compute`) to the main thread (`reject`) so the rejected promise's error
+  /// gets a `.code`. Written in `compute`, read in `reject`; `compute` fully
+  /// precedes `reject` on the same `&mut self`, so a plain field is sound.
+  code: GitErrorCode,
+}
+
+// SAFETY: every field is `Send` EXCEPT `git2::FetchOptions`, which is `!Send`
+// only because it holds a `Vec<*const c_char>` of raw header pointers. It is
+// *moved* into the task and only ever touched inside `compute()` on a single
+// worker thread. Crucially, the stored `FetchOptions` is only ever constructed
+// when the source `FetchOptions` carries NO `RemoteCallbacks` (guarded by
+// `has_remote_callbacks` in `fetch_async`), so it holds only plain owned data
+// (depth/prune/proxy url/headers) with no JS `Env` or threadsafe function
+// captured — nothing unsound to use off the JS thread. The repository handle is
+// REOPENED from the owned `repo_path` inside `compute()` and the remote is
+// re-resolved there, so the task never aliases the JS-visible handle. No
+// aliasing, no concurrent access: the move is sound.
+unsafe impl Send for RemoteFetchTask {}
+
+impl RemoteFetchTask {
+  fn run(&mut self) -> Result<()> {
+    let repo = reopen_worker_repo(&self.repo_path, self.open_flags)?;
+    // Restore the parent repo's namespace before resolving the remote so the
+    // reopened worker handle resolves/updates the namespaced refs, matching
+    // sync `fetch`.
+    if let Some(ns) = &self.namespace {
+      repo
+        .set_namespace(ns)
+        .convert("Failed to restore repository namespace")?;
+    }
+    let mut remote = match &self.remote_name {
+      Some(name) => repo.find_remote(name),
+      None => repo.remote_anonymous(self.remote_url.as_deref().unwrap_or_default()),
+    }
+    .convert("Failed to resolve remote")?;
+    let mut options = self.options.take().unwrap_or_default();
+    remote
+      .fetch(self.refspecs.as_slice(), Some(&mut options), None)
+      .convert_without_message()
+  }
+}
+
 #[napi]
+impl Task for RemoteFetchTask {
+  type Output = ();
+  type JsValue = ();
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(())
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+pub struct RemotePushTask {
+  repo_path: String,
+  /// The owning repo's `RepositoryOpenFlags`, if any (see
+  /// `Repository::open_flags`), replayed on the worker-local reopen so a
+  /// force-bare/`FromEnv`-opened repo behaves the same async as sync.
+  open_flags: Option<u32>,
+  /// Active namespace of the owning repo, queried live at `pushAsync`
+  /// call time (see Fix A). Re-applied to the reopened worker handle
+  /// before the remote is resolved so pushed refs resolve under
+  /// `refs/namespaces/<ns>/…`.
+  namespace: Option<String>,
+  /// The remote's effective push URL (configured `pushurl` if set, else
+  /// `url`), captured from the loaded `Remote` at `pushAsync` call time. The
+  /// worker reconstructs an anonymous remote from this URL rather than
+  /// re-resolving by name against on-disk config, so a concurrent
+  /// `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` on the same name does not
+  /// affect an in-flight push — matching the snapshot semantics of the
+  /// synchronous `push()`. Using this URL directly on an anonymous remote
+  /// reproduces the push target exactly: an anonymous remote never has an
+  /// in-memory pushurl override, so libgit2 falls back to its single `url` —
+  /// which is already the effective target we captured.
+  ///
+  /// Unlike `RemoteFetchTask`, this is NOT reverted to name-based resolution:
+  /// libgit2's local transport ignores a configured `pushurl` for the actual
+  /// push and re-derives the destination from the remote's fetch `url`
+  /// instead (`transports/local.c`'s `local_push()`, `push->remote->url`),
+  /// even though `pushurl` is correctly used during the connection handshake
+  /// (`remote.c`'s `git_remote__urlfordirection`). Resolving via
+  /// `find_remote(name)` here, like fetch does, would silently push to the
+  /// wrong destination for any local/file-path remote with a configured
+  /// `pushurl` — confirmed by reproducing the bug through the synchronous
+  /// `push()` method directly. Capturing and using the pre-resolved effective
+  /// push URL on an anonymous remote is the only way to make `pushurl` work
+  /// for local-transport pushes at all, so this snapshot mechanism stays.
+  ///
+  /// Caveat: pushurl + refspecs are the config properties this investigation
+  /// found and captured to make local-transport pushes safe — they are NOT
+  /// the complete set of config that diverges between named and anonymous
+  /// remote resolution. libgit2's HTTP proxy auto-detection also consults
+  /// `remote.<name>.proxy` (`remote.c`'s `http_proxy_config`, gated on
+  /// `remote->name && remote->name[0]`), so `pushAsync(...)` combined with
+  /// `PushOptions.proxyOptions(new ProxyOptions().auto())` silently skips
+  /// that per-remote proxy config and falls through to generic
+  /// `http.*.proxy`/env vars instead, unlike the synchronous `push()` (which
+  /// resolves a named remote). This is a deliberate, accepted scope
+  /// boundary, not an oversight: it does not change the decision above, and
+  /// is not worth capturing/injecting given the far worse alternative
+  /// (reverting to `find_remote`) reintroduces the silent-wrong-destination
+  /// pushurl bug this snapshot mechanism exists to avoid.
+  remote_url: String,
+  refspecs: Vec<String>,
+  options: Option<git2::PushOptions<'static>>,
+  /// Carries the `GitErrorCode` of a failed `run()` from the worker thread
+  /// (`compute`) to the main thread (`reject`); see `RemoteFetchTask::code`.
+  code: GitErrorCode,
+}
+
+// SAFETY: identical reasoning to `RemoteFetchTask`. Every field is `Send`
+// EXCEPT `git2::PushOptions`, which is `!Send` only for its `Vec<*const c_char>`
+// raw header pointers. The stored `PushOptions` is only ever built when the
+// source `PushOptions` carries NO `RemoteCallbacks` (guarded by
+// `has_remote_callbacks` in `push_async`), so it captures no JS `Env`/threadsafe
+// function. The repository is REOPENED from the owned `repo_path` inside
+// `compute()`, and the remote is reconstructed there from the captured URL
+// snapshot via `remote_anonymous` (never re-resolved by name against on-disk
+// config — see the `remote_url` field doc for why push, unlike fetch, keeps
+// this snapshot mechanism: `find_remote` + `push()` hits a real libgit2
+// local-transport bug that silently drops a configured `pushurl`; pushurl +
+// refspecs are the config properties that investigation found and captured,
+// not an exhaustively verified complete set — proxy auto-detection is a
+// known additional gap, documented on that field, not chased further), all
+// on a single worker thread — never aliasing or concurrently accessing the
+// JS-visible handle.
+unsafe impl Send for RemotePushTask {}
+
+impl RemotePushTask {
+  fn run(&mut self) -> Result<()> {
+    let repo = reopen_worker_repo(&self.repo_path, self.open_flags)?;
+    // Restore the parent repo's namespace before resolving the remote so the
+    // reopened worker handle resolves the namespaced refs, matching sync `push`.
+    if let Some(ns) = &self.namespace {
+      repo
+        .set_namespace(ns)
+        .convert("Failed to restore repository namespace")?;
+    }
+    let mut remote = repo
+      .remote_anonymous(&self.remote_url)
+      .convert("Failed to resolve remote")?;
+    let mut options = self.options.take().unwrap_or_default();
+    remote
+      .push(self.refspecs.as_slice(), Some(&mut options))
+      .convert_without_message()
+  }
+}
+
+#[napi]
+impl Task for RemotePushTask {
+  type Output = ();
+  type JsValue = ();
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(())
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
+  }
+}
+
+#[napi]
+/// @remarks Single-use: attaching this to a `FetchOptions`/`PushOptions` via
+/// `remoteCallback()` consumes it; a second attach throws (`InvalidArg`,
+/// "RemoteCallbacks can only be used once"). Construct a fresh instance per
+/// attach. (`updateTips` does NOT consume it and may reuse the same instance.)
 pub struct RemoteCallbacks {
   inner: git2::RemoteCallbacks<'static>,
   used: bool,
@@ -394,7 +822,7 @@ impl RemoteCallbacks {
     &mut self,
     env: Env,
     callback: Function<CredInfo, &'static mut Cred>,
-  ) -> Result<&Self> {
+  ) -> napi::Result<&Self> {
     let func_ref = callback.create_ref()?;
     self
       .inner
@@ -403,7 +831,7 @@ impl RemoteCallbacks {
           .borrow_back(&env)
           .and_then(|cb| {
             cb.call(CredInfo {
-              cred_type: cred.into(),
+              cred_type: cred.bits(),
               url: url.to_string(),
               username: username_from_url.unwrap_or("git").to_string(),
             })
@@ -444,8 +872,11 @@ impl RemoteCallbacks {
     self
   }
 
-  #[napi(ts_args_type = "callback: (current: number, total: number, bytes: number) => void")]
-  /// The callback through which progress of push transfer is monitored
+  #[napi]
+  /// The callback through which progress of push transfer is monitored.
+  ///
+  /// The callback receives a single `PushTransferProgress` object describing how
+  /// many objects have been processed and how many bytes have been sent.
   pub fn push_transfer_progress(
     &mut self,
     env: Env,
@@ -467,21 +898,29 @@ impl RemoteCallbacks {
     self
   }
 
-  #[napi(ts_args_type = "callback: (refname: string, status: string | null) => void")]
+  #[napi]
   /// Set a callback to get invoked for each updated reference on a push.
   ///
-  /// The callback is invoked once per reference with the reference name and a
-  /// status message sent by the server. `status` is `null` when the reference
-  /// was updated successfully; otherwise it is the server's rejection reason.
+  /// The callback is invoked once per reference with a single
+  /// `PushUpdateReference` object. `status` is `null` when the reference was
+  /// updated successfully; otherwise it is the server's rejection reason.
   pub fn push_update_reference(
     &mut self,
     env: Env,
-    callback: FunctionRef<FnArgs<(String, Option<String>)>, ()>,
+    callback: FunctionRef<PushUpdateReference, ()>,
   ) -> &Self {
     self.inner.push_update_reference(move |refname, status| {
       callback
         .borrow_back(&env)
-        .and_then(|cb| cb.call((refname.to_string(), status.map(|s| s.to_string())).into()))
+        .and_then(|cb| {
+          cb.call(PushUpdateReference {
+            refname: refname.to_string(),
+            status: match status {
+              Some(s) => Either::A(s.to_string()),
+              None => Either::B(Null),
+            },
+          })
+        })
         .map_err(|err| {
           git2::Error::new(
             ErrorCode::GenericError,
@@ -495,9 +934,17 @@ impl RemoteCallbacks {
 }
 
 #[napi]
+/// @remarks Single-use: consumed by the first `fetch()` or `fetchAsync()` call.
+/// Reusing the same instance throws (`InvalidArg`, "FetchOptions can only be used
+/// once") — synchronously at the call site even for `fetchAsync` (it does NOT
+/// reject the returned Promise). Construct a fresh instance per call.
 pub struct FetchOptions {
   pub(crate) inner: git2::FetchOptions<'static>,
   pub(crate) used: bool,
+  /// `true` once `remote_callback` has attached JS-backed `RemoteCallbacks`.
+  /// `fetch_async` rejects options with callbacks because they cannot be run
+  /// off the main JS thread.
+  pub(crate) has_remote_callbacks: bool,
 }
 
 #[napi]
@@ -508,15 +955,21 @@ impl FetchOptions {
     FetchOptions {
       inner: git2::FetchOptions::new(),
       used: false,
+      has_remote_callbacks: false,
     }
   }
 
   #[napi]
   /// Set the callbacks to use for the fetch operation.
-  pub fn remote_callback(&mut self, callback: &mut RemoteCallbacks) -> Result<&Self> {
+  pub fn remote_callback(
+    &mut self,
+    env: Env,
+    callback: &mut RemoteCallbacks,
+  ) -> napi::Result<&Self> {
     if callback.used {
-      return Err(Error::new(
-        Status::GenericFailure,
+      return Err(coded_error(
+        env,
+        GitErrorCode::InvalidArg,
         "RemoteCallbacks can only be used once".to_string(),
       ));
     }
@@ -524,15 +977,17 @@ impl FetchOptions {
     mem::swap(&mut cbs, &mut callback.inner);
     self.inner.remote_callbacks(cbs);
     callback.used = true;
+    self.has_remote_callbacks = true;
     Ok(self)
   }
 
   #[napi]
   /// Set the proxy options to use for the fetch operation.
-  pub fn proxy_options(&mut self, options: &mut ProxyOptions) -> Result<&Self> {
+  pub fn proxy_options(&mut self, env: Env, options: &mut ProxyOptions) -> napi::Result<&Self> {
     if options.used {
-      return Err(Error::new(
-        Status::GenericFailure,
+      return Err(coded_error(
+        env,
+        GitErrorCode::InvalidArg,
         "ProxyOptions can only be used once".to_string(),
       ));
     }
@@ -594,18 +1049,29 @@ impl FetchOptions {
 
   #[napi]
   /// Set extra headers for this fetch operation.
-  pub fn custom_headers(&mut self, headers: Vec<String>) -> &Self {
+  ///
+  /// Throws if any header contains an interior NUL byte.
+  pub fn custom_headers(&mut self, env: Env, headers: Vec<String>) -> napi::Result<&Self> {
+    reject_interior_nul(&headers, "custom header").code_into(env)?;
     self
       .inner
       .custom_headers(&headers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-    self
+    Ok(self)
   }
 }
 
 #[napi]
+/// @remarks Single-use: consumed by the first `push()` or `pushAsync()` call.
+/// Reusing the same instance throws (`InvalidArg`, "PushOptions can only be used
+/// once") — synchronously at the call site even for `pushAsync` (it does NOT
+/// reject the returned Promise). Construct a fresh instance per call.
 pub struct PushOptions {
   pub(crate) inner: git2::PushOptions<'static>,
   pub(crate) used: bool,
+  /// `true` once `remote_callback` has attached JS-backed `RemoteCallbacks`.
+  /// `push_async` rejects options with callbacks because they cannot be run
+  /// off the main JS thread.
+  pub(crate) has_remote_callbacks: bool,
 }
 
 #[napi]
@@ -616,15 +1082,21 @@ impl PushOptions {
     PushOptions {
       inner: git2::PushOptions::new(),
       used: false,
+      has_remote_callbacks: false,
     }
   }
 
   #[napi]
   /// Set the callbacks to use for the push operation.
-  pub fn remote_callback(&mut self, callback: &mut RemoteCallbacks) -> Result<&Self> {
+  pub fn remote_callback(
+    &mut self,
+    env: Env,
+    callback: &mut RemoteCallbacks,
+  ) -> napi::Result<&Self> {
     if callback.used {
-      return Err(Error::new(
-        Status::GenericFailure,
+      return Err(coded_error(
+        env,
+        GitErrorCode::InvalidArg,
         "RemoteCallbacks can only be used once".to_string(),
       ));
     }
@@ -632,15 +1104,17 @@ impl PushOptions {
     mem::swap(&mut cbs, &mut callback.inner);
     self.inner.remote_callbacks(cbs);
     callback.used = true;
+    self.has_remote_callbacks = true;
     Ok(self)
   }
 
   #[napi]
   /// Set the proxy options to use for the push operation.
-  pub fn proxy_options(&mut self, options: &mut ProxyOptions) -> Result<&Self> {
+  pub fn proxy_options(&mut self, env: Env, options: &mut ProxyOptions) -> napi::Result<&Self> {
     if options.used {
-      return Err(Error::new(
-        Status::GenericFailure,
+      return Err(coded_error(
+        env,
+        GitErrorCode::InvalidArg,
         "ProxyOptions can only be used once".to_string(),
       ));
     }
@@ -678,8 +1152,8 @@ impl PushOptions {
   /// Set extra headers for this push operation.
   ///
   /// Throws if any header contains an interior NUL byte.
-  pub fn custom_headers(&mut self, headers: Vec<String>) -> Result<&Self> {
-    reject_interior_nul(&headers, "custom header")?;
+  pub fn custom_headers(&mut self, env: Env, headers: Vec<String>) -> napi::Result<&Self> {
+    reject_interior_nul(&headers, "custom header").code_into(env)?;
     self
       .inner
       .custom_headers(&headers.iter().map(|s| s.as_str()).collect::<Vec<_>>());
@@ -690,8 +1164,8 @@ impl PushOptions {
   /// Set "push options" to deliver to the remote.
   ///
   /// Throws if any push option contains an interior NUL byte.
-  pub fn remote_push_options(&mut self, options: Vec<String>) -> Result<&Self> {
-    reject_interior_nul(&options, "remote push option")?;
+  pub fn remote_push_options(&mut self, env: Env, options: Vec<String>) -> napi::Result<&Self> {
+    reject_interior_nul(&options, "remote push option").code_into(env)?;
     self
       .inner
       .remote_push_options(&options.iter().map(|s| s.as_str()).collect::<Vec<_>>());
@@ -707,7 +1181,7 @@ fn reject_interior_nul(values: &[String], what: &str) -> Result<()> {
   for value in values {
     if value.contains('\0') {
       return Err(Error::new(
-        Status::InvalidArg,
+        GitErrorCode::InvalidArg,
         format!("{what} contains an interior NUL byte"),
       ));
     }
@@ -745,6 +1219,17 @@ pub struct PushTransferProgress {
   pub current: u32,
   pub total: u32,
   pub bytes: u32,
+}
+
+#[napi(object)]
+/// A single reference update reported during a push.
+pub struct PushUpdateReference {
+  /// The full name of the reference that was updated (e.g.
+  /// `refs/heads/main`).
+  pub refname: String,
+  /// `null` when the reference was updated successfully; otherwise the
+  /// server's rejection reason.
+  pub status: Either<String, Null>,
 }
 
 #[napi]
@@ -882,14 +1367,27 @@ impl Cred {
   }
 
   #[napi]
+  #[allow(clippy::unnecessary_cast)] // git_credtype_t is i32 on MSVC, u32 elsewhere
   /// Return the type of credentials that this object represents.
-  pub fn credtype(&self) -> CredentialType {
-    self.inner.credtype().into()
+  ///
+  /// The value is the raw `CredentialType` bitset (an OR-able `number`); test
+  /// individual bits with `credTypeContains` and the `CredentialType` constants.
+  pub fn cred_type(&self) -> u32 {
+    // Normalize the platform-variant raw `git_credtype_t` to a portable u32. The
+    // values match `git2::CredentialType` (always u32), so callers can mask with
+    // CredentialType.* / credTypeContains.
+    self.inner.credtype() as u32
   }
 }
 
 #[napi]
-/// Check whether a cred_type contains another credential type.
-pub fn cred_type_contains(cred_type: CredentialType, another: CredentialType) -> bool {
-  Into::<git2::CredentialType>::into(cred_type).contains(another.into())
+/// Check whether a raw credential-type bitset contains a given `CredentialType`
+/// bit.
+///
+/// `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credType()`);
+/// `flag` is one of the `CredentialType` constants. Returns
+/// `(cred_type & flag) === flag`.
+pub fn cred_type_contains(cred_type: u32, flag: CredentialType) -> bool {
+  let flag_bits = Into::<git2::CredentialType>::into(flag).bits();
+  (cred_type & flag_bits) == flag_bits
 }

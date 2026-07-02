@@ -15,29 +15,36 @@ Repository.init('/path/to/repo') // init a git repository
 
 const repo = new Repository('/path/to/repo') // Open an existed repo
 
-const timestamp = new Date(repo.getFileLatestModifiedDate('build.rs')) // get the latest modified timestamp of a `build.rs`
-console.log(timestamp) // 2022-03-13T12:47:47.920Z
+// Last-modified commit time of `build.rs` in milliseconds since the Unix epoch.
+// Returns a `number`; throws when no commit in history touched the path.
+const lastModified = repo.getFileLatestModifiedDate('build.rs')
+console.log(new Date(lastModified)) // 2022-03-13T12:47:47.920Z
 
-const timestampFromAsync = new Date(await repo.getFileLatestModifiedDateAsync('build.rs')) // Async version of `getFileLatestModifiedDate`
+// Async version of `getFileLatestModifiedDate`, also a `number` (rejects if no history).
+const lastModifiedAsync = await repo.getFileLatestModifiedDateAsync('build.rs')
+console.log(lastModifiedAsync) // 1647175667920
 
-console.log(timestamp) // 2022-03-13T12:47:47.920Z
+// Null-safe alternative: a `Date`, or `null` (never throws) when no commit ever
+// touched the path.
+const lastModifiedDate = repo.getFileLastModifiedDate('build.rs')
+if (lastModifiedDate) console.log(lastModifiedDate) // 2022-03-13T12:47:47.920Z
 
 // Enriched metadata for the last commit that touched a file.
 // Returns `null` (does **not** throw) when the path has no commit history.
-const mod = repo.getFileLatestModification('build.rs')
+const mod = repo.getFileLatestModified('build.rs')
 if (mod) {
   console.log(mod.authorName, mod.authorEmail) // 'LongYinan' 'github@lyn.one'
-  console.log(new Date(mod.timestamp)) // `timestamp` === `committerTime`, ms since epoch
+  console.log(mod.committerTime) // a `Date`, identical to getFileLastModifiedDate('build.rs')
   console.log(mod.commitId, mod.summary)
 }
 
 // Bulk: resolve many files in a single history walk (early-exits once all are found).
 // Every input path is present as a key; a never-committed path maps to `null`.
-const mods = repo.getFilesLatestModification(['build.rs', 'Cargo.toml'])
+const mods = repo.getFilesLatestModified(['build.rs', 'Cargo.toml'])
 console.log(mods['build.rs']?.committerName)
-console.log(mods['Cargo.toml']?.timestamp)
+console.log(mods['Cargo.toml']?.committerTime) // a `Date`
 // Empty input returns `{}`:
-console.log(repo.getFilesLatestModification([])) // {}
+console.log(repo.getFilesLatestModified([])) // {}
 
 // ---- Working-tree status (like `git status`) ----
 const changes = repo.statuses() // => FileStatus[]
@@ -49,9 +56,9 @@ const scanned = await repo.statusesAsync({ includeIgnored: true }) // off-thread
 
 // ---- Config + default signature ----
 const config = repo.config() // => Config (system + global + repo, prioritized)
-config.setStr('user.name', 'LongYinan')
-console.log(config.getStringValue('user.name')) // 'LongYinan'
-console.log(config.getBool('core.bare')) // false
+config.setString('user.name', 'LongYinan')
+console.log(config.getString('user.name')) // 'LongYinan'
+console.log(config.getBoolean('core.bare')) // false
 const sig = repo.signature() // built from user.name / user.email
 console.log(sig.name(), sig.email()) // 'LongYinan' 'github@lyn.one'
 
@@ -89,10 +96,38 @@ console.log(repo.blameLine('build.rs', 10)?.finalAuthorName) // hunk for line 10
 
 // ---- Push ----
 const remote = repo.findRemote('origin')!
-const callbacks = new RemoteCallbacks().pushUpdateReference((refname, status) => {
-  console.log(refname, status) // 'refs/heads/main' null   (null === accepted)
-})
+const callbacks = new RemoteCallbacks()
+  // Per-ref result: one object per updated reference.
+  .pushUpdateReference(({ refname, status }) => {
+    console.log(refname, status) // 'refs/heads/main' null   (null === accepted)
+  })
+  // Pack-transfer progress: a single PushTransferProgress object.
+  .pushTransferProgress(({ current, total, bytes }) => {
+    console.log(`${current}/${total} objects, ${bytes} bytes`)
+  })
 remote.push(['refs/heads/main'], new PushOptions().remoteCallback(callbacks))
+
+// ---- Async (off-main-thread) network + commit ----
+// Clone, commit, fetch and push also have async variants that run their git
+// work on a worker thread and return a Promise. `commitAsync` mirrors `commit`.
+const cloned = await Repository.cloneAsync('https://example.com/repo.git', '/tmp/clone')
+const asyncOid = await repo.commitAsync('HEAD', sig, sig, 'async commit', tree, [parent])
+// fetchAsync / pushAsync accept data-only Fetch/Push options. They do NOT accept
+// RemoteCallbacks (JS callbacks can't run off the main thread) — use the sync
+// fetch()/push() when you need credential or progress callbacks.
+await remote.fetchAsync(['refs/heads/main:refs/remotes/origin/main'])
+await remote.pushAsync(['refs/heads/main'], new PushOptions().packbuilderParallelism(1))
+
+// ---- Tags & diff ----
+// tagForeach hands the callback a single { id, nameBytes } object per tag.
+repo.tagForeach(({ id, nameBytes }) => {
+  console.log(id, nameBytes.toString('utf8')) // '<40-hex>' 'refs/tags/v1.0.0'
+  return true // return false to stop iterating
+})
+// DiffOptions.showUnmodified pulls unmodified files into the diff so they show
+// up in `deltas()` (with an Unmodified status) instead of being skipped.
+const headTree = repo.head().peelToTree()
+repo.diffTreeToWorkdir(headTree, { showUnmodified: true })
 ```
 
 ### API
@@ -101,22 +136,38 @@ remote.push(['refs/heads/main'], new PushOptions().remoteCallback(callbacks))
 export class Repository {
   static init(p: string): Repository
   constructor(gitDir: string)
+  /**
+   * Asynchronous variant of `clone`, performed off the main thread. Resolves
+   * with a ready-to-use `Repository` once the clone completes.
+   */
+  static cloneAsync(url: string, path: string, signal?: AbortSignal | undefined | null): Promise<Repository>
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
+  /**
+   * Last-modified commit time of `filepath` in milliseconds since the Unix
+   * epoch. Throws when no commit in history touched the path. For a
+   * `null`-on-missing `Date`, use `getFileLastModifiedDate`.
+   */
   getFileLatestModifiedDate(filepath: string): number
   getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  /**
+   * Last-modified commit time of `filepath` as a `Date`, or `null` when no
+   * commit in history touched the path (never throws for the missing case).
+   */
+  getFileLastModifiedDate(filepath: string): Date | null
+  getFileLastModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
   /**
    * Last commit that modified `filepath`, with author/committer identity.
    * Returns `null` when no commit in history touched the path.
    */
-  getFileLatestModification(filepath: string): FileModification | null
-  getFileLatestModificationAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
+  getFileLatestModified(filepath: string): FileModification | null
+  getFileLatestModifiedAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
   /**
    * Resolve the last commit that modified each of `filepaths` in a single
    * history walk. Every input path is a key; never-committed paths map to `null`.
    */
-  getFilesLatestModification(filepaths: Array<string>): Record<string, FileModification | undefined | null>
-  getFilesLatestModificationAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
+  getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | null>
+  getFilesLatestModifiedAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | null>>
   /** Repository config view (system + global + repo, prioritized). */
   config(): Config
   /** Default signature built from `user.name` / `user.email`. */
@@ -143,6 +194,8 @@ export class Repository {
   referenceSymbolic(name: string, target: string, force: boolean, logMessage: string): Reference
   /** Create a new commit; `parents` is an optional list of parent OID hex strings. */
   commit(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null): string
+  /** Asynchronous variant of `commit`, performed off the main thread. Resolves with the new commit's OID hex. */
+  commitAsync(updateRef: string | undefined | null, author: Signature, committer: Signature, message: string, tree: Tree, parents?: Array<string> | undefined | null, signal?: AbortSignal | undefined | null): Promise<string>
   /** Get the index (staging area) for this repository. */
   index(): Index
   /** Write an in-memory buffer to the object database as a blob; returns its OID hex. */
@@ -161,15 +214,27 @@ export class Repository {
   blameLine(path: string, lineNo: number, options?: BlameOptions | undefined | null): BlameHunk | null
   /** Asynchronous variant of `blameFile`, computed off the main thread. */
   blameFileAsync(path: string, options?: BlameOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<BlameHunk>>
+  /** Create an annotated tag (and its ref); returns the new tag object's OID. */
+  tag(name: string, target: GitObject, tagger: Signature, message: string, force: boolean): string
+  /** Create an annotated tag object WITHOUT a ref; returns its OID. */
+  tagAnnotation(name: string, target: GitObject, tagger: Signature, message: string): string
+  /** Lookup a tag object by OID; `null` when it does not exist. */
+  findTag(oid: string): Tag | null
+  /** Lookup a tag object by hash prefix; `null` when no tag matches. */
+  findTagByPrefix(prefixHash: string): Tag | null
+  /** Read libgit2's merge message (`.git/MERGE_MSG`). */
+  mergeMessage(): string
+  /** Remove the merge message (`.git/MERGE_MSG`). */
+  removeMergeMessage(): void
+  /** Add a remote with the provided fetch refspec to the configuration. */
+  remoteWithFetch(name: string, url: string, refspec: string): Remote
 }
 
 /**
  * Last commit that modified a file, with author/committer identity.
- * All times are ms since epoch (UTC; timezone offset ignored).
+ * All times are `Date`s (UTC; timezone offset ignored).
  */
 export interface FileModification {
-  /** Committer time, ms since epoch. Identical to `getFileLatestModifiedDate`. Equals `committerTime`. */
-  timestamp: number
   /** 40-char lowercase hex OID of the last commit that modified the file. */
   commitId: string
   /** Commit summary (first line). Undefined if absent or not valid UTF-8. */
@@ -178,14 +243,14 @@ export interface FileModification {
   authorName?: string
   /** Author email. Undefined if not valid UTF-8. */
   authorEmail?: string
-  /** Author time, ms since epoch. */
-  authorTime: number
+  /** Author time, as a `Date`. */
+  authorTime: Date
   /** Committer name. Undefined if not valid UTF-8. */
   committerName?: string
   /** Committer email. Undefined if not valid UTF-8. */
   committerEmail?: string
-  /** Committer time, ms since epoch. Equals `timestamp`. */
-  committerTime: number
+  /** Committer time, as a `Date`. Identical to `getFileLastModifiedDate`. */
+  committerTime: Date
 }
 
 /**
@@ -196,15 +261,17 @@ export class Config {
   /** Open global, XDG and system config into one prioritized object. */
   static openDefault(): Config
   /** Get a string config value (highest-priority occurrence wins). */
-  getStringValue(name: string): string
-  getBool(name: string): boolean
-  getI32(name: string): number
-  getI64(name: string): number
+  getString(name: string): string
+  getBoolean(name: string): boolean
+  getNumber(name: string): number
+  /** i64 value as a `bigint` (no >2^53 truncation). */
+  getBigInt(name: string): bigint
   /** Set a value in the highest-level config file (usually the local one). */
-  setStr(name: string, value: string): void
-  setBool(name: string, value: boolean): void
-  setI32(name: string, value: number): void
-  setI64(name: string, value: number): void
+  setString(name: string, value: string): void
+  setBoolean(name: string, value: boolean): void
+  setNumber(name: string, value: number): void
+  /** Set an i64 value from a `bigint`; throws if it doesn't fit in i64. */
+  setBigInt(name: string, value: bigint): void
   /** Delete a variable from the highest-level config file. */
   removeEntry(name: string): void
   /** Create a read-only point-in-time snapshot of this configuration. */
@@ -262,7 +329,7 @@ export class Index {
   /** Remove an index entry corresponding to a file on disk. */
   removePath(path: string): void
   /** Get the count of entries currently in the index. */
-  count(): number
+  size(): number
   /** Write the in-memory index back to disk using an atomic file lock. */
   write(): void
   /** Write the index as a tree to the object database and return its OID. */
@@ -319,7 +386,7 @@ export class PushOptions {
  * value as a forward-compatible escape hatch for flags not surfaced here.
  */
 export interface FileStatus {
-  /** Workdir-relative path. `null` if the path is not valid UTF-8. */
+  /** Workdir-relative path. Undefined if the path is not valid UTF-8. */
   path?: string
   /** Raw `git2::Status` bits — forward-compat escape hatch. */
   bits: number
@@ -394,8 +461,8 @@ export interface BlameHunk {
   finalAuthorName?: string
   /** Author email of the final commit. Undefined if absent or not valid UTF-8. */
   finalAuthorEmail?: string
-  /** Author time of the final commit, ms since epoch. `0` if no signature. */
-  finalTime: number
+  /** Author time of the final commit, as a `Date`. The Unix epoch if no signature. */
+  finalTime: Date
   /** 40-char lowercase hex OID of the commit where this hunk was found. */
   origCommitId: string
   /** Line number where this hunk begins in the original file (1-based). */
@@ -413,9 +480,19 @@ export interface BlameHunk {
  * (no copy tracking, the whole file, starting from the current HEAD).
  */
 export interface BlameOptions {
-  /** Track lines that have moved within a file. Defaults to `false`. */
+  /**
+   * Track lines that have moved within a file. Defaults to `false`.
+   *
+   * Note: libgit2 1.9.4 does not implement blame copy/move tracking, so setting
+   * this flag has no effect today (accepted for forward-compat; effectively a no-op).
+   */
   trackCopiesSameFile?: boolean
-  /** Track lines that have moved across files in the same commit. Defaults to `false`. */
+  /**
+   * Track lines that have moved across files in the same commit. Defaults to `false`.
+   *
+   * Note: libgit2 1.9.4 does not implement blame copy/move tracking, so setting
+   * this flag has no effect today (accepted for forward-compat; effectively a no-op).
+   */
   trackCopiesSameCommitMoves?: boolean
   /** 40-char hex OID of the newest commit to consider (the blame starts here). */
   newestCommit?: string
@@ -466,6 +543,19 @@ export interface CheckoutOptions {
 }
 ```
 
+### Disposal
+
+`dispose()` — and its alias `free()` — eagerly releases the native git2 handle
+without waiting for garbage collection; both are idempotent. After disposal every
+throwing method throws `"Repository has been disposed"` (the `Option`-returning
+lookups return `null` instead), and every handle derived from the repo (`Remote`,
+`Tree`, `Commit`, `Reference`, `RevWalk`, …) throws the same error on use —
+whether it is the receiver or passed as an argument to another method
+(machine-enforced, not merely documented). Disposal does NOT cancel
+already-scheduled `*Async` operations: they reopen the repo on their own worker
+thread and run to completion. To cancel a pending async op, pass an `AbortSignal`
+to the `*Async` method rather than relying on `dispose()`.
+
 ## `Reference`
 
 ### Usage
@@ -504,13 +594,13 @@ export class Reference {
    * ```ts
    * import { Reference } from '@napi-rs/simple-git'
    *
-   * console.assert(Reference.is_valid_name("HEAD"));
-   * console.assert(Reference.is_valid_name("refs/heads/main"));
+   * console.assert(Reference.isValidName("HEAD"));
+   * console.assert(Reference.isValidName("refs/heads/main"));
    *
    * // But:
-   * console.assert(!Reference.is_valid_name("main"));
-   * console.assert(!Reference.is_valid_name("refs/heads/*"));
-   * console.assert(!Reference.is_valid_name("foo//bar"));
+   * console.assert(!Reference.isValidName("main"));
+   * console.assert(!Reference.isValidName("refs/heads/*"));
+   * console.assert(!Reference.isValidName("foo//bar"));
    * ```
    */
   static isValidName(name: string): boolean
@@ -528,7 +618,7 @@ export class Reference {
    *
    * Returns `None` if the name is not valid utf-8.
    */
-  name(): string | undefined | null
+  name(): string | null
   /**
    * Get the full shorthand of a reference.
    *
@@ -537,30 +627,129 @@ export class Reference {
    *
    * Returns `None` if the shorthand is not valid utf-8.
    */
-  shorthand(): string | undefined | null
+  shorthand(): string | null
   /**
    * Get the OID pointed to by a direct reference.
    *
    * Only available if the reference is direct (i.e. an object id reference,
    * not a symbolic one).
    */
-  target(): string | undefined | null
+  target(): string | null
   /**
    * Return the peeled OID target of this reference.
    *
    * This peeled OID only applies to direct references that point to a hard
    * Tag object: it is the result of peeling such Tag.
    */
-  targetPeel(): string | undefined | null
+  targetPeel(): string | null
   /**
    * Get full name to the reference pointed to by a symbolic reference.
    *
    * May return `None` if the reference is either not symbolic or not a
    * valid utf-8 string.
    */
-  symbolicTarget(): string | undefined | null
+  symbolicTarget(): string | null
 }
 ```
+
+## Error handling
+
+Every error thrown by this library — from a synchronous method or from a rejected
+`*Async` promise — is a standard `Error` carrying a `code` string property drawn
+from a fixed union of tokens. The tokens are exported as the **`GitErrorCode`**
+const enum, and any caught value can be narrowed to a coded error with the
+**`isGitError(e)`** type guard:
+
+```ts
+import { isGitError, GitErrorCode } from '@napi-rs/simple-git'
+
+try {
+  // …some git operation…
+} catch (e) {
+  if (isGitError(e) && e.code === GitErrorCode.NotFound) {
+    // handle the missing object/reference/config entry
+  }
+}
+```
+
+`isGitError(e)` returns `true` only when `e` is a genuine `Error` object whose
+`code` is a real member of the `GitErrorCode` enum; it narrows `e` to
+`Error & { code: GitErrorCode }` in TypeScript. The `Error` check is the native
+Node-API `napi_is_error` test (not a JS-level `instanceof`), so it recognizes
+cross-realm and subclassed errors while rejecting look-alike proxies and plain
+objects. Membership is validated against the enum (the single source of truth),
+so a non-git `Error` that merely exposes some other string `.code` (e.g. Node's
+`ENOENT`) returns `false`. The guard is total — it never throws for any input,
+even a hostile value with a throwing proxy trap or `Symbol.hasInstance`, or an
+`Error` whose `code` is a throwing getter (all return `false`) — so it is always
+safe to call inside a `catch`.
+
+The 29 members of `GitErrorCode` are the 28 libgit2 error classes plus one
+napi-level token:
+
+| Token | Meaning |
+| --- | --- |
+| `GenericError` | Unclassified catch-all. Any unmapped or future libgit2 code collapses here — treat it as "something went wrong" rather than a specific class. |
+| `NotFound` | A requested object/reference/config entry does not exist. |
+| `Exists` | The object already exists and cannot be overwritten. |
+| `Ambiguous` | A short OID or name matched more than one object. |
+| `BufSize` | An output buffer was too small. |
+| `User` | A user-supplied callback returned an error. |
+| `BareRepo` | The operation is not allowed on a bare repository. |
+| `UnbornBranch` | HEAD points at a branch with no commits yet. |
+| `Unmerged` | The index contains unmerged entries. |
+| `NotFastForward` | A reference update was rejected because it was not fast-forward. |
+| `InvalidSpec` | A refspec/name is not well-formed. |
+| `Conflict` | A checkout/merge conflict prevents the operation. |
+| `Locked` | The resource is locked by another operation. |
+| `Modified` | The reference/object was modified concurrently. |
+| `Auth` | Authentication failed. |
+| `Certificate` | The server TLS certificate was rejected. |
+| `Applied` | The patch/commit was already applied. |
+| `Peel` | An object could not be peeled to the requested type. |
+| `Eof` | Unexpected end of file/stream. |
+| `Invalid` | An invalid operation or input for the current state. |
+| `Uncommitted` | Uncommitted changes prevent the operation. |
+| `Directory` | The operation is not valid on a directory. |
+| `MergeConflict` | A merge produced conflicts. |
+| `HashsumMismatch` | A hash verification failed. |
+| `IndexDirty` | The index has unsaved changes. |
+| `ApplyFail` | A patch failed to apply. |
+| `Owner` | The repository is owned by an unexpected user. |
+| `Timeout` | The operation timed out. |
+| `InvalidArg` | napi-level argument validation / API misuse (e.g. an option object reused across two `*Async` calls, or `RemoteCallbacks` passed to `fetchAsync`/`pushAsync`). Not a libgit2 class. |
+
+Synchronous methods and `*Async` promise rejections expose the same
+`GitErrorCode` token set, so you can branch on it either way:
+
+```ts
+import { isGitError, GitErrorCode } from '@napi-rs/simple-git'
+
+// Synchronous
+try {
+  repo.findRemote('does-not-exist')
+} catch (e) {
+  if (isGitError(e) && e.code === GitErrorCode.NotFound) {
+    // handle the missing remote
+  }
+}
+
+// Asynchronous
+await repo.getFileLatestModifiedDateAsync('build.rs').catch((e) => {
+  if (isGitError(e) && e.code === GitErrorCode.GenericError) {
+    // unclassified failure
+  }
+})
+```
+
+> **Cancellation is different.** `*Async` methods that accept an `AbortSignal`
+> reject an aborted call with napi's own `AbortError`, whose `.code === "Cancelled"`.
+> That is napi's runtime cancellation code — it is **not** a `GitErrorCode` member
+> (it comes from napi, not the git layer), because cancellation bypasses the
+> task's own reject hook. Because `"Cancelled"` is not a `GitErrorCode` member,
+> `isGitError` returns **`false`** for it. Detect an aborted call separately —
+> via the `AbortSignal`'s `aborted`/`abort` event or by checking
+> `e.code === "Cancelled"` — rather than through `isGitError`.
 
 ## Performance
 

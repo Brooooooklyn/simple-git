@@ -1,9 +1,13 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::{mem, path::Path};
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-use crate::{error::IntoNapiError, remote::FetchOptions, repo::Repository};
+use crate::{
+  GitErrorCode, Result, coded_error, error::IntoNapiError, remote::FetchOptions, repo::Repository,
+};
 
 #[napi]
 pub struct RepoBuilder {
@@ -119,11 +123,16 @@ impl RepoBuilder {
   ///
   /// The callbacks are used for reporting fetch progress, and for acquiring
   /// credentials in the event they are needed.
-  pub fn fetch_options(&mut self, fetch_options: &mut FetchOptions) -> Result<&Self> {
+  pub fn fetch_options(
+    &mut self,
+    env: Env,
+    fetch_options: &mut FetchOptions,
+  ) -> napi::Result<&Self> {
     if fetch_options.used {
-      return Err(Error::new(
-        Status::GenericFailure,
-        "FetchOptions has been used, please create a new one",
+      return Err(coded_error(
+        env,
+        GitErrorCode::InvalidArg,
+        "FetchOptions has been used, please create a new one".to_string(),
       ));
     }
     let mut opt = git2::FetchOptions::default();
@@ -136,10 +145,14 @@ impl RepoBuilder {
   #[napi]
   pub fn clone(&mut self, url: String, path: String) -> Result<Repository> {
     Ok(Repository {
-      inner: self
-        .builder
-        .clone(&url, Path::new(&path))
-        .convert("Clone failed")?,
+      inner: Some(
+        self
+          .builder
+          .clone(&url, Path::new(&path))
+          .convert("Clone failed")?,
+      ),
+      open_flags: None,
+      alive: Arc::new(AtomicBool::new(true)),
     })
   }
 }

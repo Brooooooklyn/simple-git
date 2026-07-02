@@ -39,10 +39,13 @@ const bareRev = (bare, ref) =>
 test("push updates the bare remote ref", (t) => {
   const { root, bare, work, head } = makePushSetup();
   try {
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     t.truthy(remote);
     remote.push(["refs/heads/main:refs/heads/main"], null);
     t.is(bareRev(bare, "refs/heads/main"), head);
+    // Free the git2 handle before rmSync deletes the temp dir (Windows EBUSY).
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -52,10 +55,12 @@ test("push updates the bare remote ref", (t) => {
 test("push accepts a PushOptions instance", (t) => {
   const { root, bare, work, head } = makePushSetup();
   try {
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     const options = new PushOptions();
     remote.push(["refs/heads/main:refs/heads/main"], options);
     t.is(bareRev(bare, "refs/heads/main"), head);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -80,24 +85,27 @@ test("customHeaders rejects an interior NUL byte instead of crashing", (t) => {
   t.is(options.customHeaders(["X-Ok: 1"]), options);
 });
 
-// Callback path: pushUpdateReference fires once per ref with a null status on
-// a successful (non-rejected) push.
-test("pushUpdateReference fires with null status on success", (t) => {
+// Callback path: pushUpdateReference fires once per ref with a single object
+// argument carrying { refname, status }. status is null on a successful
+// (non-rejected) push.
+test("pushUpdateReference fires with a single { refname, status } object on success", (t) => {
   const { root, bare, work, head } = makePushSetup();
   try {
-    const remote = new Repository(work).findRemote("origin");
+    const repo = new Repository(work);
+    const remote = repo.findRemote("origin");
     const updates = [];
-    const callbacks = new RemoteCallbacks().pushUpdateReference(
-      (refname, status) => {
-        updates.push({ refname, status });
-      },
-    );
+    const callbacks = new RemoteCallbacks().pushUpdateReference((update) => {
+      updates.push(update);
+    });
     const options = new PushOptions().remoteCallback(callbacks);
     remote.push(["refs/heads/main:refs/heads/main"], options);
     t.is(updates.length, 1);
+    // Exactly one object argument with the documented fields.
+    t.is(typeof updates[0], "object");
     t.is(updates[0].refname, "refs/heads/main");
     t.is(updates[0].status, null);
     t.is(bareRev(bare, "refs/heads/main"), head);
+    repo.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

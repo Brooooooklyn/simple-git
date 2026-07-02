@@ -1,7 +1,10 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-use crate::{error::IntoNapiError, repo::Repository};
+use crate::{CodeInto, ensure_alive, error::IntoNapiError, repo::Repository};
 
 #[napi]
 /// Orderings that may be specified for Revwalk iteration.
@@ -33,20 +36,12 @@ pub enum Sort {
   Reverse = 4,
 }
 
-impl From<Sort> for git2::Sort {
-  fn from(value: Sort) -> Self {
-    match value {
-      Sort::None => git2::Sort::NONE,
-      Sort::Topological => git2::Sort::TOPOLOGICAL,
-      Sort::Time => git2::Sort::TIME,
-      Sort::Reverse => git2::Sort::REVERSE,
-    }
-  }
-}
-
 #[napi(iterator)]
 pub struct RevWalk {
   pub(crate) inner: SharedReference<Repository, git2::Revwalk<'static>>,
+  /// Liveness flag shared with the owning `Repository` (see `Repository::alive`).
+  /// Guards every method that derefs the underlying `git2::Revwalk`.
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -56,6 +51,13 @@ impl Generator for RevWalk {
   type Next = ();
 
   fn next(&mut self, _value: Option<Self::Next>) -> Option<Self::Yield> {
+    // The `Generator` trait's `next` returns `Option`, not `Result`, so it
+    // cannot throw. On disposal the revwalk borrows a freed repo, so returning
+    // `None` (a safe iteration end) is the correct memory-safe substitute for a
+    // throw — it prevents the use-after-free deref below.
+    if !self.alive.load(Ordering::Relaxed) {
+      return None;
+    }
     self
       .inner
       .next()
@@ -70,18 +72,28 @@ impl RevWalk {
   ///
   /// The revwalk is automatically reset when iteration of its commits
   /// completes.
-  pub fn reset(&mut self) -> Result<&Self> {
-    self.inner.reset().convert_without_message()?;
+  pub fn reset(&mut self, env: Env) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    self
+      .inner
+      .reset()
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
   #[napi]
   /// Set the sorting mode for a revwalk.
-  pub fn set_sorting(&mut self, sorting: Sort) -> Result<&Self> {
+  ///
+  /// `sorting` is a raw bitset of `Sort` flags OR-ed together (e.g.
+  /// `Sort.Time | Sort.Reverse`). Unknown bits are ignored.
+  pub fn set_sorting(&mut self, env: Env, sorting: u32) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
     self
       .inner
-      .set_sorting(sorting.into())
-      .convert_without_message()?;
+      .set_sorting(git2::Sort::from_bits_truncate(sorting))
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -89,11 +101,13 @@ impl RevWalk {
   /// Simplify the history by first-parent
   ///
   /// No parents other than the first for each commit will be enqueued.
-  pub fn simplify_first_parent(&mut self) -> Result<&Self> {
+  pub fn simplify_first_parent(&mut self, env: Env) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
     self
       .inner
       .simplify_first_parent()
-      .convert_without_message()?;
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -105,9 +119,16 @@ impl RevWalk {
   /// The given commit will be used as one of the roots when starting the
   /// revision walk. At least one commit must be pushed onto the walker before
   /// a walk can be started.
-  pub fn push(&mut self, oid: String) -> Result<&Self> {
-    let oid = git2::Oid::from_str(&oid).convert("Invalid oid")?;
-    self.inner.push(oid).convert_without_message()?;
+  pub fn push(&mut self, env: Env, oid: String) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    let oid = git2::Oid::from_str(&oid)
+      .convert("Invalid oid")
+      .code_into(env)?;
+    self
+      .inner
+      .push(oid)
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -115,8 +136,13 @@ impl RevWalk {
   /// Push the repository's HEAD
   ///
   /// For more information, see `push`.
-  pub fn push_head(&mut self) -> Result<&Self> {
-    self.inner.push_head().convert_without_message()?;
+  pub fn push_head(&mut self, env: Env) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    self
+      .inner
+      .push_head()
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -131,8 +157,13 @@ impl RevWalk {
   ///
   /// Any references matching this glob which do not point to a commitish
   /// will be ignored.
-  pub fn push_glob(&mut self, glob: String) -> Result<&Self> {
-    self.inner.push_glob(&glob).convert_without_message()?;
+  pub fn push_glob(&mut self, env: Env, glob: String) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    self
+      .inner
+      .push_glob(&glob)
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -142,8 +173,13 @@ impl RevWalk {
   /// The range should be of the form `<commit>..<commit>` where each
   /// `<commit>` is in the form accepted by `revparse_single`. The left-hand
   /// commit will be hidden and the right-hand commit pushed.
-  pub fn push_range(&mut self, range: String) -> Result<&Self> {
-    self.inner.push_range(&range).convert_without_message()?;
+  pub fn push_range(&mut self, env: Env, range: String) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    self
+      .inner
+      .push_range(&range)
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -151,16 +187,28 @@ impl RevWalk {
   /// Push the OID pointed to by a reference
   ///
   /// The reference must point to a commitish.
-  pub fn push_ref(&mut self, reference: String) -> Result<&Self> {
-    self.inner.push_ref(&reference).convert_without_message()?;
+  pub fn push_ref(&mut self, env: Env, reference: String) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    self
+      .inner
+      .push_ref(&reference)
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
   #[napi]
   /// Mark a commit as not of interest to this revwalk.
-  pub fn hide(&mut self, oid: String) -> Result<&Self> {
-    let oid = git2::Oid::from_str(&oid).convert("Invalid oid")?;
-    self.inner.hide(oid).convert_without_message()?;
+  pub fn hide(&mut self, env: Env, oid: String) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    let oid = git2::Oid::from_str(&oid)
+      .convert("Invalid oid")
+      .code_into(env)?;
+    self
+      .inner
+      .hide(oid)
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -168,8 +216,13 @@ impl RevWalk {
   /// Hide the repository's HEAD
   ///
   /// For more information, see `hide`.
-  pub fn hide_head(&mut self) -> Result<&Self> {
-    self.inner.hide_head().convert_without_message()?;
+  pub fn hide_head(&mut self, env: Env) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    self
+      .inner
+      .hide_head()
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -184,8 +237,13 @@ impl RevWalk {
   ///
   /// Any references matching this glob which do not point to a commitish
   /// will be ignored.
-  pub fn hide_glob(&mut self, glob: String) -> Result<&Self> {
-    self.inner.hide_glob(&glob).convert_without_message()?;
+  pub fn hide_glob(&mut self, env: Env, glob: String) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    self
+      .inner
+      .hide_glob(&glob)
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 
@@ -193,8 +251,13 @@ impl RevWalk {
   /// Hide the OID pointed to by a reference.
   ///
   /// The reference must point to a commitish.
-  pub fn hide_ref(&mut self, reference: String) -> Result<&Self> {
-    self.inner.hide_ref(&reference).convert_without_message()?;
+  pub fn hide_ref(&mut self, env: Env, reference: String) -> napi::Result<&Self> {
+    ensure_alive(&self.alive).code_into(env)?;
+    self
+      .inner
+      .hide_ref(&reference)
+      .convert_without_message()
+      .code_into(env)?;
     Ok(self)
   }
 }

@@ -1,8 +1,11 @@
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
-use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+use crate::Result;
+use crate::ensure_alive;
 use crate::error::IntoNapiError;
 
 #[napi]
@@ -14,6 +17,9 @@ use crate::error::IntoNapiError;
 /// used to create a commit).
 pub struct Index {
   pub(crate) inner: git2::Index,
+  /// Liveness flag shared with the owning `Repository` (see `Repository::alive`).
+  /// Guards every method that touches the underlying `git2::Index`.
+  pub(crate) alive: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -25,6 +31,7 @@ impl Index {
   /// readable. This forces the file to be added to the index even if it is
   /// ignored.
   pub fn add_path(&mut self, path: String) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self
       .inner
       .add_path(Path::new(&path))
@@ -38,6 +45,7 @@ impl Index {
   /// are skipped unless `force` is `true`, which maps to
   /// `IndexAddOption::FORCE`.
   pub fn add_all(&mut self, pathspecs: Option<Vec<String>>, force: Option<bool>) -> Result<()> {
+    ensure_alive(&self.alive)?;
     let specs = pathspecs.unwrap_or_else(|| vec!["*".to_owned()]);
     let flag = if force.unwrap_or(false) {
       git2::IndexAddOption::FORCE
@@ -57,6 +65,7 @@ impl Index {
   /// removed. `pathspecs` defaults to `["*"]` when omitted. This will fail on a
   /// bare index.
   pub fn update_all(&mut self, pathspecs: Option<Vec<String>>) -> Result<()> {
+    ensure_alive(&self.alive)?;
     let specs = pathspecs.unwrap_or_else(|| vec!["*".to_owned()]);
     self
       .inner
@@ -67,6 +76,7 @@ impl Index {
   #[napi]
   /// Remove an index entry corresponding to a file on disk.
   pub fn remove_path(&mut self, path: String) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self
       .inner
       .remove_path(Path::new(&path))
@@ -75,13 +85,15 @@ impl Index {
 
   #[napi]
   /// Get the count of entries currently in the index.
-  pub fn count(&self) -> u32 {
-    self.inner.len() as u32
+  pub fn size(&self) -> Result<u32> {
+    ensure_alive(&self.alive)?;
+    Ok(self.inner.len() as u32)
   }
 
   #[napi]
   /// Write the in-memory index back to disk using an atomic file lock.
   pub fn write(&mut self) -> Result<()> {
+    ensure_alive(&self.alive)?;
     self.inner.write().convert_without_message()
   }
 
@@ -92,6 +104,7 @@ impl Index {
   /// contain any conflicted entries. The returned OID can be used to create a
   /// commit.
   pub fn write_tree(&mut self) -> Result<String> {
+    ensure_alive(&self.alive)?;
     self
       .inner
       .write_tree()
