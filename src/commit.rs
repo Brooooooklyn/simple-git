@@ -8,7 +8,7 @@ use napi_derive::napi;
 use chrono::{DateTime, Utc};
 
 use crate::{
-  CodeInto, GitCode, Result, ensure_alive,
+  CodeInto, GitErrorCode, Result, ensure_alive,
   error::IntoNapiError,
   object::ObjectParent,
   signature::{Signature, SignatureInner},
@@ -213,7 +213,7 @@ impl Commit {
     let committer_time = self.inner.time();
 
     DateTime::from_timestamp(committer_time.seconds(), 0)
-      .ok_or_else(|| Error::new(GitCode::GenericError, "Invalid commit time"))
+      .ok_or_else(|| Error::new(GitErrorCode::GenericError, "Invalid commit time"))
   }
 
   #[napi]

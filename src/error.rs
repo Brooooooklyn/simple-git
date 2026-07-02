@@ -13,7 +13,7 @@ impl<T> IntoNapiError for Result<T, git2::Error> {
   fn convert<S: AsRef<str>>(self, msg: S) -> crate::Result<T> {
     self.map_err(|err| {
       napi::Error::new(
-        crate::GitCode::from_git2(err.code()),
+        crate::GitErrorCode::from_git2(err.code()),
         format!("{}: {}", msg.as_ref(), err),
       )
     })
@@ -23,7 +23,7 @@ impl<T> IntoNapiError for Result<T, git2::Error> {
   fn convert_without_message(self) -> crate::Result<Self::Associate> {
     self.map_err(|err| {
       napi::Error::new(
-        crate::GitCode::from_git2(err.code()),
+        crate::GitErrorCode::from_git2(err.code()),
         format!("libgit2 error: {err}"),
       )
     })
@@ -37,19 +37,19 @@ impl<T> IntoNapiError for Result<T, git2::Error> {
 /// a module-level `type Result<T>` would shadow that prelude `Result`. Nesting
 /// keeps the `Result` alias out of the parent module's scope so both coexist,
 /// while `lib.rs` re-exports these at the crate root so `crate::Result` /
-/// `crate::GitCode` / `crate::coded_error` / `crate::CodeInto` resolve crate-wide.
+/// `crate::GitErrorCode` / `crate::coded_error` / `crate::CodeInto` resolve crate-wide.
 pub(crate) mod codes {
   use napi::{Env, Status, bindgen_prelude::*};
   use napi_derive::napi;
 
   /// Stable string tokens surfaced to JS as `error.code`. The first 28 variants
   /// mirror `git2::ErrorCode` (verbatim names); `InvalidArg` is the napi-level
-  /// token. `GenericError` doubles as the catch-all. `GitCode: Copy` ⇒ it is
+  /// token. `GenericError` doubles as the catch-all. `GitErrorCode: Copy` ⇒ it is
   /// `Send + Sync`, which is required so it can ride along as an async carrier
-  /// field on `napi::Error<GitCode>`.
-  #[napi(string_enum, js_name = "GitErrorCode")]
+  /// field on `napi::Error<GitErrorCode>`.
+  #[napi(string_enum)]
   #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-  pub enum GitCode {
+  pub enum GitErrorCode {
     GenericError,
     NotFound,
     Exists,
@@ -81,95 +81,95 @@ pub(crate) mod codes {
     InvalidArg,
   }
 
-  impl AsRef<str> for GitCode {
+  impl AsRef<str> for GitErrorCode {
     fn as_ref(&self) -> &str {
       match self {
-        GitCode::GenericError => "GenericError",
-        GitCode::NotFound => "NotFound",
-        GitCode::Exists => "Exists",
-        GitCode::Ambiguous => "Ambiguous",
-        GitCode::BufSize => "BufSize",
-        GitCode::User => "User",
-        GitCode::BareRepo => "BareRepo",
-        GitCode::UnbornBranch => "UnbornBranch",
-        GitCode::Unmerged => "Unmerged",
-        GitCode::NotFastForward => "NotFastForward",
-        GitCode::InvalidSpec => "InvalidSpec",
-        GitCode::Conflict => "Conflict",
-        GitCode::Locked => "Locked",
-        GitCode::Modified => "Modified",
-        GitCode::Auth => "Auth",
-        GitCode::Certificate => "Certificate",
-        GitCode::Applied => "Applied",
-        GitCode::Peel => "Peel",
-        GitCode::Eof => "Eof",
-        GitCode::Invalid => "Invalid",
-        GitCode::Uncommitted => "Uncommitted",
-        GitCode::Directory => "Directory",
-        GitCode::MergeConflict => "MergeConflict",
-        GitCode::HashsumMismatch => "HashsumMismatch",
-        GitCode::IndexDirty => "IndexDirty",
-        GitCode::ApplyFail => "ApplyFail",
-        GitCode::Owner => "Owner",
-        GitCode::Timeout => "Timeout",
-        GitCode::InvalidArg => "InvalidArg",
+        GitErrorCode::GenericError => "GenericError",
+        GitErrorCode::NotFound => "NotFound",
+        GitErrorCode::Exists => "Exists",
+        GitErrorCode::Ambiguous => "Ambiguous",
+        GitErrorCode::BufSize => "BufSize",
+        GitErrorCode::User => "User",
+        GitErrorCode::BareRepo => "BareRepo",
+        GitErrorCode::UnbornBranch => "UnbornBranch",
+        GitErrorCode::Unmerged => "Unmerged",
+        GitErrorCode::NotFastForward => "NotFastForward",
+        GitErrorCode::InvalidSpec => "InvalidSpec",
+        GitErrorCode::Conflict => "Conflict",
+        GitErrorCode::Locked => "Locked",
+        GitErrorCode::Modified => "Modified",
+        GitErrorCode::Auth => "Auth",
+        GitErrorCode::Certificate => "Certificate",
+        GitErrorCode::Applied => "Applied",
+        GitErrorCode::Peel => "Peel",
+        GitErrorCode::Eof => "Eof",
+        GitErrorCode::Invalid => "Invalid",
+        GitErrorCode::Uncommitted => "Uncommitted",
+        GitErrorCode::Directory => "Directory",
+        GitErrorCode::MergeConflict => "MergeConflict",
+        GitErrorCode::HashsumMismatch => "HashsumMismatch",
+        GitErrorCode::IndexDirty => "IndexDirty",
+        GitErrorCode::ApplyFail => "ApplyFail",
+        GitErrorCode::Owner => "Owner",
+        GitErrorCode::Timeout => "Timeout",
+        GitErrorCode::InvalidArg => "InvalidArg",
       }
     }
   }
 
-  impl GitCode {
+  impl GitErrorCode {
     /// Map a `git2::ErrorCode` to its token. `git2::ErrorCode` is an exhaustive
     /// (not `#[non_exhaustive]`) enum with 28 variants; matching all 28 *plus* a
     /// wildcard would make the wildcard an `unreachable_pattern` (a warning that
     /// breaks the clippy-clean bar). So `GenericError` is folded into the same
-    /// `_ => GitCode::GenericError` catch-all that keeps this forward-compatible
+    /// `_ => GitErrorCode::GenericError` catch-all that keeps this forward-compatible
     /// with any variant a future git2 may add. The remaining 27 map 1:1.
     pub fn from_git2(code: git2::ErrorCode) -> Self {
       match code {
-        git2::ErrorCode::NotFound => GitCode::NotFound,
-        git2::ErrorCode::Exists => GitCode::Exists,
-        git2::ErrorCode::Ambiguous => GitCode::Ambiguous,
-        git2::ErrorCode::BufSize => GitCode::BufSize,
-        git2::ErrorCode::User => GitCode::User,
-        git2::ErrorCode::BareRepo => GitCode::BareRepo,
-        git2::ErrorCode::UnbornBranch => GitCode::UnbornBranch,
-        git2::ErrorCode::Unmerged => GitCode::Unmerged,
-        git2::ErrorCode::NotFastForward => GitCode::NotFastForward,
-        git2::ErrorCode::InvalidSpec => GitCode::InvalidSpec,
-        git2::ErrorCode::Conflict => GitCode::Conflict,
-        git2::ErrorCode::Locked => GitCode::Locked,
-        git2::ErrorCode::Modified => GitCode::Modified,
-        git2::ErrorCode::Auth => GitCode::Auth,
-        git2::ErrorCode::Certificate => GitCode::Certificate,
-        git2::ErrorCode::Applied => GitCode::Applied,
-        git2::ErrorCode::Peel => GitCode::Peel,
-        git2::ErrorCode::Eof => GitCode::Eof,
-        git2::ErrorCode::Invalid => GitCode::Invalid,
-        git2::ErrorCode::Uncommitted => GitCode::Uncommitted,
-        git2::ErrorCode::Directory => GitCode::Directory,
-        git2::ErrorCode::MergeConflict => GitCode::MergeConflict,
-        git2::ErrorCode::HashsumMismatch => GitCode::HashsumMismatch,
-        git2::ErrorCode::IndexDirty => GitCode::IndexDirty,
-        git2::ErrorCode::ApplyFail => GitCode::ApplyFail,
-        git2::ErrorCode::Owner => GitCode::Owner,
-        git2::ErrorCode::Timeout => GitCode::Timeout,
+        git2::ErrorCode::NotFound => GitErrorCode::NotFound,
+        git2::ErrorCode::Exists => GitErrorCode::Exists,
+        git2::ErrorCode::Ambiguous => GitErrorCode::Ambiguous,
+        git2::ErrorCode::BufSize => GitErrorCode::BufSize,
+        git2::ErrorCode::User => GitErrorCode::User,
+        git2::ErrorCode::BareRepo => GitErrorCode::BareRepo,
+        git2::ErrorCode::UnbornBranch => GitErrorCode::UnbornBranch,
+        git2::ErrorCode::Unmerged => GitErrorCode::Unmerged,
+        git2::ErrorCode::NotFastForward => GitErrorCode::NotFastForward,
+        git2::ErrorCode::InvalidSpec => GitErrorCode::InvalidSpec,
+        git2::ErrorCode::Conflict => GitErrorCode::Conflict,
+        git2::ErrorCode::Locked => GitErrorCode::Locked,
+        git2::ErrorCode::Modified => GitErrorCode::Modified,
+        git2::ErrorCode::Auth => GitErrorCode::Auth,
+        git2::ErrorCode::Certificate => GitErrorCode::Certificate,
+        git2::ErrorCode::Applied => GitErrorCode::Applied,
+        git2::ErrorCode::Peel => GitErrorCode::Peel,
+        git2::ErrorCode::Eof => GitErrorCode::Eof,
+        git2::ErrorCode::Invalid => GitErrorCode::Invalid,
+        git2::ErrorCode::Uncommitted => GitErrorCode::Uncommitted,
+        git2::ErrorCode::Directory => GitErrorCode::Directory,
+        git2::ErrorCode::MergeConflict => GitErrorCode::MergeConflict,
+        git2::ErrorCode::HashsumMismatch => GitErrorCode::HashsumMismatch,
+        git2::ErrorCode::IndexDirty => GitErrorCode::IndexDirty,
+        git2::ErrorCode::ApplyFail => GitErrorCode::ApplyFail,
+        git2::ErrorCode::Owner => GitErrorCode::Owner,
+        git2::ErrorCode::Timeout => GitErrorCode::Timeout,
         // `GenericError` and any future git2 variant collapse to the catch-all.
-        _ => GitCode::GenericError,
+        _ => GitErrorCode::GenericError,
       }
     }
   }
 
-  /// Crate-local result whose error carries a `GitCode` (distinct from
+  /// Crate-local result whose error carries a `GitErrorCode` (distinct from
   /// `napi::Result<T, S = Status>`, whose error carries a `Status`). Task 2
   /// threads this through the fallible git paths.
-  pub type Result<T> = core::result::Result<T, napi::Error<GitCode>>;
+  pub type Result<T> = core::result::Result<T, napi::Error<GitErrorCode>>;
 
   /// Build a `napi::Error<Status>` whose pre-materialised JS error object carries
   /// a `.code` string property. When thrown, napi reuses this object verbatim, so
   /// `.code` survives onto the JS `Error`. The infallible `unwrap_or_else`
   /// fallback guarantees this never panics even if the napi object plumbing fails
   /// (in which case the error is still surfaced, just without `.code`).
-  pub fn coded_error(env: Env, code: GitCode, message: String) -> napi::Error {
+  pub fn coded_error(env: Env, code: GitErrorCode, message: String) -> napi::Error {
     (|| -> napi::Result<napi::Error> {
       let mut obj = env.create_error(napi::Error::new(Status::GenericFailure, message.clone()))?;
       obj.set_named_property("code", code.as_ref())?;
@@ -226,9 +226,9 @@ pub(crate) mod codes {
   /// derived from it — is accessed after `dispose()`/`free()`. Kept byte-for-byte
   /// identical to the message `Repository::inner()` throws (see repo.rs) so a
   /// disposed repository and every derived handle surface an IDENTICAL error.
-  pub(crate) fn disposed_error() -> napi::Error<GitCode> {
+  pub(crate) fn disposed_error() -> napi::Error<GitErrorCode> {
     napi::Error::new(
-      GitCode::GenericError,
+      GitErrorCode::GenericError,
       "Repository has been disposed".to_string(),
     )
   }
@@ -248,16 +248,16 @@ pub(crate) mod codes {
     }
   }
 
-  /// Collapse a `Result<T>` (error carries a `GitCode`) into a `napi::Result<T>`
+  /// Collapse a `Result<T>` (error carries a `GitErrorCode`) into a `napi::Result<T>`
   /// whose error still surfaces `.code`. This lets `share_with` closures and the
-  /// async outer-converts turn an `Error<GitCode>` into a coded `Error<Status>`.
+  /// async outer-converts turn an `Error<GitErrorCode>` into a coded `Error<Status>`.
   pub(crate) trait CodeInto<T> {
     fn code_into(self, env: Env) -> napi::Result<T>;
   }
 
   impl<T> CodeInto<T> for Result<T> {
     fn code_into(self, env: Env) -> napi::Result<T> {
-      // `napi::Error<GitCode>` implements `Drop`, so `reason` can't be moved out
+      // `napi::Error<GitErrorCode>` implements `Drop`, so `reason` can't be moved out
       // by field access (E0509). `status` is `Copy`; take `reason` via `mem::take`.
       self.map_err(|mut e| coded_error(env, e.status, core::mem::take(&mut e.reason)))
     }
@@ -265,37 +265,46 @@ pub(crate) mod codes {
 
   #[cfg(test)]
   mod tests {
-    use super::GitCode;
+    use super::GitErrorCode;
 
     #[test]
     fn from_git2_maps_representative_codes() {
       assert_eq!(
-        GitCode::from_git2(git2::ErrorCode::NotFound),
-        GitCode::NotFound
+        GitErrorCode::from_git2(git2::ErrorCode::NotFound),
+        GitErrorCode::NotFound
       );
-      assert_eq!(GitCode::from_git2(git2::ErrorCode::Exists), GitCode::Exists);
       assert_eq!(
-        GitCode::from_git2(git2::ErrorCode::InvalidSpec),
-        GitCode::InvalidSpec
+        GitErrorCode::from_git2(git2::ErrorCode::Exists),
+        GitErrorCode::Exists
       );
-      assert_eq!(GitCode::from_git2(git2::ErrorCode::Auth), GitCode::Auth);
-      assert_eq!(GitCode::from_git2(git2::ErrorCode::Owner), GitCode::Owner);
       assert_eq!(
-        GitCode::from_git2(git2::ErrorCode::Timeout),
-        GitCode::Timeout
+        GitErrorCode::from_git2(git2::ErrorCode::InvalidSpec),
+        GitErrorCode::InvalidSpec
+      );
+      assert_eq!(
+        GitErrorCode::from_git2(git2::ErrorCode::Auth),
+        GitErrorCode::Auth
+      );
+      assert_eq!(
+        GitErrorCode::from_git2(git2::ErrorCode::Owner),
+        GitErrorCode::Owner
+      );
+      assert_eq!(
+        GitErrorCode::from_git2(git2::ErrorCode::Timeout),
+        GitErrorCode::Timeout
       );
     }
 
     #[test]
     fn as_ref_yields_verbatim_tokens() {
-      assert_eq!(GitCode::NotFound.as_ref(), "NotFound");
-      assert_eq!(GitCode::Exists.as_ref(), "Exists");
-      assert_eq!(GitCode::InvalidSpec.as_ref(), "InvalidSpec");
-      assert_eq!(GitCode::Auth.as_ref(), "Auth");
-      assert_eq!(GitCode::Owner.as_ref(), "Owner");
-      assert_eq!(GitCode::Timeout.as_ref(), "Timeout");
-      assert_eq!(GitCode::GenericError.as_ref(), "GenericError");
-      assert_eq!(GitCode::InvalidArg.as_ref(), "InvalidArg");
+      assert_eq!(GitErrorCode::NotFound.as_ref(), "NotFound");
+      assert_eq!(GitErrorCode::Exists.as_ref(), "Exists");
+      assert_eq!(GitErrorCode::InvalidSpec.as_ref(), "InvalidSpec");
+      assert_eq!(GitErrorCode::Auth.as_ref(), "Auth");
+      assert_eq!(GitErrorCode::Owner.as_ref(), "Owner");
+      assert_eq!(GitErrorCode::Timeout.as_ref(), "Timeout");
+      assert_eq!(GitErrorCode::GenericError.as_ref(), "GenericError");
+      assert_eq!(GitErrorCode::InvalidArg.as_ref(), "InvalidArg");
     }
 
     #[test]
@@ -305,8 +314,8 @@ pub(crate) mod codes {
       // is intentionally not given its own explicit arm and therefore routes
       // through the wildcard — the same path a future git2 variant would take.
       assert_eq!(
-        GitCode::from_git2(git2::ErrorCode::GenericError),
-        GitCode::GenericError
+        GitErrorCode::from_git2(git2::ErrorCode::GenericError),
+        GitErrorCode::GenericError
       );
     }
   }

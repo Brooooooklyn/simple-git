@@ -1,7 +1,7 @@
 #![deny(clippy::all)]
 
 pub(crate) use error::codes::{
-  CodeInto, GitCode, Result, coded_error, disposed_error, ensure_alive,
+  CodeInto, GitErrorCode, Result, coded_error, disposed_error, ensure_alive,
 };
 
 pub mod blame;

@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-use crate::{GitCode, Result, commit::Commit, ensure_alive, error::IntoNapiError};
+use crate::{GitErrorCode, Result, commit::Commit, ensure_alive, error::IntoNapiError};
 
 pub(crate) enum SignatureInner {
   Signature(git2::Signature<'static>),
@@ -111,7 +111,7 @@ impl Signature {
   pub fn when(&self) -> Result<DateTime<Utc>> {
     ensure_alive(&self.alive)?;
     DateTime::from_timestamp(self.inner.when().seconds(), 0)
-      .ok_or_else(|| Error::new(GitCode::GenericError, "Invalid signature time"))
+      .ok_or_else(|| Error::new(GitErrorCode::GenericError, "Invalid signature time"))
   }
 }
 

@@ -625,7 +625,6 @@ module.exports.Direction = nativeBinding.Direction
 module.exports.FetchPrune = nativeBinding.FetchPrune
 module.exports.FileMode = nativeBinding.FileMode
 module.exports.GitErrorCode = nativeBinding.GitErrorCode
-module.exports.GitCode = nativeBinding.GitCode
 module.exports.isGitError = nativeBinding.isGitError
 module.exports.ObjectType = nativeBinding.ObjectType
 module.exports.ReferenceType = nativeBinding.ReferenceType

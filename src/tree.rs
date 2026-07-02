@@ -265,7 +265,7 @@ impl TreeEntry {
       .inner
       .name()
       .ok()
-      .ok_or_else(|| Error::new(crate::GitCode::GenericError, "Invalid utf-8"))
+      .ok_or_else(|| Error::new(crate::GitErrorCode::GenericError, "Invalid utf-8"))
   }
 
   #[napi]

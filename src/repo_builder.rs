@@ -6,7 +6,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::{
-  GitCode, Result, coded_error, error::IntoNapiError, remote::FetchOptions, repo::Repository,
+  GitErrorCode, Result, coded_error, error::IntoNapiError, remote::FetchOptions, repo::Repository,
 };
 
 #[napi]
@@ -131,7 +131,7 @@ impl RepoBuilder {
     if fetch_options.used {
       return Err(coded_error(
         env,
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         "FetchOptions has been used, please create a new one".to_string(),
       ));
     }

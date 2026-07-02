@@ -2,7 +2,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use crate::error::IntoNapiError;
-use crate::{GitCode, Result};
+use crate::{GitErrorCode, Result};
 
 /// `Number.MAX_SAFE_INTEGER` — largest integer a JS `number` (f64) holds losslessly.
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
@@ -101,7 +101,7 @@ impl Config {
     let value = self.inner.get_i64(&name).convert_without_message()?;
     if !(-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&value) {
       return Err(Error::new(
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         format!(
           "Config value for `{name}` ({value}) exceeds Number.MAX_SAFE_INTEGER; use getBigInt"
         ),
@@ -144,7 +144,7 @@ impl Config {
   pub fn set_number(&mut self, name: String, value: f64) -> Result<()> {
     if value.fract() != 0.0 || value.abs() > MAX_SAFE_INTEGER as f64 {
       return Err(Error::new(
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         format!(
           "Config value for `{name}` ({value}) must be an integer within the JS safe-integer range; use setBigInt"
         ),
@@ -166,7 +166,7 @@ impl Config {
     let (value, lossless) = value.get_i64();
     if !lossless {
       return Err(Error::new(
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         format!("BigInt value for `{name}` does not fit in a 64-bit signed integer"),
       ));
     }

@@ -8,7 +8,7 @@ use napi_derive::napi;
 
 use crate::error::IntoNapiError;
 use crate::repo::reopen_worker_repo;
-use crate::{CodeInto, GitCode, Result, coded_error, ensure_alive};
+use crate::{CodeInto, GitErrorCode, Result, coded_error, ensure_alive};
 
 #[napi]
 /// An enumeration of the possible directions for a remote.
@@ -223,7 +223,7 @@ impl Remote {
       .and_then(|b| {
         b.as_str().ok().map(|name| name.to_owned()).ok_or_else(|| {
           Error::new(
-            GitCode::GenericError,
+            GitErrorCode::GenericError,
             "Default branch name contains non-utf-8 characters".to_string(),
           )
         })
@@ -278,7 +278,7 @@ impl Remote {
       Some(o) => {
         if o.used {
           return Err(Error::new(
-            GitCode::InvalidArg,
+            GitErrorCode::InvalidArg,
             "FetchOptions can only be used once".to_string(),
           ));
         }
@@ -311,7 +311,7 @@ impl Remote {
       Some(o) => {
         if o.used {
           return Err(Error::new(
-            GitCode::InvalidArg,
+            GitErrorCode::InvalidArg,
             "PushOptions can only be used once".to_string(),
           ));
         }
@@ -368,19 +368,19 @@ impl Remote {
     let namespace = self
       .inner
       .clone_owner(env)
-      .map_err(|mut e| Error::new(GitCode::GenericError, core::mem::take(&mut e.reason)))?
+      .map_err(|mut e| Error::new(GitErrorCode::GenericError, core::mem::take(&mut e.reason)))?
       .namespace();
     let options = match fetch_options {
       Some(o) => {
         if o.used {
           return Err(Error::new(
-            GitCode::InvalidArg,
+            GitErrorCode::InvalidArg,
             "FetchOptions can only be used once".to_string(),
           ));
         }
         if o.has_remote_callbacks {
           return Err(Error::new(
-            GitCode::InvalidArg,
+            GitErrorCode::InvalidArg,
             "fetchAsync does not support RemoteCallbacks; use the synchronous fetch() instead"
               .to_string(),
           ));
@@ -403,7 +403,7 @@ impl Remote {
         remote_url,
         refspecs,
         options,
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -470,19 +470,19 @@ impl Remote {
     let namespace = self
       .inner
       .clone_owner(env)
-      .map_err(|mut e| Error::new(GitCode::GenericError, core::mem::take(&mut e.reason)))?
+      .map_err(|mut e| Error::new(GitErrorCode::GenericError, core::mem::take(&mut e.reason)))?
       .namespace();
     let options = match push_options {
       Some(o) => {
         if o.used {
           return Err(Error::new(
-            GitCode::InvalidArg,
+            GitErrorCode::InvalidArg,
             "PushOptions can only be used once".to_string(),
           ));
         }
         if o.has_remote_callbacks {
           return Err(Error::new(
-            GitCode::InvalidArg,
+            GitErrorCode::InvalidArg,
             "pushAsync does not support RemoteCallbacks; use the synchronous push() instead"
               .to_string(),
           ));
@@ -502,7 +502,7 @@ impl Remote {
       .or_else(|| self.inner.url().ok().map(|s| s.to_owned()))
       .ok_or_else(|| {
         Error::new(
-          GitCode::GenericError,
+          GitErrorCode::GenericError,
           "Remote has no valid UTF-8 push URL".to_string(),
         )
       })?;
@@ -525,7 +525,7 @@ impl Remote {
         remote_url,
         refspecs,
         options,
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -550,7 +550,7 @@ impl Remote {
     // across several `update_tips` calls; flipping `used` would break that.
     if callbacks.as_deref().is_some_and(|cb| cb.used) {
       return Err(napi::Error::new(
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         "RemoteCallbacks has already been used".to_string(),
       ));
     }
@@ -582,11 +582,11 @@ pub struct RemoteFetchTask {
   remote_url: Option<String>,
   refspecs: Vec<String>,
   options: Option<git2::FetchOptions<'static>>,
-  /// Carries the `GitCode` of a failed `run()` from the worker thread
+  /// Carries the `GitErrorCode` of a failed `run()` from the worker thread
   /// (`compute`) to the main thread (`reject`) so the rejected promise's error
   /// gets a `.code`. Written in `compute`, read in `reject`; `compute` fully
   /// precedes `reject` on the same `&mut self`, so a plain field is sound.
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 // SAFETY: every field is `Send` EXCEPT `git2::FetchOptions`, which is `!Send`
@@ -702,9 +702,9 @@ pub struct RemotePushTask {
   remote_url: String,
   refspecs: Vec<String>,
   options: Option<git2::PushOptions<'static>>,
-  /// Carries the `GitCode` of a failed `run()` from the worker thread
+  /// Carries the `GitErrorCode` of a failed `run()` from the worker thread
   /// (`compute`) to the main thread (`reject`); see `RemoteFetchTask::code`.
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 // SAFETY: identical reasoning to `RemoteFetchTask`. Every field is `Send`
@@ -961,7 +961,7 @@ impl FetchOptions {
     if callback.used {
       return Err(coded_error(
         env,
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         "RemoteCallbacks can only be used once".to_string(),
       ));
     }
@@ -979,7 +979,7 @@ impl FetchOptions {
     if options.used {
       return Err(coded_error(
         env,
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         "ProxyOptions can only be used once".to_string(),
       ));
     }
@@ -1084,7 +1084,7 @@ impl PushOptions {
     if callback.used {
       return Err(coded_error(
         env,
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         "RemoteCallbacks can only be used once".to_string(),
       ));
     }
@@ -1102,7 +1102,7 @@ impl PushOptions {
     if options.used {
       return Err(coded_error(
         env,
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         "ProxyOptions can only be used once".to_string(),
       ));
     }
@@ -1169,7 +1169,7 @@ fn reject_interior_nul(values: &[String], what: &str) -> Result<()> {
   for value in values {
     if value.contains('\0') {
       return Err(Error::new(
-        GitCode::InvalidArg,
+        GitErrorCode::InvalidArg,
         format!("{what} contains an interior NUL byte"),
       ));
     }

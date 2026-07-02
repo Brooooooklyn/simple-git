@@ -2069,9 +2069,9 @@ export interface FileStatus {
 /**
  * Stable string tokens surfaced to JS as `error.code`. The first 28 variants
  * mirror `git2::ErrorCode` (verbatim names); `InvalidArg` is the napi-level
- * token. `GenericError` doubles as the catch-all. `GitCode: Copy` ⇒ it is
+ * token. `GenericError` doubles as the catch-all. `GitErrorCode: Copy` ⇒ it is
  * `Send + Sync`, which is required so it can ride along as an async carrier
- * field on `napi::Error<GitCode>`.
+ * field on `napi::Error<GitErrorCode>`.
  */
 export declare const enum GitErrorCode {
   GenericError = 'GenericError',

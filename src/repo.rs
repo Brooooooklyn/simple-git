@@ -28,7 +28,7 @@ use crate::status::{FileStatus, StatusOptions, build_status_opts, status_from_bi
 use crate::tag::Tag;
 use crate::tree::{Tree, TreeParent};
 use crate::util::path_to_javascript_string;
-use crate::{CodeInto, GitCode, Result, coded_error, disposed_error, ensure_alive};
+use crate::{CodeInto, GitErrorCode, Result, coded_error, disposed_error, ensure_alive};
 
 static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
   // Handle the `failed to stat '/root/.gitconfig'; class=Config (7)` Error
@@ -44,7 +44,7 @@ static INIT_GIT_CONFIG: Lazy<Result<()>> = Lazy::new(|| {
       git_config_dir.push(".gitconfig");
       std::fs::write(&git_config_dir, "").map_err(|err| {
         Error::new(
-          GitCode::GenericError,
+          GitErrorCode::GenericError,
           format!("Initialize {git_config_dir:?} failed {err}"),
         )
       })?;
@@ -133,7 +133,7 @@ pub struct GitDateTask {
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 pub struct GitCreatedDateTask {
@@ -142,7 +142,7 @@ pub struct GitCreatedDateTask {
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 pub struct GitModificationTask {
@@ -151,7 +151,7 @@ pub struct GitModificationTask {
   namespace: Option<String>,
   workdir: Option<String>,
   filepath: String,
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 pub struct GitBulkModificationTask {
@@ -160,7 +160,7 @@ pub struct GitBulkModificationTask {
   namespace: Option<String>,
   workdir: Option<String>,
   filepaths: Vec<String>,
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 pub struct GitStatusTask {
@@ -169,7 +169,7 @@ pub struct GitStatusTask {
   namespace: Option<String>,
   workdir: Option<String>,
   options: Option<StatusOptions>,
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 pub struct GitBlameTask {
@@ -179,7 +179,7 @@ pub struct GitBlameTask {
   workdir: Option<String>,
   filepath: String,
   options: Option<BlameOptions>,
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 pub struct GitCommitTask {
@@ -193,7 +193,7 @@ pub struct GitCommitTask {
   message: String,
   tree_oid: git2::Oid,
   parents: Vec<String>,
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 /// Reopen a worker-local `git2::Repository` from `path`, replaying the
@@ -254,7 +254,7 @@ pub struct GitCloneTask {
   url: String,
   path: String,
   result: Option<git2::Repository>,
-  code: GitCode,
+  code: GitErrorCode,
 }
 
 // `git2::Repository` is `Send` (see git2's `unsafe impl Send for Repository`),
@@ -552,7 +552,7 @@ impl Task for GitCloneTask {
       .ok_or_else(|| {
         coded_error(
           env,
-          GitCode::GenericError,
+          GitErrorCode::GenericError,
           "Clone task produced no repository".to_string(),
         )
       })
@@ -775,7 +775,7 @@ impl Repository {
         url,
         path,
         result: None,
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     )
@@ -1871,7 +1871,7 @@ impl Repository {
         message,
         tree_oid: tree.as_ref().id(),
         parents: parents.unwrap_or_default(),
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -1958,7 +1958,7 @@ impl Repository {
         namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepath,
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -1994,7 +1994,7 @@ impl Repository {
         namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepath,
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -2032,7 +2032,7 @@ impl Repository {
         namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepaths,
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -2076,7 +2076,7 @@ impl Repository {
         namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         options,
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -2122,7 +2122,7 @@ impl Repository {
         workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepath: path,
         options,
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
@@ -2158,7 +2158,7 @@ impl Repository {
         namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
         workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
         filepath,
-        code: GitCode::GenericError,
+        code: GitErrorCode::GenericError,
       },
       signal,
     ))
