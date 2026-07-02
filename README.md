@@ -615,11 +615,30 @@ export class Reference {
 
 Every error thrown by this library — from a synchronous method or from a rejected
 `*Async` promise — is a standard `Error` carrying a `code` string property drawn
-from a fixed union of tokens. The `code` is a runtime property on the thrown
-`Error`; napi has no mechanism to add it to the generated `.d.ts` types, so this
-section is the canonical reference for the union.
+from a fixed union of tokens. The tokens are exported as the **`GitErrorCode`**
+const enum, and any caught value can be narrowed to a coded error with the
+**`isGitError(e)`** type guard:
 
-The 29 tokens are the 28 libgit2 error classes plus one napi-level token:
+```ts
+import { isGitError, GitErrorCode } from '@napi-rs/simple-git'
+
+try {
+  // …some git operation…
+} catch (e) {
+  if (isGitError(e) && e.code === GitErrorCode.NotFound) {
+    // handle the missing object/reference/config entry
+  }
+}
+```
+
+`isGitError(e)` returns `true` only when `e` is a genuine `Error` instance that
+carries a string `code`; it narrows `e` to `Error & { code: GitErrorCode }` in
+TypeScript. It is a structural guard, so a non-git `Error` that happens to expose
+a string `.code` (e.g. Node's `ENOENT`) also matches — that is the accepted
+trade-off; the valid tokens are not enumerated at runtime.
+
+The 29 members of `GitErrorCode` are the 28 libgit2 error classes plus one
+napi-level token:
 
 | Token | Meaning |
 | --- | --- |
@@ -653,22 +672,24 @@ The 29 tokens are the 28 libgit2 error classes plus one napi-level token:
 | `Timeout` | The operation timed out. |
 | `InvalidArg` | napi-level argument validation / API misuse (e.g. an option object reused across two `*Async` calls, or `RemoteCallbacks` passed to `fetchAsync`/`pushAsync`). Not a libgit2 class. |
 
-Synchronous methods and `*Async` promise rejections expose the same `error.code`
-token set, so you can branch on it either way:
+Synchronous methods and `*Async` promise rejections expose the same
+`GitErrorCode` token set, so you can branch on it either way:
 
 ```ts
+import { isGitError, GitErrorCode } from '@napi-rs/simple-git'
+
 // Synchronous
 try {
   repo.findRemote('does-not-exist')
 } catch (e) {
-  if (e.code === 'NotFound') {
+  if (isGitError(e) && e.code === GitErrorCode.NotFound) {
     // handle the missing remote
   }
 }
 
 // Asynchronous
 await repo.getFileLatestModifiedDateAsync('build.rs').catch((e) => {
-  if (e.code === 'GenericError') {
+  if (isGitError(e) && e.code === GitErrorCode.GenericError) {
     // unclassified failure
   }
 })
@@ -676,8 +697,12 @@ await repo.getFileLatestModifiedDateAsync('build.rs').catch((e) => {
 
 > **Cancellation is different.** `*Async` methods that accept an `AbortSignal`
 > reject an aborted call with napi's own `AbortError`, whose `.code === "Cancelled"`.
-> That is napi's runtime cancellation code — it is **not** one of the git2/`InvalidArg`
-> tokens above, because cancellation bypasses the task's own reject hook.
+> That is napi's runtime cancellation code — it is **not** a `GitErrorCode` member
+> (it comes from napi, not the git layer), because cancellation bypasses the
+> task's own reject hook. `isGitError` still returns `true` for it (it is an
+> `Error` with a string `code`), so compare `e.code` against the specific
+> `GitErrorCode` members you handle rather than treating every `isGitError` hit
+> as a git-layer failure.
 
 ## Performance
 

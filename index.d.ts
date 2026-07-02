@@ -2066,6 +2066,61 @@ export interface FileStatus {
   isConflicted: boolean
 }
 
+/**
+ * Stable string tokens surfaced to JS as `error.code`. The first 28 variants
+ * mirror `git2::ErrorCode` (verbatim names); `InvalidArg` is the napi-level
+ * token. `GenericError` doubles as the catch-all. `GitCode: Copy` ⇒ it is
+ * `Send + Sync`, which is required so it can ride along as an async carrier
+ * field on `napi::Error<GitCode>`.
+ */
+export declare const enum GitErrorCode {
+  GenericError = 'GenericError',
+  NotFound = 'NotFound',
+  Exists = 'Exists',
+  Ambiguous = 'Ambiguous',
+  BufSize = 'BufSize',
+  User = 'User',
+  BareRepo = 'BareRepo',
+  UnbornBranch = 'UnbornBranch',
+  Unmerged = 'Unmerged',
+  NotFastForward = 'NotFastForward',
+  InvalidSpec = 'InvalidSpec',
+  Conflict = 'Conflict',
+  Locked = 'Locked',
+  Modified = 'Modified',
+  Auth = 'Auth',
+  Certificate = 'Certificate',
+  Applied = 'Applied',
+  Peel = 'Peel',
+  Eof = 'Eof',
+  Invalid = 'Invalid',
+  Uncommitted = 'Uncommitted',
+  Directory = 'Directory',
+  MergeConflict = 'MergeConflict',
+  HashsumMismatch = 'HashsumMismatch',
+  IndexDirty = 'IndexDirty',
+  ApplyFail = 'ApplyFail',
+  Owner = 'Owner',
+  Timeout = 'Timeout',
+  InvalidArg = 'InvalidArg'
+}
+
+/**
+ * Runtime type guard for the coded errors this addon throws.
+ *
+ * Returns `true` iff `e` is a genuine `Error` instance — tested with
+ * `instanceof` against the current realm's global `Error` constructor — that
+ * also carries a string `code` property. Returns `false` for non-errors,
+ * plain objects, `null`/`undefined`, and `Error`s without a string `code`.
+ *
+ * This is a structural (shape) guard: it also matches a non-git `Error` that
+ * happens to expose a string `.code` (e.g. Node's `ENOENT`). That is the
+ * accepted, standard trade-off — the valid token set is intentionally not
+ * enumerated. The companion `GitErrorCode` enum lists the tokens this addon
+ * actually produces.
+ */
+export declare function isGitError(e: unknown): e is Error & { code: GitErrorCode }
+
 export declare const enum ObjectType {
   /** Any kind of git object */
   Any = 0,

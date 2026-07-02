@@ -7,6 +7,8 @@ import test from "ava";
 
 import {
   FetchOptions,
+  GitErrorCode,
+  isGitError,
   RepoBuilder,
   Repository,
   Signature,
@@ -176,4 +178,78 @@ test("fetchAsync against a nonexistent local remote rejects with a git2 code", a
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// -------- GitErrorCode enum + isGitError type guard (published TS surface) ----
+
+// Piece 1: the enum is a real runtime export whose members equal their string
+// tokens (the `string_enum` macro emits the variant identifier verbatim).
+test("GitErrorCode members equal their string tokens", (t) => {
+  t.is(GitErrorCode.GenericError, "GenericError");
+  t.is(GitErrorCode.NotFound, "NotFound");
+  t.is(GitErrorCode.Exists, "Exists");
+  t.is(GitErrorCode.InvalidSpec, "InvalidSpec");
+  t.is(GitErrorCode.InvalidArg, "InvalidArg");
+});
+
+// Piece 2 + end-to-end proof of the identifier==AsRef invariant on the SYNC
+// throw path: the runtime `.code` equals the generated enum member for the
+// same variant, so `e.code === GitErrorCode.NotFound` holds.
+test("isGitError narrows a real thrown git error to its GitErrorCode", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-error-code-"));
+  try {
+    const err = t.throws(() => new Repository(join(root, "does-not-exist")));
+    t.true(isGitError(err));
+    t.is(typeof err.code, "string");
+    t.is(err.code, GitErrorCode.NotFound);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Same invariant on the ASYNC (coded_error) reject path.
+test("isGitError narrows an async-rejected git error to its GitErrorCode", async (t) => {
+  const { root, work, repo } = makeRepo();
+  try {
+    const { tree } = seedCommit(repo, work);
+    const err = await t.throwsAsync(() =>
+      repo.commitAsync("HEAD", sig(), sig(), "orphan", tree, [
+        "0000000000000000000000000000000000000000",
+      ]),
+    );
+    t.true(isGitError(err));
+    t.is(err.code, GitErrorCode.NotFound);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("isGitError rejects a plain Error without a code", (t) => {
+  t.is(isGitError(new Error("x")), false);
+});
+
+test("isGitError rejects an Error whose code is not a string", (t) => {
+  const e = new Error("x");
+  e.code = 42;
+  t.is(isGitError(e), false);
+});
+
+test("isGitError rejects non-errors, plain objects, and null/undefined", (t) => {
+  t.is(isGitError(null), false);
+  t.is(isGitError(undefined), false);
+  t.is(isGitError({}), false);
+  t.is(isGitError("NotFound"), false);
+  t.is(isGitError(123), false);
+  // A PLAIN object carrying a string `code` is NOT an `Error` instance, so the
+  // `instanceof Error` check we shipped rejects it (a bare shape check would not).
+  t.is(isGitError({ code: "NotFound" }), false);
+});
+
+test("isGitError accepts a non-git Error carrying a string code (documented shape-guard trade-off)", (t) => {
+  // The guard is structural: any Error with a string `.code` passes, e.g. a
+  // Node system error like ENOENT. This is the accepted, standard trade-off —
+  // the valid token set is intentionally not enumerated.
+  const e = new Error("boom");
+  e.code = "ENOENT";
+  t.is(isGitError(e), true);
 });

@@ -40,12 +40,14 @@ impl<T> IntoNapiError for Result<T, git2::Error> {
 /// `crate::GitCode` / `crate::coded_error` / `crate::CodeInto` resolve crate-wide.
 pub(crate) mod codes {
   use napi::{Env, Status, bindgen_prelude::*};
+  use napi_derive::napi;
 
   /// Stable string tokens surfaced to JS as `error.code`. The first 28 variants
   /// mirror `git2::ErrorCode` (verbatim names); `InvalidArg` is the napi-level
   /// token. `GenericError` doubles as the catch-all. `GitCode: Copy` ⇒ it is
   /// `Send + Sync`, which is required so it can ride along as an async carrier
   /// field on `napi::Error<GitCode>`.
+  #[napi(string_enum, js_name = "GitErrorCode")]
   #[derive(Copy, Clone, Debug, PartialEq, Eq)]
   pub enum GitCode {
     GenericError,
@@ -174,6 +176,48 @@ pub(crate) mod codes {
       Ok(napi::Error::from(obj.into_unknown(&env)?))
     })()
     .unwrap_or_else(|_| napi::Error::new(Status::GenericFailure, message))
+  }
+
+  /// Runtime type guard for the coded errors this addon throws.
+  ///
+  /// Returns `true` iff `e` is a genuine `Error` instance — tested with
+  /// `instanceof` against the current realm's global `Error` constructor — that
+  /// also carries a string `code` property. Returns `false` for non-errors,
+  /// plain objects, `null`/`undefined`, and `Error`s without a string `code`.
+  ///
+  /// This is a structural (shape) guard: it also matches a non-git `Error` that
+  /// happens to expose a string `.code` (e.g. Node's `ENOENT`). That is the
+  /// accepted, standard trade-off — the valid token set is intentionally not
+  /// enumerated. The companion `GitErrorCode` enum lists the tokens this addon
+  /// actually produces.
+  // napi emits the calling wrapper behind `#[cfg(all(not(test), ...))]`, so under
+  // `cfg(test)` nothing references this fn. Unlike the other free `#[napi]` fns
+  // (which sit in `pub mod`s and are thus part of the crate's public API), this
+  // one lives in the private `mod error`, so `dead_code` fires for the test
+  // build only. Silence it there; the non-test build wires it up normally.
+  #[cfg_attr(test, allow(dead_code))]
+  #[napi(
+    ts_args_type = "e: unknown",
+    ts_return_type = "e is Error & { code: GitErrorCode }"
+  )]
+  pub fn is_git_error(env: &Env, e: Unknown) -> napi::Result<bool> {
+    // Only objects can be `Error` instances; short-circuit primitives, `null`,
+    // and `undefined` before touching `instanceof`/`coerce_to_object`.
+    if e.get_type()? != ValueType::Object {
+      return Ok(false);
+    }
+    // Genuine `e instanceof Error` against this realm's global constructor.
+    let error_ctor = env
+      .get_global()?
+      .get_named_property_unchecked::<Unknown>("Error")?;
+    if !e.instanceof(error_ctor)? {
+      return Ok(false);
+    }
+    // `typeof e.code === "string"`.
+    let code = e
+      .coerce_to_object()?
+      .get_named_property_unchecked::<Unknown>("code")?;
+    Ok(code.get_type()? == ValueType::String)
   }
 
   use std::sync::atomic::{AtomicBool, Ordering};
