@@ -23,7 +23,7 @@ pub struct FileModification {
   pub committer_name: Option<String>,
   /// Committer email. Undefined if not valid UTF-8.
   pub committer_email: Option<String>,
-  /// Committer time, as a `Date`. Identical to `getFileLatestModifiedDate`.
+  /// Committer time, as a `Date`. Identical to `getFileLastModifiedDate`.
   pub committer_time: DateTime<Utc>,
 }
 

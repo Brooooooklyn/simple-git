@@ -23,7 +23,7 @@ test("Date should be equal with cli", (t) => {
     t.notThrows(() => repo.getFileLatestModifiedDate(join("src", "lib.rs")));
   } else {
     const actual = repo.getFileLatestModifiedDate(join("src", "lib.rs"));
-    t.true(actual instanceof Date);
+    t.is(typeof actual, "number");
     t.is(
       new Date(
         execSync("git log -1 --format=%cd --date=iso src/lib.rs", {
@@ -32,7 +32,7 @@ test("Date should be equal with cli", (t) => {
           .toString("utf8")
           .trim(),
       ).valueOf(),
-      actual.getTime(),
+      actual,
     );
   }
 });
@@ -43,7 +43,7 @@ test("Created date should be equal with cli", (t) => {
     t.notThrows(() => repo.getFileCreatedDate(join("src", "lib.rs")));
   } else {
     const actual = repo.getFileCreatedDate(join("src", "lib.rs"));
-    t.true(actual instanceof Date);
+    t.is(typeof actual, "number");
     t.is(
       new Date(
         execSync("git log --reverse --format=%cd --date=iso src/lib.rs", {
@@ -53,7 +53,7 @@ test("Created date should be equal with cli", (t) => {
           .split('\n')[0]
           .trim(),
       ).valueOf(),
-      actual.getTime(),
+      actual,
     );
   }
 });
@@ -73,31 +73,32 @@ test("Created date async should work", async (t) => {
     ).valueOf();
 
     const actualDate = await repo.getFileCreatedDateAsync(join("src", "lib.rs"));
-    t.true(actualDate instanceof Date);
-    t.is(expectedDate, actualDate.getTime());
+    t.is(typeof actualDate, "number");
+    t.is(expectedDate, actualDate);
   }
 });
 
-// A path that no commit ever touched is "no matching commit", NOT an error:
-// the accessors now resolve to `null` instead of throwing.
-test("Created date returns null for non-existent file", (t) => {
+// A path that no commit ever touched is "no matching commit". The legacy
+// `number` accessors THROW for this case (0.1.x behavior); only the
+// `getFileLastModifiedDate` Date twin returns `null` (covered in modification.spec).
+test("Created date THROWS for non-existent file", (t) => {
   const { repo } = t.context;
-  t.is(repo.getFileCreatedDate("non-existent-file.txt"), null);
+  t.throws(() => repo.getFileCreatedDate("non-existent-file.txt"));
 });
 
-test("Created date async returns null for non-existent file", async (t) => {
+test("Created date async THROWS for non-existent file", async (t) => {
   const { repo } = t.context;
-  t.is(await repo.getFileCreatedDateAsync("non-existent-file.txt"), null);
+  await t.throwsAsync(() => repo.getFileCreatedDateAsync("non-existent-file.txt"));
 });
 
-test("Latest modified date returns null for non-existent file", (t) => {
+test("Latest modified date THROWS for non-existent file", (t) => {
   const { repo } = t.context;
-  t.is(repo.getFileLatestModifiedDate("does-not-exist-xyz.txt"), null);
+  t.throws(() => repo.getFileLatestModifiedDate("does-not-exist-xyz.txt"));
 });
 
-test("Latest modified date async returns null for non-existent file", async (t) => {
+test("Latest modified date async THROWS for non-existent file", async (t) => {
   const { repo } = t.context;
-  t.is(await repo.getFileLatestModifiedDateAsync("does-not-exist-xyz.txt"), null);
+  await t.throwsAsync(() => repo.getFileLatestModifiedDateAsync("does-not-exist-xyz.txt"));
 });
 
 // Guard the null-vs-throw boundary: a fresh repo with an unborn HEAD (no commit)
@@ -117,6 +118,10 @@ test("File-date accessors THROW on an unborn HEAD (no commit), not null", async 
     t.throws(() => repo.getFileCreatedDate("anything.txt"));
     t.throws(() => repo.getFileLatestModifiedDate("anything.txt"));
     await t.throwsAsync(() => repo.getFileCreatedDateAsync("anything.txt"));
+    // Unborn HEAD is a REAL error, so even the null-safe Date twin throws,
+    // and the number async rejects.
+    t.throws(() => repo.getFileLastModifiedDate("anything.txt"));
+    await t.throwsAsync(() => repo.getFileLatestModifiedDateAsync("anything.txt"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -176,6 +181,9 @@ test("File-date walkers THROW on a corrupt/missing object mid-walk, not null/wro
     await t.throwsAsync(() => repo.getFileLatestModifiedAsync("a.txt"));
     await t.throwsAsync(() => repo.getFileCreatedDateAsync("a.txt"));
     await t.throwsAsync(() => repo.getFilesLatestModifiedAsync(["a.txt"]));
+    // A corrupt object mid-walk is a REAL error, so the Date twin throws too.
+    t.throws(() => repo.getFileLastModifiedDate("a.txt"));
+    await t.throwsAsync(() => repo.getFileLastModifiedDateAsync("a.txt"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -199,18 +207,19 @@ test("File-date accessors resolve a root-only file and keep no-match -> null", a
     run("commit -q -m root");
 
     const repo = new Repository(work);
-    t.true(repo.getFileCreatedDate("only.txt") instanceof Date);
-    t.true(repo.getFileLatestModifiedDate("only.txt") instanceof Date);
+    t.is(typeof repo.getFileCreatedDate("only.txt"), "number");
+    t.is(typeof repo.getFileLatestModifiedDate("only.txt"), "number");
+    t.true(repo.getFileLastModifiedDate("only.txt") instanceof Date);
     t.truthy(repo.getFileLatestModified("only.txt"));
-    t.true(
-      (await repo.getFileCreatedDateAsync("only.txt")) instanceof Date,
-    );
+    t.is(typeof (await repo.getFileCreatedDateAsync("only.txt")), "number");
 
-    // Same repo, never-committed path: still a plain no-match -> null (no throw).
-    t.is(repo.getFileCreatedDate("missing.txt"), null);
-    t.is(repo.getFileLatestModifiedDate("missing.txt"), null);
+    // Same repo, never-committed path: the legacy number getters THROW, while
+    // getFileLatestModified/getFileLastModifiedDate stay null (no throw).
+    t.throws(() => repo.getFileCreatedDate("missing.txt"));
+    t.throws(() => repo.getFileLatestModifiedDate("missing.txt"));
     t.is(repo.getFileLatestModified("missing.txt"), null);
-    t.is(await repo.getFileCreatedDateAsync("missing.txt"), null);
+    t.is(repo.getFileLastModifiedDate("missing.txt"), null);
+    await t.throwsAsync(() => repo.getFileCreatedDateAsync("missing.txt"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

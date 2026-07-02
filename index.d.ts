@@ -1384,22 +1384,29 @@ export declare class Repository {
   /** Create a revwalk that can be used to traverse the commit graph. */
   revWalk(): RevWalk
   /**
-   * Committer time (as a `Date`) of the most recent commit that modified
-   * `filepath`, or `null` when no commit in history touched the path.
-   *
-   * Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
-   * diffing each non-merge commit against its parent under a libgit2 pathspec
-   * (so `filepath` may be a directory or glob that matches a file); merge
-   * commits are skipped. The value equals `FileModification.committerTime`
-   * returned by `getFileLatestModified`. Only real errors throw
-   * (unborn/empty HEAD, corrupt object, out-of-range timestamp).
+   * Last-modified commit time of `filepath` in **milliseconds since the Unix
+   * epoch**. Throws when no commit in history touched the path. For a
+   * `null`-on-missing `Date`, use `getFileLastModifiedDate`.
    */
-  getFileLatestModifiedDate(filepath: string): Date | null
+  getFileLatestModifiedDate(filepath: string): number
   /**
    * Asynchronous variant of `getFileLatestModifiedDate`, computed off the main
+   * thread. Rejects when no commit in history touched `filepath`.
+   */
+  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  /**
+   * Last-modified commit time of `filepath` as a `Date`, or `null` when no
+   * commit in history touched the path (never throws for the missing case).
+   * Equals `FileModification.committerTime` from `getFileLatestModified`. Only
+   * real errors throw (unborn/empty HEAD, corrupt object, out-of-range
+   * timestamp). For milliseconds-since-epoch, use `getFileLatestModifiedDate`.
+   */
+  getFileLastModifiedDate(filepath: string): Date | null
+  /**
+   * Asynchronous variant of `getFileLastModifiedDate`, computed off the main
    * thread. Resolves to `null` when no commit in history touched `filepath`.
    */
-  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
+  getFileLastModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
   /**
    * Last commit that modified `filepath` (author/committer identity, summary,
    * OID), or `null` when no commit in history touched the path.
@@ -1407,7 +1414,7 @@ export declare class Repository {
    * Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
    * diffing each non-merge commit against its parent under a libgit2 pathspec
    * (so `filepath` may be a directory or glob that matches a file); merge
-   * commits are skipped. `committerTime` equals `getFileLatestModifiedDate`.
+   * commits are skipped. `committerTime` equals `getFileLastModifiedDate`.
    * Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
    * timestamp).
    */
@@ -1467,22 +1474,24 @@ export declare class Repository {
   /** Asynchronous variant of `blame_file`, computed off the main thread. */
   blameFileAsync(path: string, options?: BlameOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<Array<BlameHunk>>
   /**
-   * Commit (committer) time (as a `Date`) of the earliest commit whose tree
-   * contains `filepath`, or `null` when no commit in history contains the path.
+   * Commit (committer) time in **milliseconds since the Unix epoch** of the
+   * earliest commit whose tree contains `filepath`. Throws when no commit in
+   * history contains the path.
    *
    * Walks all history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`)
    * and keeps the last-visited commit whose tree contains `filepath` (matched
    * by exact tree path, not pathspec) — i.e. the oldest containing commit;
    * merge commits are included in this walk. Rename detection is NOT performed
-   * (no `git log --follow`), so history is not traced across renames. Only real
-   * errors throw (unborn/empty HEAD, corrupt object, out-of-range timestamp).
+   * (no `git log --follow`), so history is not traced across renames. Also
+   * throws on real errors (unborn/empty HEAD, corrupt object, out-of-range
+   * timestamp).
    */
-  getFileCreatedDate(filepath: string): Date | null
+  getFileCreatedDate(filepath: string): number
   /**
    * Asynchronous variant of `getFileCreatedDate`, computed off the main thread.
-   * Resolves to `null` when no commit in history contains `filepath`.
+   * Rejects when no commit in history contains `filepath`.
    */
-  getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
+  getFileCreatedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
 }
 
 /**
@@ -2047,7 +2056,7 @@ export interface FileModification {
   committerName?: string
   /** Committer email. Undefined if not valid UTF-8. */
   committerEmail?: string
-  /** Committer time, as a `Date`. Identical to `getFileLatestModifiedDate`. */
+  /** Committer time, as a `Date`. Identical to `getFileLastModifiedDate`. */
   committerTime: Date
 }
 

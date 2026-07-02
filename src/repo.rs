@@ -127,7 +127,16 @@ pub enum RepositoryOpenFlags {
 // neither is set, so default repos are unaffected. Both are `Option<String>`
 // (Send), so the read tasks stay auto-`Send`.
 
-pub struct GitDateTask {
+pub struct GitLastModifiedDateTask {
+  path: String,
+  open_flags: Option<u32>,
+  namespace: Option<String>,
+  workdir: Option<String>,
+  filepath: String,
+  code: GitErrorCode,
+}
+
+pub struct GitLatestModifiedDateTask {
   path: String,
   open_flags: Option<u32>,
   namespace: Option<String>,
@@ -274,7 +283,7 @@ pub struct GitCloneTask {
 // thread, moved out in `resolve()` on the main thread, and (because `compute()`
 // completes before `resolve()` runs) is only ever owned by one thread at a time.
 
-impl GitDateTask {
+impl GitLastModifiedDateTask {
   fn run(&mut self) -> Result<Option<DateTime<Utc>>> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
@@ -285,7 +294,7 @@ impl GitDateTask {
 }
 
 #[napi]
-impl Task for GitDateTask {
+impl Task for GitLastModifiedDateTask {
   type Output = Option<DateTime<Utc>>;
   type JsValue = Option<DateTime<Utc>>;
 
@@ -309,18 +318,63 @@ impl Task for GitDateTask {
   }
 }
 
-impl GitCreatedDateTask {
-  fn run(&mut self) -> Result<Option<DateTime<Utc>>> {
+impl GitLatestModifiedDateTask {
+  fn run(&mut self) -> Result<i64> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    get_file_created_date(&repo, &self.filepath).convert_without_message()
+    get_file_modification(&repo, &self.filepath)
+      .convert_without_message()?
+      .map(|m| m.committer_time.timestamp_millis())
+      .ok_or_else(|| {
+        napi::Error::new(
+          GitErrorCode::GenericError,
+          format!("Failed to get commit for [{}]", self.filepath),
+        )
+      })
+  }
+}
+
+#[napi]
+impl Task for GitLatestModifiedDateTask {
+  type Output = i64;
+  type JsValue = i64;
+
+  fn compute(&mut self) -> napi::Result<Self::Output> {
+    self.run().map_err(|mut e| {
+      self.code = e.status;
+      napi::Error::new(Status::GenericFailure, core::mem::take(&mut e.reason))
+    })
+  }
+
+  fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+    Ok(output)
+  }
+
+  fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
+    Err(coded_error(env, self.code, core::mem::take(&mut err.reason)))
+  }
+}
+
+impl GitCreatedDateTask {
+  fn run(&mut self) -> Result<i64> {
+    let repo = reopen_worker_repo(&self.path, self.open_flags)?;
+    restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
+    get_file_created_date(&repo, &self.filepath)
+      .convert_without_message()?
+      .map(|d| d.timestamp_millis())
+      .ok_or_else(|| {
+        napi::Error::new(
+          GitErrorCode::GenericError,
+          format!("Failed to get created date for [{}]", self.filepath),
+        )
+      })
   }
 }
 
 #[napi]
 impl Task for GitCreatedDateTask {
-  type Output = Option<DateTime<Utc>>;
-  type JsValue = Option<DateTime<Utc>>;
+  type Output = i64;
+  type JsValue = i64;
 
   fn compute(&mut self) -> napi::Result<Self::Output> {
     self.run().map_err(|mut e| {
@@ -1947,32 +2001,66 @@ impl Repository {
   }
 
   #[napi]
-  /// Committer time (as a `Date`) of the most recent commit that modified
-  /// `filepath`, or `null` when no commit in history touched the path.
-  ///
-  /// Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
-  /// diffing each non-merge commit against its parent under a libgit2 pathspec
-  /// (so `filepath` may be a directory or glob that matches a file); merge
-  /// commits are skipped. The value equals `FileModification.committerTime`
-  /// returned by `getFileLatestModified`. Only real errors throw
-  /// (unborn/empty HEAD, corrupt object, out-of-range timestamp).
-  pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
+  /// Last-modified commit time of `filepath` in **milliseconds since the Unix
+  /// epoch**. Throws when no commit in history touched the path. For a
+  /// `null`-on-missing `Date`, use `getFileLastModifiedDate`.
+  pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<i64> {
+    get_file_modification(self.inner()?, &filepath)
+      .convert_without_message()?
+      .map(|m| m.committer_time.timestamp_millis())
+      .ok_or_else(|| {
+        napi::Error::new(
+          GitErrorCode::GenericError,
+          format!("Failed to get commit for [{filepath}]"),
+        )
+      })
+  }
+
+  #[napi]
+  /// Asynchronous variant of `getFileLatestModifiedDate`, computed off the main
+  /// thread. Rejects when no commit in history touched `filepath`.
+  pub fn get_file_latest_modified_date_async(
+    &self,
+    filepath: String,
+    signal: Option<AbortSignal>,
+  ) -> Result<AsyncTask<GitLatestModifiedDateTask>> {
+    let repo = self.inner()?;
+    Ok(AsyncTask::with_optional_signal(
+      GitLatestModifiedDateTask {
+        path: repo.path().to_string_lossy().into_owned(),
+        open_flags: self.open_flags,
+        namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
+        workdir: repo.workdir().map(|p| p.to_string_lossy().into_owned()),
+        filepath,
+        code: GitErrorCode::GenericError,
+      },
+      signal,
+    ))
+  }
+
+  #[napi]
+  /// Last-modified commit time of `filepath` as a `Date`, or `null` when no
+  /// commit in history touched the path (never throws for the missing case).
+  /// Equals `FileModification.committerTime` from `getFileLatestModified`. Only
+  /// real errors throw (unborn/empty HEAD, corrupt object, out-of-range
+  /// timestamp). For milliseconds-since-epoch, use `getFileLatestModifiedDate`.
+  pub fn get_file_last_modified_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
     get_file_modification(self.inner()?, &filepath)
       .convert_without_message()
       .map(|value| value.map(|m| m.committer_time))
   }
 
   #[napi]
-  /// Asynchronous variant of `getFileLatestModifiedDate`, computed off the main
+  /// Asynchronous variant of `getFileLastModifiedDate`, computed off the main
   /// thread. Resolves to `null` when no commit in history touched `filepath`.
-  pub fn get_file_latest_modified_date_async(
+  pub fn get_file_last_modified_date_async(
     &self,
     filepath: String,
     signal: Option<AbortSignal>,
-  ) -> Result<AsyncTask<GitDateTask>> {
+  ) -> Result<AsyncTask<GitLastModifiedDateTask>> {
     let repo = self.inner()?;
     Ok(AsyncTask::with_optional_signal(
-      GitDateTask {
+      GitLastModifiedDateTask {
         path: repo.path().to_string_lossy().into_owned(),
         open_flags: self.open_flags,
         namespace: repo.namespace().ok().flatten().map(|s| s.to_owned()),
@@ -1991,7 +2079,7 @@ impl Repository {
   /// Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
   /// diffing each non-merge commit against its parent under a libgit2 pathspec
   /// (so `filepath` may be a directory or glob that matches a file); merge
-  /// commits are skipped. `committerTime` equals `getFileLatestModifiedDate`.
+  /// commits are skipped. `committerTime` equals `getFileLastModifiedDate`.
   /// Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
   /// timestamp).
   pub fn get_file_latest_modified(&self, filepath: String) -> Result<Option<FileModification>> {
@@ -2152,22 +2240,32 @@ impl Repository {
   }
 
   #[napi]
-  /// Commit (committer) time (as a `Date`) of the earliest commit whose tree
-  /// contains `filepath`, or `null` when no commit in history contains the path.
+  /// Commit (committer) time in **milliseconds since the Unix epoch** of the
+  /// earliest commit whose tree contains `filepath`. Throws when no commit in
+  /// history contains the path.
   ///
   /// Walks all history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`)
   /// and keeps the last-visited commit whose tree contains `filepath` (matched
   /// by exact tree path, not pathspec) — i.e. the oldest containing commit;
   /// merge commits are included in this walk. Rename detection is NOT performed
-  /// (no `git log --follow`), so history is not traced across renames. Only real
-  /// errors throw (unborn/empty HEAD, corrupt object, out-of-range timestamp).
-  pub fn get_file_created_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
-    get_file_created_date(self.inner()?, &filepath).convert_without_message()
+  /// (no `git log --follow`), so history is not traced across renames. Also
+  /// throws on real errors (unborn/empty HEAD, corrupt object, out-of-range
+  /// timestamp).
+  pub fn get_file_created_date(&self, filepath: String) -> Result<i64> {
+    get_file_created_date(self.inner()?, &filepath)
+      .convert_without_message()?
+      .map(|d| d.timestamp_millis())
+      .ok_or_else(|| {
+        napi::Error::new(
+          GitErrorCode::GenericError,
+          format!("Failed to get created date for [{filepath}]"),
+        )
+      })
   }
 
   #[napi]
   /// Asynchronous variant of `getFileCreatedDate`, computed off the main thread.
-  /// Resolves to `null` when no commit in history contains `filepath`.
+  /// Rejects when no commit in history contains `filepath`.
   pub fn get_file_created_date_async(
     &self,
     filepath: String,

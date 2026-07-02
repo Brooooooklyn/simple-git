@@ -46,11 +46,12 @@ test("getFileLatestModified returns enriched metadata", (t) => {
   t.truthy(mod);
 
   // Delegation guard (runs unconditionally; two native methods). committerTime
-  // is the same instant getFileLatestModifiedDate returns -- both now Date.
+  // is the same instant getFileLatestModifiedDate returns -- a Date whose
+  // epoch ms equal the number getter.
   t.true(mod.committerTime instanceof Date);
   t.is(
     mod.committerTime.getTime(),
-    repo.getFileLatestModifiedDate("build.rs").getTime(),
+    repo.getFileLatestModifiedDate("build.rs"),
   );
   t.regex(mod.commitId, /^[0-9a-f]{40}$/);
 
@@ -86,15 +87,33 @@ test("getFileLatestModifiedAsync matches sync result", async (t) => {
   );
 });
 
-// Test #2b — getFileLatestModifiedDateAsync (GitDateTask) matches its sync
-// sibling. Covers the previously-untested async date path; both return a Date
-// for the same instant.
+// Test #2b — getFileLatestModifiedDateAsync (GitLatestModifiedDateTask) matches
+// its sync sibling. Covers the async number-date path; both return epoch ms.
 test("getFileLatestModifiedDateAsync matches sync result", async (t) => {
   const { repo } = t.context;
   const sync = repo.getFileLatestModifiedDate("build.rs");
   const asyncResult = await repo.getFileLatestModifiedDateAsync("build.rs");
-  t.true(asyncResult instanceof Date);
-  t.is(asyncResult.getTime(), sync.getTime());
+  t.is(typeof asyncResult, "number");
+  t.is(asyncResult, sync);
+});
+
+// getFileLastModifiedDate — the robust Date|null twin. Same instant as the
+// number getter; null (not throw) for a never-committed path; async mirrors.
+test("getFileLastModifiedDate returns a Date and mirrors the number getter", async (t) => {
+  const { repo } = t.context;
+  const date = repo.getFileLastModifiedDate("build.rs");
+  t.true(date instanceof Date);
+  t.is(date.getTime(), repo.getFileLatestModifiedDate("build.rs"));
+
+  const asyncDate = await repo.getFileLastModifiedDateAsync("build.rs");
+  t.true(asyncDate instanceof Date);
+  t.is(asyncDate.getTime(), date.getTime());
+});
+
+test("getFileLastModifiedDate returns null (no throw) for a missing path", async (t) => {
+  const { repo } = t.context;
+  t.is(repo.getFileLastModifiedDate("does-not-exist-xyz.nope"), null);
+  t.is(await repo.getFileLastModifiedDateAsync("does-not-exist-xyz.nope"), null);
 });
 
 // Test #3 — null for a path that was never committed.
@@ -111,7 +130,7 @@ test("getFileLatestModified resolves a file whose only commit is the root", (t) 
   t.regex(mod.commitId, /^[0-9a-f]{40}$/);
   t.is(
     mod.committerTime.getTime(),
-    repo.getFileLatestModifiedDate("LICENSE").getTime(),
+    repo.getFileLatestModifiedDate("LICENSE"),
   );
 });
 
