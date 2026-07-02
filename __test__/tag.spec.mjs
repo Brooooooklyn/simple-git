@@ -86,6 +86,25 @@ test("findTagByPrefix resolves by prefix and is null when absent", (t) => {
   }
 });
 
+// After dispose(), findTag/findTagByPrefix return `null` like the other
+// nullable find* helpers (findRemote/findTree/findCommit) rather than throwing
+// "Repository has been disposed" — a disposed repo simply has no tags to
+// resolve. (A genuine libgit2 error other than not-found still throws.)
+test("findTag/findTagByPrefix return null after dispose (not throw)", (t) => {
+  const { root, work, repo } = makeRepo();
+  try {
+    const target = repo.findCommit(rootCommit(work, repo)).asObject();
+    const tagOid = repo.tag("v3.0.0", target, sig(), "release three\n", false);
+    t.truthy(repo.findTag(tagOid), "sanity: resolves while the repo is live");
+
+    repo.dispose();
+    t.is(repo.findTag(tagOid), null);
+    t.is(repo.findTagByPrefix(tagOid.slice(0, 8)), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // tagForeach hands the callback a single object { id, nameBytes } per tag:
 // `id` is the 40-char OID hex string, `nameBytes` is the raw reference name as
 // a Buffer (e.g. "refs/tags/v1.0.0").

@@ -888,7 +888,8 @@ export declare class Repository {
    * After disposal, every throwing method throws
    * `"Repository has been disposed"`; the `Option`-returning methods
    * (`workdir()`, `namespace()`, `findRemote()`, `findTree()`,
-   * `findCommit()`) return `null` instead. Any handle previously derived from
+   * `findCommit()`, `findTag()`, `findTagByPrefix()`) return `null` instead.
+   * Any handle previously derived from
    * this repository — `Remote`, `Reference`, `Tree`, `TreeEntry`, `Commit`,
    * `Tag`, `Branch`, `GitObject`, `Diff`, `RevWalk` and their descendants —
    * throws the same `"Repository has been disposed"` error on use, whether it

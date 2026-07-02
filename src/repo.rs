@@ -615,7 +615,8 @@ impl Repository {
   /// After disposal, every throwing method throws
   /// `"Repository has been disposed"`; the `Option`-returning methods
   /// (`workdir()`, `namespace()`, `findRemote()`, `findTree()`,
-  /// `findCommit()`) return `null` instead. Any handle previously derived from
+  /// `findCommit()`, `findTag()`, `findTagByPrefix()`) return `null` instead.
+  /// Any handle previously derived from
   /// this repository — `Remote`, `Reference`, `Tree`, `TreeEntry`, `Commit`,
   /// `Tag`, `Branch`, `GitObject`, `Diff`, `RevWalk` and their descendants —
   /// throws the same `"Repository has been disposed"` error on use, whether it
@@ -1588,9 +1589,14 @@ impl Repository {
     let oid = git2::Oid::from_str(oid.as_str())
       .convert(format!("Invalid OID [{oid}]"))
       .code_into(env)?;
+    // A disposed repository has no tags to resolve, so return `None`
+    // (consistent with findRemote/findTree/findCommit) rather than throwing.
+    let Some(repo) = self.inner.as_ref() else {
+      return Ok(None);
+    };
     // Probe first so a genuine "not found" maps to `None` while other errors
     // surface, and the `SharedReference` is only built when the tag exists.
-    if let Err(err) = self.inner().code_into(env)?.find_tag(oid) {
+    if let Err(err) = repo.find_tag(oid) {
       if err.code() == git2::ErrorCode::NotFound {
         return Ok(None);
       }
@@ -1622,13 +1628,14 @@ impl Repository {
     this: Reference<Repository>,
     prefix_hash: String,
   ) -> napi::Result<Option<Tag>> {
+    // A disposed repository has no tags to resolve, so return `None`
+    // (consistent with findRemote/findTree/findCommit) rather than throwing.
+    let Some(repo) = self.inner.as_ref() else {
+      return Ok(None);
+    };
     // Probe first so a genuine "not found" maps to `None` while other errors
     // surface, and the `SharedReference` is only built when the tag exists.
-    if let Err(err) = self
-      .inner()
-      .code_into(env)?
-      .find_tag_by_prefix(&prefix_hash)
-    {
+    if let Err(err) = repo.find_tag_by_prefix(&prefix_hash) {
       if err.code() == git2::ErrorCode::NotFound {
         return Ok(None);
       }
