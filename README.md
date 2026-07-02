@@ -15,21 +15,26 @@ Repository.init('/path/to/repo') // init a git repository
 
 const repo = new Repository('/path/to/repo') // Open an existed repo
 
-// Latest modified date of `build.rs`, a `Date` — or `null` when no commit ever
-// touched the path (only a genuine error throws).
+// Last-modified commit time of `build.rs` in milliseconds since the Unix epoch.
+// Returns a `number`; throws when no commit in history touched the path.
 const lastModified = repo.getFileLatestModifiedDate('build.rs')
-if (lastModified) console.log(lastModified) // 2022-03-13T12:47:47.920Z
+console.log(new Date(lastModified)) // 2022-03-13T12:47:47.920Z
 
-// Async version of `getFileLatestModifiedDate`, also `Date | null`.
+// Async version of `getFileLatestModifiedDate`, also a `number` (rejects if no history).
 const lastModifiedAsync = await repo.getFileLatestModifiedDateAsync('build.rs')
-console.log(lastModifiedAsync) // 2022-03-13T12:47:47.920Z, or null
+console.log(lastModifiedAsync) // 1647175667920
+
+// Null-safe alternative: a `Date`, or `null` (never throws) when no commit ever
+// touched the path.
+const lastModifiedDate = repo.getFileLastModifiedDate('build.rs')
+if (lastModifiedDate) console.log(lastModifiedDate) // 2022-03-13T12:47:47.920Z
 
 // Enriched metadata for the last commit that touched a file.
 // Returns `null` (does **not** throw) when the path has no commit history.
 const mod = repo.getFileLatestModified('build.rs')
 if (mod) {
   console.log(mod.authorName, mod.authorEmail) // 'LongYinan' 'github@lyn.one'
-  console.log(mod.committerTime) // a `Date`, identical to getFileLatestModifiedDate('build.rs')
+  console.log(mod.committerTime) // a `Date`, identical to getFileLastModifiedDate('build.rs')
   console.log(mod.commitId, mod.summary)
 }
 
@@ -139,11 +144,18 @@ export class Repository {
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
   /**
-   * Latest commit date that modified `filepath`. Returns `null` when no commit
-   * in history touched the path (only a genuine error throws).
+   * Last-modified commit time of `filepath` in milliseconds since the Unix
+   * epoch. Throws when no commit in history touched the path. For a
+   * `null`-on-missing `Date`, use `getFileLastModifiedDate`.
    */
-  getFileLatestModifiedDate(filepath: string): Date | null
-  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
+  getFileLatestModifiedDate(filepath: string): number
+  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<number>
+  /**
+   * Last-modified commit time of `filepath` as a `Date`, or `null` when no
+   * commit in history touched the path (never throws for the missing case).
+   */
+  getFileLastModifiedDate(filepath: string): Date | null
+  getFileLastModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
   /**
    * Last commit that modified `filepath`, with author/committer identity.
    * Returns `null` when no commit in history touched the path.
@@ -237,7 +249,7 @@ export interface FileModification {
   committerName?: string
   /** Committer email. Undefined if not valid UTF-8. */
   committerEmail?: string
-  /** Committer time, as a `Date`. Identical to `getFileLatestModifiedDate`. */
+  /** Committer time, as a `Date`. Identical to `getFileLastModifiedDate`. */
   committerTime: Date
 }
 
