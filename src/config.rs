@@ -4,6 +4,9 @@ use napi_derive::napi;
 use crate::error::IntoNapiError;
 use crate::{GitCode, Result};
 
+/// `Number.MAX_SAFE_INTEGER` — largest integer a JS `number` (f64) holds losslessly.
+const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+
 #[napi]
 /// The priority level a configuration entry or file applies to. Higher levels
 /// take precedence; `Local` (the repository's own `.git/config`) is where
@@ -89,9 +92,22 @@ impl Config {
   }
 
   #[napi]
-  /// Get the value of an i32 config variable, as a JS `number`.
-  pub fn get_number(&self, name: String) -> Result<i32> {
-    self.inner.get_i32(&name).convert_without_message()
+  /// Get the value of an integer config variable, as a JS `number`.
+  ///
+  /// Reads the value as a 64-bit integer. Errors with `InvalidArg` when it lies
+  /// outside the JS safe-integer range (±(2^53 − 1)), where a `number` would lose
+  /// precision — use `getBigInt` for those.
+  pub fn get_number(&self, name: String) -> Result<f64> {
+    let value = self.inner.get_i64(&name).convert_without_message()?;
+    if !(-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&value) {
+      return Err(Error::new(
+        GitCode::InvalidArg,
+        format!(
+          "Config value for `{name}` ({value}) exceeds Number.MAX_SAFE_INTEGER; use getBigInt"
+        ),
+      ));
+    }
+    Ok(value as f64)
   }
 
   #[napi]
@@ -119,10 +135,25 @@ impl Config {
   }
 
   #[napi]
-  /// Set the value of an i32 config variable in the config file with the
+  /// Set the value of an integer config variable in the config file with the
   /// highest level (usually the local one). Takes a JS `number`.
-  pub fn set_number(&mut self, name: String, value: i32) -> Result<()> {
-    self.inner.set_i32(&name, value).convert_without_message()
+  ///
+  /// Errors with `InvalidArg` when `value` is not an integer or lies outside the
+  /// JS safe-integer range (±(2^53 − 1)) — use `setBigInt` for larger magnitudes
+  /// rather than silently truncating.
+  pub fn set_number(&mut self, name: String, value: f64) -> Result<()> {
+    if value.fract() != 0.0 || value.abs() > MAX_SAFE_INTEGER as f64 {
+      return Err(Error::new(
+        GitCode::InvalidArg,
+        format!(
+          "Config value for `{name}` ({value}) must be an integer within the JS safe-integer range; use setBigInt"
+        ),
+      ));
+    }
+    self
+      .inner
+      .set_i64(&name, value as i64)
+      .convert_without_message()
   }
 
   #[napi]

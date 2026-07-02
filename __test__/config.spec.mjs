@@ -74,6 +74,89 @@ test("config typed setters round-trip (bool/number/bigint)", (t) => {
   }
 });
 
+// Mutating (temp repo): a value above 2^31 but below 2^53 round-trips through
+// setNumber/getNumber exactly. Under the old i32-backed path setNumber(3e9)
+// silently ToInt32-wrapped to -1294967296; now it survives losslessly.
+test("config setNumber/getNumber round-trips a value beyond i32 range", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const config = new Repository(dir).config();
+    const big = 3000000000; // > 2^31 - 1, < Number.MAX_SAFE_INTEGER
+    t.true(big > 2 ** 31 - 1);
+    config.setNumber("x.big", big);
+    t.is(config.getNumber("x.big"), big);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Mutating (temp repo): small integers (including negatives and zero) still
+// round-trip unchanged after the i32 -> f64/i64 switch.
+test("config setNumber/getNumber round-trips small integers", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const config = new Repository(dir).config();
+    for (const n of [42, -7, 0]) {
+      config.setNumber("x.small", n);
+      t.is(config.getNumber("x.small"), n);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Mutating (temp repo): setNumber rejects a non-integer instead of truncating.
+test("config setNumber rejects a non-integer value", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const config = new Repository(dir).config();
+    t.throws(() => config.setNumber("x.f", 1.5), { code: "InvalidArg" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Mutating (temp repo): setNumber rejects a magnitude beyond the JS
+// safe-integer range instead of silently losing precision.
+test("config setNumber rejects an out-of-safe-range value", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const config = new Repository(dir).config();
+    t.throws(() => config.setNumber("x.huge", 1e18), { code: "InvalidArg" });
+    t.throws(() => config.setNumber("x.huge", Number.MAX_SAFE_INTEGER + 2), {
+      code: "InvalidArg",
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Mutating (temp repo): a value stored (via setBigInt) beyond the safe-integer
+// range makes getNumber throw InvalidArg rather than returning a lossy number.
+test("config getNumber throws InvalidArg on a value beyond safe range", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const config = new Repository(dir).config();
+    config.setBigInt("x.i64", 9007199254740993n); // Number.MAX_SAFE_INTEGER + 2
+    t.throws(() => config.getNumber("x.i64"), { code: "InvalidArg" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Mutating (temp repo): the exact Number.MAX_SAFE_INTEGER boundary is accepted
+// by setNumber and read back exactly by getNumber.
+test("config setNumber/getNumber round-trips Number.MAX_SAFE_INTEGER", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const config = new Repository(dir).config();
+    config.setNumber("x.max", Number.MAX_SAFE_INTEGER);
+    t.is(config.getNumber("x.max"), Number.MAX_SAFE_INTEGER);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Mutating (temp repo): a bigint above Number.MAX_SAFE_INTEGER survives a
 // setBigInt/getBigInt round-trip exactly. Under the old `number`-based getI64
 // this value would have been silently truncated.

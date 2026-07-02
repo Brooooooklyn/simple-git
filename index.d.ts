@@ -214,7 +214,13 @@ export declare class Config {
   getString(name: string): string
   /** Get the value of a boolean config variable. */
   getBoolean(name: string): boolean
-  /** Get the value of an i32 config variable, as a JS `number`. */
+  /**
+   * Get the value of an integer config variable, as a JS `number`.
+   *
+   * Reads the value as a 64-bit integer. Errors with `InvalidArg` when it lies
+   * outside the JS safe-integer range (±(2^53 − 1)), where a `number` would lose
+   * precision — use `getBigInt` for those.
+   */
   getNumber(name: string): number
   /**
    * Get the value of an i64 config variable, as a JS `bigint`.
@@ -234,8 +240,12 @@ export declare class Config {
    */
   setBoolean(name: string, value: boolean): void
   /**
-   * Set the value of an i32 config variable in the config file with the
+   * Set the value of an integer config variable in the config file with the
    * highest level (usually the local one). Takes a JS `number`.
+   *
+   * Errors with `InvalidArg` when `value` is not an integer or lies outside the
+   * JS safe-integer range (±(2^53 − 1)) — use `setBigInt` for larger magnitudes
+   * rather than silently truncating.
    */
   setNumber(name: string, value: number): void
   /**
