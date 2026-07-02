@@ -24,7 +24,7 @@ console.log(lastModifiedAsync) // 2022-03-13T12:47:47.920Z
 
 // Enriched metadata for the last commit that touched a file.
 // Returns `null` (does **not** throw) when the path has no commit history.
-const mod = repo.getFileLatestModification('build.rs')
+const mod = repo.getFileLatestModified('build.rs')
 if (mod) {
   console.log(mod.authorName, mod.authorEmail) // 'LongYinan' 'github@lyn.one'
   console.log(mod.committerTime) // a `Date`, identical to getFileLatestModifiedDate('build.rs')
@@ -33,11 +33,11 @@ if (mod) {
 
 // Bulk: resolve many files in a single history walk (early-exits once all are found).
 // Every input path is present as a key; a never-committed path maps to `null`.
-const mods = repo.getFilesLatestModification(['build.rs', 'Cargo.toml'])
+const mods = repo.getFilesLatestModified(['build.rs', 'Cargo.toml'])
 console.log(mods['build.rs']?.committerName)
 console.log(mods['Cargo.toml']?.committerTime) // a `Date`
 // Empty input returns `{}`:
-console.log(repo.getFilesLatestModification([])) // {}
+console.log(repo.getFilesLatestModified([])) // {}
 
 // ---- Working-tree status (like `git status`) ----
 const changes = repo.statuses() // => FileStatus[]
@@ -142,14 +142,14 @@ export class Repository {
    * Last commit that modified `filepath`, with author/committer identity.
    * Returns `null` when no commit in history touched the path.
    */
-  getFileLatestModification(filepath: string): FileModification | null
-  getFileLatestModificationAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
+  getFileLatestModified(filepath: string): FileModification | null
+  getFileLatestModifiedAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
   /**
    * Resolve the last commit that modified each of `filepaths` in a single
    * history walk. Every input path is a key; never-committed paths map to `null`.
    */
-  getFilesLatestModification(filepaths: Array<string>): Record<string, FileModification | undefined | null>
-  getFilesLatestModificationAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
+  getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | undefined | null>
+  getFilesLatestModifiedAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
   /** Repository config view (system + global + repo, prioritized). */
   config(): Config
   /** Default signature built from `user.name` / `user.email`. */

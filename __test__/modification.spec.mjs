@@ -18,9 +18,9 @@ test.beforeEach((t) => {
 
 // Test #1 — enriched metadata, value-asserted against git CLI.
 // build.rs author (LongYinan) != committer (GitHub): catches author/committer swaps.
-test("getFileLatestModification returns enriched metadata", (t) => {
+test("getFileLatestModified returns enriched metadata", (t) => {
   const { repo } = t.context;
-  const mod = repo.getFileLatestModification("build.rs");
+  const mod = repo.getFileLatestModified("build.rs");
   t.truthy(mod);
 
   // Delegation guard (runs unconditionally; two native methods). committerTime
@@ -51,15 +51,15 @@ test("getFileLatestModification returns enriched metadata", (t) => {
 });
 
 // Test #2 — async matches sync.
-test("getFileLatestModificationAsync matches sync result", async (t) => {
+test("getFileLatestModifiedAsync matches sync result", async (t) => {
   const { repo } = t.context;
-  const sync = repo.getFileLatestModification("build.rs");
-  const asyncResult = await repo.getFileLatestModificationAsync("build.rs");
+  const sync = repo.getFileLatestModified("build.rs");
+  const asyncResult = await repo.getFileLatestModifiedAsync("build.rs");
   t.deepEqual(asyncResult, sync);
 
   // Async missing path resolves to null (mirrors sync null-on-missing, no throw).
   t.is(
-    await repo.getFileLatestModificationAsync("does-not-exist-xyz.nope"),
+    await repo.getFileLatestModifiedAsync("does-not-exist-xyz.nope"),
     null,
   );
 });
@@ -76,15 +76,15 @@ test("getFileLatestModifiedDateAsync matches sync result", async (t) => {
 });
 
 // Test #3 — null for a path that was never committed.
-test("getFileLatestModification returns null for missing path", (t) => {
+test("getFileLatestModified returns null for missing path", (t) => {
   const { repo } = t.context;
-  t.is(repo.getFileLatestModification("does-not-exist-xyz.txt"), null);
+  t.is(repo.getFileLatestModified("does-not-exist-xyz.txt"), null);
 });
 
 // Root-commit branch (parent_count()==0): LICENSE's only commit is the root.
-test("getFileLatestModification resolves a file whose only commit is the root", (t) => {
+test("getFileLatestModified resolves a file whose only commit is the root", (t) => {
   const { repo } = t.context;
-  const mod = repo.getFileLatestModification("LICENSE");
+  const mod = repo.getFileLatestModified("LICENSE");
   t.truthy(mod);
   t.regex(mod.commitId, /^[0-9a-f]{40}$/);
   t.is(
@@ -94,9 +94,9 @@ test("getFileLatestModification resolves a file whose only commit is the root", 
 });
 
 // Test #4 — bulk resolves many paths in one pass; cross-validate vs single-file.
-test("getFilesLatestModification resolves many paths in one pass", (t) => {
+test("getFilesLatestModified resolves many paths in one pass", (t) => {
   const { repo } = t.context;
-  const result = repo.getFilesLatestModification([
+  const result = repo.getFilesLatestModified([
     "build.rs",
     "Cargo.toml",
     "bogus-zzz.txt",
@@ -105,39 +105,39 @@ test("getFilesLatestModification resolves many paths in one pass", (t) => {
     Object.keys(result).sort(),
     ["Cargo.toml", "bogus-zzz.txt", "build.rs"],
   );
-  t.deepEqual(result["build.rs"], repo.getFileLatestModification("build.rs"));
-  t.deepEqual(result["Cargo.toml"], repo.getFileLatestModification("Cargo.toml"));
+  t.deepEqual(result["build.rs"], repo.getFileLatestModified("build.rs"));
+  t.deepEqual(result["Cargo.toml"], repo.getFileLatestModified("Cargo.toml"));
   t.is(result["bogus-zzz.txt"], null);
 });
 
 // Empty input -> {} (exercises the early-return branch + empty-Record serialization).
-test("getFilesLatestModification returns {} for empty input", (t) => {
+test("getFilesLatestModified returns {} for empty input", (t) => {
   const { repo } = t.context;
-  t.deepEqual(repo.getFilesLatestModification([]), {});
+  t.deepEqual(repo.getFilesLatestModified([]), {});
 });
 
 // Nested forward-slash path: exact-string match against git's forward-slash delta path.
 // Use a literal "src/lib.rs" (NOT path.join, which yields backslashes on Windows).
-test("getFilesLatestModification matches a nested forward-slash path", (t) => {
+test("getFilesLatestModified matches a nested forward-slash path", (t) => {
   const { repo } = t.context;
-  const result = repo.getFilesLatestModification(["src/lib.rs"]);
-  t.deepEqual(result["src/lib.rs"], repo.getFileLatestModification("src/lib.rs"));
+  const result = repo.getFilesLatestModified(["src/lib.rs"]);
+  t.deepEqual(result["src/lib.rs"], repo.getFileLatestModified("src/lib.rs"));
   t.truthy(result["src/lib.rs"]);
 });
 
 // Root-commit branch in the bulk walk, cross-validated vs single-file.
-test("getFilesLatestModification resolves a root-only file (LICENSE)", (t) => {
+test("getFilesLatestModified resolves a root-only file (LICENSE)", (t) => {
   const { repo } = t.context;
-  const result = repo.getFilesLatestModification(["LICENSE"]);
-  t.deepEqual(result["LICENSE"], repo.getFileLatestModification("LICENSE"));
+  const result = repo.getFilesLatestModified(["LICENSE"]);
+  t.deepEqual(result["LICENSE"], repo.getFileLatestModified("LICENSE"));
   t.truthy(result["LICENSE"]);
 });
 
 // Test #5 — async bulk matches sync bulk.
-test("getFilesLatestModificationAsync matches sync bulk result", async (t) => {
+test("getFilesLatestModifiedAsync matches sync bulk result", async (t) => {
   const { repo } = t.context;
   const paths = ["build.rs", "Cargo.toml", "bogus-zzz.txt"];
-  const sync = repo.getFilesLatestModification(paths);
-  const bulkAsync = await repo.getFilesLatestModificationAsync(paths);
+  const sync = repo.getFilesLatestModified(paths);
+  const bulkAsync = await repo.getFilesLatestModifiedAsync(paths);
   t.deepEqual(bulkAsync, sync);
 });

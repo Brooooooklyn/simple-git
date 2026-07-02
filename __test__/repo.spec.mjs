@@ -169,13 +169,13 @@ test("File-date walkers THROW on a corrupt/missing object mid-walk, not null/wro
 
     const repo = new Repository(work);
     t.throws(() => repo.getFileLatestModifiedDate("a.txt"));
-    t.throws(() => repo.getFileLatestModification("a.txt"));
+    t.throws(() => repo.getFileLatestModified("a.txt"));
     t.throws(() => repo.getFileCreatedDate("a.txt"));
-    t.throws(() => repo.getFilesLatestModification(["a.txt"]));
+    t.throws(() => repo.getFilesLatestModified(["a.txt"]));
     await t.throwsAsync(() => repo.getFileLatestModifiedDateAsync("a.txt"));
-    await t.throwsAsync(() => repo.getFileLatestModificationAsync("a.txt"));
+    await t.throwsAsync(() => repo.getFileLatestModifiedAsync("a.txt"));
     await t.throwsAsync(() => repo.getFileCreatedDateAsync("a.txt"));
-    await t.throwsAsync(() => repo.getFilesLatestModificationAsync(["a.txt"]));
+    await t.throwsAsync(() => repo.getFilesLatestModifiedAsync(["a.txt"]));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -201,7 +201,7 @@ test("File-date accessors resolve a root-only file and keep no-match -> null", a
     const repo = new Repository(work);
     t.true(repo.getFileCreatedDate("only.txt") instanceof Date);
     t.true(repo.getFileLatestModifiedDate("only.txt") instanceof Date);
-    t.truthy(repo.getFileLatestModification("only.txt"));
+    t.truthy(repo.getFileLatestModified("only.txt"));
     t.true(
       (await repo.getFileCreatedDateAsync("only.txt")) instanceof Date,
     );
@@ -209,7 +209,7 @@ test("File-date accessors resolve a root-only file and keep no-match -> null", a
     // Same repo, never-committed path: still a plain no-match -> null (no throw).
     t.is(repo.getFileCreatedDate("missing.txt"), null);
     t.is(repo.getFileLatestModifiedDate("missing.txt"), null);
-    t.is(repo.getFileLatestModification("missing.txt"), null);
+    t.is(repo.getFileLatestModified("missing.txt"), null);
     t.is(await repo.getFileCreatedDateAsync("missing.txt"), null);
   } finally {
     rmSync(root, { recursive: true, force: true });

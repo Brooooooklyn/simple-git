@@ -202,7 +202,7 @@ impl Remote {
   /// Get the remote's pushurl.
   ///
   /// Returns `None` if the pushurl is not valid utf-8
-  pub fn pushurl(&self) -> Result<Option<&str>> {
+  pub fn push_url(&self) -> Result<Option<&str>> {
     ensure_alive(&self.alive)?;
     Ok(self.inner.pushurl().ok().flatten())
   }
@@ -433,7 +433,7 @@ impl Remote {
   /// configured `pushurl`. Capturing the effective push URL up front and
   /// handing it to an anonymous remote sidesteps the bug, because that
   /// remote's SOLE url is already the pushurl-resolved value. Trade-off: a
-  /// later `remoteSetUrl`/`remoteSetPushurl`/`remoteAddPush` on the same name
+  /// later `remoteSetUrl`/`remoteSetPushUrl`/`remoteAddPush` on the same name
   /// after this `Remote` was loaded is NOT observed by an already-scheduled
   /// `pushAsync`, matching the synchronous `push()` contract ("no loaded
   /// remote instances will be affected"). Also note: pushurl + refspecs are
@@ -534,11 +534,11 @@ impl Remote {
   #[napi]
   /// Update the tips to the new state
   ///
-  /// `update_fetchhead` is a raw bitset of `RemoteUpdateFlags` OR-ed together
+  /// `update_flags` is a raw bitset of `RemoteUpdateFlags` OR-ed together
   /// (e.g. `RemoteUpdateFlags.UpdateFetchHead`). Unknown bits are ignored.
   pub fn update_tips(
     &mut self,
-    update_fetchhead: u32,
+    update_flags: u32,
     download_tags: AutotagOption,
     mut callbacks: Option<&mut RemoteCallbacks>,
     msg: Option<String>,
@@ -559,7 +559,7 @@ impl Remote {
       .inner
       .update_tips(
         callbacks,
-        git2::RemoteUpdateFlags::from_bits_truncate(update_fetchhead),
+        git2::RemoteUpdateFlags::from_bits_truncate(update_flags),
         download_tags.into(),
         msg.as_deref(),
       )
@@ -1373,9 +1373,9 @@ impl Cred {
 /// bit.
 ///
 /// `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credType()`);
-/// `another` is one of the `CredentialType` constants. Returns
-/// `(cred_type & another) === another`.
-pub fn cred_type_contains(cred_type: u32, another: CredentialType) -> bool {
-  let another_bits = Into::<git2::CredentialType>::into(another).bits();
-  (cred_type & another_bits) == another_bits
+/// `flag` is one of the `CredentialType` constants. Returns
+/// `(cred_type & flag) === flag`.
+pub fn cred_type_contains(cred_type: u32, flag: CredentialType) -> bool {
+  let flag_bits = Into::<git2::CredentialType>::into(flag).bits();
+  (cred_type & flag_bits) == flag_bits
 }

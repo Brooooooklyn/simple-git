@@ -69,7 +69,7 @@ test("every derived handle throws /disposed/ after repo.dispose()", (t) => {
     // The three iterators: obtained live, iterated AFTER disposal.
     const revWalk = repo.revWalk(); // RevWalk
     revWalk.pushHead();
-    const treeIter = tree.iter(); // TreeIter
+    const treeIter = tree.entries(); // TreeIter
     const deltasIter = diff.deltas(); // Deltas (a fresh, unconsumed one)
 
     // --- Free the underlying git2::Repository. ---

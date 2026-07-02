@@ -62,7 +62,7 @@ impl Tree {
 
   #[napi]
   /// Returns an iterator over the entries in this tree.
-  pub fn iter(&self, this_ref: Reference<Tree>, env: Env) -> Result<TreeIter> {
+  pub fn entries(&self, this_ref: Reference<Tree>, env: Env) -> Result<TreeIter> {
     ensure_alive(&self.alive).code_into(env)?;
     Ok(TreeIter {
       inner: this_ref.share_with(env, |tree| Ok(tree.inner().iter()))?,

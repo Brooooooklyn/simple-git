@@ -679,7 +679,7 @@ export declare class Remote {
    *
    * Returns `None` if the pushurl is not valid utf-8
    */
-  pushurl(): string | null
+  pushUrl(): string | null
   /**
    * Get the remote's default branch.
    *
@@ -770,7 +770,7 @@ export declare class Remote {
    * configured `pushurl`. Capturing the effective push URL up front and
    * handing it to an anonymous remote sidesteps the bug, because that
    * remote's SOLE url is already the pushurl-resolved value. Trade-off: a
-   * later `remoteSetUrl`/`remoteSetPushurl`/`remoteAddPush` on the same name
+   * later `remoteSetUrl`/`remoteSetPushUrl`/`remoteAddPush` on the same name
    * after this `Remote` was loaded is NOT observed by an already-scheduled
    * `pushAsync`, matching the synchronous `push()` contract ("no loaded
    * remote instances will be affected"). Also note: pushurl + refspecs are
@@ -799,10 +799,10 @@ export declare class Remote {
   /**
    * Update the tips to the new state
    *
-   * `update_fetchhead` is a raw bitset of `RemoteUpdateFlags` OR-ed together
+   * `update_flags` is a raw bitset of `RemoteUpdateFlags` OR-ed together
    * (e.g. `RemoteUpdateFlags.UpdateFetchHead`). Unknown bits are ignored.
    */
-  updateTips(updateFetchhead: number, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
+  updateTips(updateFlags: number, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
 }
 
 export declare class RemoteCallbacks {
@@ -1139,7 +1139,7 @@ export declare class Repository {
    *
    * `None` indicates that it should be cleared.
    */
-  remoteSetPushurl(name: string, url?: string | undefined | null): this
+  remoteSetPushUrl(name: string, url?: string | undefined | null): this
   /** Lookup a reference to one of the objects in a repository. */
   findTree(oid: string): Tree | null
   findCommit(oid: string): Commit | null
@@ -1369,7 +1369,7 @@ export declare class Repository {
    * diffing each non-merge commit against its parent under a libgit2 pathspec
    * (so `filepath` may be a directory or glob that matches a file); merge
    * commits are skipped. The value equals `FileModification.committerTime`
-   * returned by `getFileLatestModification`. Only real errors throw
+   * returned by `getFileLatestModified`. Only real errors throw
    * (unborn/empty HEAD, corrupt object, out-of-range timestamp).
    */
   getFileLatestModifiedDate(filepath: string): Date | null
@@ -1389,12 +1389,12 @@ export declare class Repository {
    * Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
    * timestamp).
    */
-  getFileLatestModification(filepath: string): FileModification | null
+  getFileLatestModified(filepath: string): FileModification | null
   /**
-   * Asynchronous variant of `getFileLatestModification`, computed off the main
+   * Asynchronous variant of `getFileLatestModified`, computed off the main
    * thread. Resolves to `null` when no commit in history touched `filepath`.
    */
-  getFileLatestModificationAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
+  getFileLatestModifiedAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
   /**
    * Resolve the last commit that modified each of `filepaths` in a single
    * history walk (early-exits once every path is resolved).
@@ -1405,12 +1405,12 @@ export declare class Repository {
    * path is present as a key in the result; a never-committed path maps to
    * `null`. Merge commits are skipped; only real errors throw.
    */
-  getFilesLatestModification(filepaths: Array<string>): Record<string, FileModification | undefined | null>
+  getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | null>
   /**
-   * Asynchronous variant of `getFilesLatestModification`, computed off the main
+   * Asynchronous variant of `getFilesLatestModified`, computed off the main
    * thread. Every input path is a key; never-committed paths map to `null`.
    */
-  getFilesLatestModificationAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
+  getFilesLatestModifiedAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | null>>
   /**
    * List the working-tree and index status of files in the repository.
    *
@@ -1648,7 +1648,7 @@ export declare class Tree {
   /** Return `true` if there is not entry */
   isEmpty(): boolean
   /** Returns an iterator over the entries in this tree. */
-  iter(): TreeIter
+  entries(): TreeIter
   /** Lookup a tree entry by SHA value */
   getId(id: string): TreeEntry | null
   /** Lookup a tree entry by its position in the tree */
@@ -1898,10 +1898,10 @@ export interface CredInfo {
  * bit.
  *
  * `cred_type` is the raw value (e.g. `CredInfo.credType` or `Cred.credType()`);
- * `another` is one of the `CredentialType` constants. Returns
- * `(cred_type & another) === another`.
+ * `flag` is one of the `CredentialType` constants. Returns
+ * `(cred_type & flag) === flag`.
  */
-export declare function credTypeContains(credType: number, another: CredentialType): boolean
+export declare function credTypeContains(credType: number, flag: CredentialType): boolean
 
 export declare const enum Delta {
   /** No changes */

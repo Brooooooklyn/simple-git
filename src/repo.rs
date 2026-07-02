@@ -1198,7 +1198,7 @@ impl Repository {
   /// error.
   ///
   /// `None` indicates that it should be cleared.
-  pub fn remote_set_pushurl(
+  pub fn remote_set_push_url(
     &self,
     env: Env,
     name: String,
@@ -1934,7 +1934,7 @@ impl Repository {
   /// diffing each non-merge commit against its parent under a libgit2 pathspec
   /// (so `filepath` may be a directory or glob that matches a file); merge
   /// commits are skipped. The value equals `FileModification.committerTime`
-  /// returned by `getFileLatestModification`. Only real errors throw
+  /// returned by `getFileLatestModified`. Only real errors throw
   /// (unborn/empty HEAD, corrupt object, out-of-range timestamp).
   pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
     get_file_modification(self.inner()?, &filepath)
@@ -1974,14 +1974,14 @@ impl Repository {
   /// commits are skipped. `committerTime` equals `getFileLatestModifiedDate`.
   /// Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
   /// timestamp).
-  pub fn get_file_latest_modification(&self, filepath: String) -> Result<Option<FileModification>> {
+  pub fn get_file_latest_modified(&self, filepath: String) -> Result<Option<FileModification>> {
     get_file_modification(self.inner()?, &filepath).convert_without_message()
   }
 
   #[napi]
-  /// Asynchronous variant of `getFileLatestModification`, computed off the main
+  /// Asynchronous variant of `getFileLatestModified`, computed off the main
   /// thread. Resolves to `null` when no commit in history touched `filepath`.
-  pub fn get_file_latest_modification_async(
+  pub fn get_file_latest_modified_async(
     &self,
     filepath: String,
     signal: Option<AbortSignal>,
@@ -2000,7 +2000,7 @@ impl Repository {
     ))
   }
 
-  #[napi]
+  #[napi(ts_return_type = "Record<string, FileModification | null>")]
   /// Resolve the last commit that modified each of `filepaths` in a single
   /// history walk (early-exits once every path is resolved).
   ///
@@ -2009,17 +2009,17 @@ impl Repository {
   /// inputs must be file paths (a directory or glob will not match). Every input
   /// path is present as a key in the result; a never-committed path maps to
   /// `null`. Merge commits are skipped; only real errors throw.
-  pub fn get_files_latest_modification(
+  pub fn get_files_latest_modified(
     &self,
     filepaths: Vec<String>,
   ) -> Result<HashMap<String, Option<FileModification>>> {
     get_files_modification(self.inner()?, &filepaths).convert_without_message()
   }
 
-  #[napi]
-  /// Asynchronous variant of `getFilesLatestModification`, computed off the main
+  #[napi(ts_return_type = "Promise<Record<string, FileModification | null>>")]
+  /// Asynchronous variant of `getFilesLatestModified`, computed off the main
   /// thread. Every input path is a key; never-committed paths map to `null`.
-  pub fn get_files_latest_modification_async(
+  pub fn get_files_latest_modified_async(
     &self,
     filepaths: Vec<String>,
     signal: Option<AbortSignal>,
