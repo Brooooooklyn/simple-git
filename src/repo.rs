@@ -351,7 +351,11 @@ impl Task for GitLatestModifiedDateTask {
   }
 
   fn reject(&mut self, env: napi::Env, mut err: Error) -> napi::Result<Self::JsValue> {
-    Err(coded_error(env, self.code, core::mem::take(&mut err.reason)))
+    Err(coded_error(
+      env,
+      self.code,
+      core::mem::take(&mut err.reason),
+    ))
   }
 }
 
