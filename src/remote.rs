@@ -771,6 +771,10 @@ impl Task for RemotePushTask {
 }
 
 #[napi]
+/// @remarks Single-use: attaching this to a `FetchOptions`/`PushOptions` via
+/// `remoteCallback()` consumes it; a second attach throws (`InvalidArg`,
+/// "RemoteCallbacks can only be used once"). Construct a fresh instance per
+/// attach. (`updateTips` does NOT consume it and may reuse the same instance.)
 pub struct RemoteCallbacks {
   inner: git2::RemoteCallbacks<'static>,
   used: bool,
@@ -930,6 +934,10 @@ impl RemoteCallbacks {
 }
 
 #[napi]
+/// @remarks Single-use: consumed by the first `fetch()` or `fetchAsync()` call.
+/// Reusing the same instance throws (`InvalidArg`, "FetchOptions can only be used
+/// once") — synchronously at the call site even for `fetchAsync` (it does NOT
+/// reject the returned Promise). Construct a fresh instance per call.
 pub struct FetchOptions {
   pub(crate) inner: git2::FetchOptions<'static>,
   pub(crate) used: bool,
@@ -1053,6 +1061,10 @@ impl FetchOptions {
 }
 
 #[napi]
+/// @remarks Single-use: consumed by the first `push()` or `pushAsync()` call.
+/// Reusing the same instance throws (`InvalidArg`, "PushOptions can only be used
+/// once") — synchronously at the call site even for `pushAsync` (it does NOT
+/// reject the returned Promise). Construct a fresh instance per call.
 pub struct PushOptions {
   pub(crate) inner: git2::PushOptions<'static>,
   pub(crate) used: bool,

@@ -15,12 +15,14 @@ Repository.init('/path/to/repo') // init a git repository
 
 const repo = new Repository('/path/to/repo') // Open an existed repo
 
-const lastModified = repo.getFileLatestModifiedDate('build.rs') // latest modified date of `build.rs`, a `Date`
-console.log(lastModified) // 2022-03-13T12:47:47.920Z
+// Latest modified date of `build.rs`, a `Date` — or `null` when no commit ever
+// touched the path (only a genuine error throws).
+const lastModified = repo.getFileLatestModifiedDate('build.rs')
+if (lastModified) console.log(lastModified) // 2022-03-13T12:47:47.920Z
 
-const lastModifiedAsync = await repo.getFileLatestModifiedDateAsync('build.rs') // Async version of `getFileLatestModifiedDate`, also a `Date`
-
-console.log(lastModifiedAsync) // 2022-03-13T12:47:47.920Z
+// Async version of `getFileLatestModifiedDate`, also `Date | null`.
+const lastModifiedAsync = await repo.getFileLatestModifiedDateAsync('build.rs')
+console.log(lastModifiedAsync) // 2022-03-13T12:47:47.920Z, or null
 
 // Enriched metadata for the last commit that touched a file.
 // Returns `null` (does **not** throw) when the path has no commit history.
@@ -136,8 +138,12 @@ export class Repository {
   static cloneAsync(url: string, path: string, signal?: AbortSignal | undefined | null): Promise<Repository>
   /** Retrieve and resolve the reference pointed at by HEAD. */
   head(): Reference
-  getFileLatestModifiedDate(filepath: string): Date
-  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date>
+  /**
+   * Latest commit date that modified `filepath`. Returns `null` when no commit
+   * in history touched the path (only a genuine error throws).
+   */
+  getFileLatestModifiedDate(filepath: string): Date | null
+  getFileLatestModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
   /**
    * Last commit that modified `filepath`, with author/committer identity.
    * Returns `null` when no commit in history touched the path.
@@ -148,8 +154,8 @@ export class Repository {
    * Resolve the last commit that modified each of `filepaths` in a single
    * history walk. Every input path is a key; never-committed paths map to `null`.
    */
-  getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | undefined | null>
-  getFilesLatestModifiedAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | undefined | null>>
+  getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | null>
+  getFilesLatestModifiedAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | null>>
   /** Repository config view (system + global + repo, prioritized). */
   config(): Config
   /** Default signature built from `user.name` / `user.email`. */
@@ -462,9 +468,19 @@ export interface BlameHunk {
  * (no copy tracking, the whole file, starting from the current HEAD).
  */
 export interface BlameOptions {
-  /** Track lines that have moved within a file. Defaults to `false`. */
+  /**
+   * Track lines that have moved within a file. Defaults to `false`.
+   *
+   * Note: libgit2 1.9.4 does not implement blame copy/move tracking, so setting
+   * this flag has no effect today (accepted for forward-compat; effectively a no-op).
+   */
   trackCopiesSameFile?: boolean
-  /** Track lines that have moved across files in the same commit. Defaults to `false`. */
+  /**
+   * Track lines that have moved across files in the same commit. Defaults to `false`.
+   *
+   * Note: libgit2 1.9.4 does not implement blame copy/move tracking, so setting
+   * this flag has no effect today (accepted for forward-compat; effectively a no-op).
+   */
   trackCopiesSameCommitMoves?: boolean
   /** 40-char hex OID of the newest commit to consider (the blame starts here). */
   newestCommit?: string
@@ -514,6 +530,19 @@ export interface CheckoutOptions {
   targetDir?: string
 }
 ```
+
+### Disposal
+
+`dispose()` — and its alias `free()` — eagerly releases the native git2 handle
+without waiting for garbage collection; both are idempotent. After disposal every
+throwing method throws `"Repository has been disposed"` (the `Option`-returning
+lookups return `null` instead), and every handle derived from the repo (`Remote`,
+`Tree`, `Commit`, `Reference`, `RevWalk`, …) throws the same error on use —
+whether it is the receiver or passed as an argument to another method
+(machine-enforced, not merely documented). Disposal does NOT cancel
+already-scheduled `*Async` operations: they reopen the repo on their own worker
+thread and run to completion. To cancel a pending async op, pass an `AbortSignal`
+to the `*Async` method rather than relying on `dispose()`.
 
 ## `Reference`
 

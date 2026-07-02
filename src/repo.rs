@@ -671,30 +671,23 @@ impl Repository {
   #[napi(factory)]
   /// Find and open an existing repository, with additional options.
   ///
-  /// If flags contains REPOSITORY_OPEN_NO_SEARCH, the path must point
-  /// directly to a repository; otherwise, this may point to a subdirectory
-  /// of a repository, and `open_ext` will search up through parent
-  /// directories.
+  /// `flags` is a raw bitset of `RepositoryOpenFlags` OR-ed together (e.g.
+  /// `RepositoryOpenFlags.NoSearch | RepositoryOpenFlags.CrossFS`). Unknown
+  /// bits are ignored.
   ///
-  /// If flags contains REPOSITORY_OPEN_CROSS_FS, the search through parent
-  /// directories will not cross a filesystem boundary (detected when the
-  /// stat st_dev field changes).
+  /// - `RepositoryOpenFlags.NoSearch`: only open the repository at `path`; do
+  ///   not walk upward through parent directories searching for one.
+  /// - `RepositoryOpenFlags.CrossFS`: when searching upward, allow crossing
+  ///   filesystem boundaries.
+  /// - `RepositoryOpenFlags.Bare`: force opening as a bare repository (ignore
+  ///   any working directory) and defer loading its config.
+  /// - `RepositoryOpenFlags.NoDotGit`: don't try appending `/.git` to `path`.
+  /// - `RepositoryOpenFlags.FromEnv`: resolve the repository from the same
+  ///   environment variables git honors (ignores the other flags and
+  ///   `ceilingDirs`).
   ///
-  /// If flags contains REPOSITORY_OPEN_BARE, force opening the repository as
-  /// bare even if it isn't, ignoring any working directory, and defer
-  /// loading the repository configuration for performance.
-  ///
-  /// If flags contains REPOSITORY_OPEN_NO_DOTGIT, don't try appending
-  /// `/.git` to `path`.
-  ///
-  /// If flags contains REPOSITORY_OPEN_FROM_ENV, `open_ext` will ignore
-  /// other flags and `ceiling_dirs`, and respect the same environment
-  /// variables git does. Note, however, that `path` overrides `$GIT_DIR`; to
-  /// respect `$GIT_DIR` as well, use `open_from_env`.
-  ///
-  /// ceiling_dirs specifies a list of paths that the search through parent
-  /// directories will stop before entering.  Use the functions in std::env
-  /// to construct or manipulate such a path list.
+  /// `ceilingDirs` is a list of absolute paths at which the upward search stops
+  /// (ignored when `RepositoryOpenFlags.FromEnv` is set).
   pub fn open_ext(path: String, flags: u32, ceiling_dirs: Vec<String>) -> Result<Repository> {
     INIT_GIT_CONFIG
       .as_ref()
