@@ -965,6 +965,17 @@ export declare class Repository {
    *   environment variables git honors (ignores the other flags and
    *   `ceilingDirs`).
    *
+   *   Note: a `FromEnv` handle re-consults the environment when an `*Async`
+   *   method reopens it on a worker thread. The git directory, working
+   *   directory, and namespace are re-pinned to this handle's resolved
+   *   values, but environment-derived index/object inputs (notably
+   *   `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, and
+   *   `GIT_ALTERNATE_OBJECT_DIRECTORIES`) are re-read from the *current*
+   *   process environment at reopen time. Mutating those variables between a
+   *   synchronous call and a later `*Async` call on the same handle can make
+   *   the two observe different index/object state. For stable results, do
+   *   not change those variables mid-flight, or open without `FromEnv`.
+   *
    * `ceilingDirs` is a list of absolute paths at which the upward search stops
    * (ignored when `RepositoryOpenFlags.FromEnv` is set).
    */

@@ -202,6 +202,17 @@ pub struct GitCommitTask {
 /// `Bare`/`FromEnv` behavior as the handle the async call was made on. `None`
 /// (the common case: `new`/`init`/`discover`/`clone`) is a plain
 /// `git2::Repository::open`, identical to prior behavior.
+///
+/// KNOWN, DELIBERATE limitation (documented + deferred for 1.0): replaying
+/// `FromEnv` makes libgit2 re-read env-derived index/odb inputs
+/// (`GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`)
+/// on the worker at reopen time. git-dir (via `path`), workdir, and namespace
+/// (via `restore_worker_handle_state`) are pinned, but those lazily-resolved
+/// inputs are not, so mutating them between a sync call and a later `*Async`
+/// call on the same handle can diverge. A full pin is out of scope for 1.0:
+/// the odb write path needs `libgit2-sys` FFI (git2 0.21 exposes no safe
+/// resolved-odb getter/setter), and stripping `FromEnv` would break legitimate
+/// constant `GIT_INDEX_FILE`/`GIT_OBJECT_DIRECTORY` overrides.
 pub(crate) fn reopen_worker_repo(path: &str, open_flags: Option<u32>) -> Result<git2::Repository> {
   match open_flags {
     Some(flags) => git2::Repository::open_ext(
@@ -688,6 +699,17 @@ impl Repository {
   /// - `RepositoryOpenFlags.FromEnv`: resolve the repository from the same
   ///   environment variables git honors (ignores the other flags and
   ///   `ceilingDirs`).
+  ///
+  ///   Note: a `FromEnv` handle re-consults the environment when an `*Async`
+  ///   method reopens it on a worker thread. The git directory, working
+  ///   directory, and namespace are re-pinned to this handle's resolved
+  ///   values, but environment-derived index/object inputs (notably
+  ///   `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, and
+  ///   `GIT_ALTERNATE_OBJECT_DIRECTORIES`) are re-read from the *current*
+  ///   process environment at reopen time. Mutating those variables between a
+  ///   synchronous call and a later `*Async` call on the same handle can make
+  ///   the two observe different index/object state. For stable results, do
+  ///   not change those variables mid-flight, or open without `FromEnv`.
   ///
   /// `ceilingDirs` is a list of absolute paths at which the upward search stops
   /// (ignored when `RepositoryOpenFlags.FromEnv` is set).
