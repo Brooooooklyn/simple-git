@@ -660,13 +660,17 @@ try {
 }
 ```
 
-`isGitError(e)` returns `true` only when `e` is a genuine `Error` instance whose
+`isGitError(e)` returns `true` only when `e` is a genuine `Error` object whose
 `code` is a real member of the `GitErrorCode` enum; it narrows `e` to
-`Error & { code: GitErrorCode }` in TypeScript. Membership is validated against
-the enum (the single source of truth), so a non-git `Error` that merely exposes
-some other string `.code` (e.g. Node's `ENOENT`) returns `false`. The guard is
-total — it never throws, even for an `Error` whose `code` is a throwing getter
-(it returns `false`) — so it is always safe to call inside a `catch`.
+`Error & { code: GitErrorCode }` in TypeScript. The `Error` check is the native
+Node-API `napi_is_error` test (not a JS-level `instanceof`), so it recognizes
+cross-realm and subclassed errors while rejecting look-alike proxies and plain
+objects. Membership is validated against the enum (the single source of truth),
+so a non-git `Error` that merely exposes some other string `.code` (e.g. Node's
+`ENOENT`) returns `false`. The guard is total — it never throws for any input,
+even a hostile value with a throwing proxy trap or `Symbol.hasInstance`, or an
+`Error` whose `code` is a throwing getter (all return `false`) — so it is always
+safe to call inside a `catch`.
 
 The 29 members of `GitErrorCode` are the 28 libgit2 error classes plus one
 napi-level token:

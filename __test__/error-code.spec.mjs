@@ -282,3 +282,53 @@ test("isGitError is total: an Error with a throwing `code` getter returns false 
   member.code = GitErrorCode.NotFound;
   t.is(isGitError(member), true);
 });
+
+test("isGitError is total: a hostile Proxy with a throwing getPrototypeOf trap returns false and does not throw", (t) => {
+  // A JS-level `instanceof` invokes `[[GetPrototypeOf]]`; the native
+  // `napi_is_error` check does NOT, so this proxy is classified as a non-error
+  // without ever running the trap. Proxies are not native errors -> `false`.
+  const hostile = new Proxy(Object.create(null), {
+    getPrototypeOf() {
+      throw new Error("getPrototypeOf trap blew up");
+    },
+  });
+  let out;
+  t.notThrows(() => {
+    out = isGitError(hostile);
+  });
+  t.is(out, false);
+});
+
+test("isGitError is total: a throwing Error[Symbol.hasInstance] cannot hijack the guard", (t) => {
+  // A JS-level `instanceof Error` consults `Error[Symbol.hasInstance]`; the
+  // native `napi_is_error` check never does. Mutate -> call -> restore
+  // SYNCHRONOUSLY (no `await` between them) so the override is atomic with
+  // respect to ava's in-file test concurrency and cannot leak into other tests.
+  // `Error[Symbol.hasInstance]` is inherited from `Function.prototype`, so there
+  // is no OWN descriptor to capture; deleting the own shadow we install restores
+  // the inherited behaviour.
+  const ownDescriptor = Object.getOwnPropertyDescriptor(
+    Error,
+    Symbol.hasInstance,
+  );
+  try {
+    Object.defineProperty(Error, Symbol.hasInstance, {
+      value() {
+        throw new Error("hasInstance blew up");
+      },
+      configurable: true,
+    });
+    let out;
+    t.notThrows(() => {
+      out = isGitError(new Error("x"));
+    });
+    t.is(out, false);
+  } finally {
+    // Always restore, even if an assertion above threw.
+    if (ownDescriptor) {
+      Object.defineProperty(Error, Symbol.hasInstance, ownDescriptor);
+    } else {
+      delete Error[Symbol.hasInstance];
+    }
+  }
+});

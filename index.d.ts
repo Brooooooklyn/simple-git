@@ -2119,18 +2119,24 @@ export declare const enum GitErrorCode {
 /**
  * Runtime type guard for the coded errors this addon throws.
  *
- * Returns `true` iff `e` is a genuine `Error` instance — tested with
- * `instanceof` against the current realm's global `Error` constructor — whose
- * `code` is a real member of the `GitErrorCode` enum. Membership is validated
- * against that generated enum (the single source of truth), so a non-git
- * `Error` (e.g. Node's `ENOENT`) or an `AbortSignal` cancellation
- * (`code: 'Cancelled'`, which is a napi-level token, NOT a `GitErrorCode`)
- * returns `false`. Non-errors, plain objects, `null`/`undefined`, and `Error`s
- * without a member `code` all return `false`.
+ * Returns `true` iff `e` is a genuine `Error` object — tested with the
+ * Node-API native-error check (`napi_is_error`, a pure V8 `IsNativeError`
+ * test) — whose `code` is a real member of the `GitErrorCode` enum. The
+ * native check recognizes cross-realm and subclassed errors while rejecting
+ * look-alike proxies and plain objects. Membership is validated against that
+ * generated enum (the single source of truth), so a non-git `Error` (e.g.
+ * Node's `ENOENT`) or an `AbortSignal` cancellation (`code: 'Cancelled'`,
+ * which is a napi-level token, NOT a `GitErrorCode`) returns `false`.
+ * Non-errors, plain objects, `null`/`undefined`, and `Error`s without a
+ * member `code` all return `false`.
  *
- * The guard is TOTAL: it never throws for any input. An `Error` whose `code`
- * is a throwing getter yields `false` (the pending exception is cleared), so
- * it is always safe to call inside a `catch`.
+ * The guard is TOTAL: it never throws for any input. Because the `Error`
+ * check is the native `napi_is_error` (which runs NO JS callbacks), a hostile
+ * value cannot hijack it — a throwing `[[GetPrototypeOf]]`/proxy trap or a
+ * throwing `Error[Symbol.hasInstance]` yields `false`, not a thrown error. An
+ * `Error` whose `code` is a throwing getter likewise yields `false` (the
+ * pending exception is cleared), so it is always safe to call inside a
+ * `catch`.
  */
 export declare function isGitError(e: unknown): e is Error & { code: GitErrorCode }
 

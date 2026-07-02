@@ -180,18 +180,24 @@ pub(crate) mod codes {
 
   /// Runtime type guard for the coded errors this addon throws.
   ///
-  /// Returns `true` iff `e` is a genuine `Error` instance — tested with
-  /// `instanceof` against the current realm's global `Error` constructor — whose
-  /// `code` is a real member of the `GitErrorCode` enum. Membership is validated
-  /// against that generated enum (the single source of truth), so a non-git
-  /// `Error` (e.g. Node's `ENOENT`) or an `AbortSignal` cancellation
-  /// (`code: 'Cancelled'`, which is a napi-level token, NOT a `GitErrorCode`)
-  /// returns `false`. Non-errors, plain objects, `null`/`undefined`, and `Error`s
-  /// without a member `code` all return `false`.
+  /// Returns `true` iff `e` is a genuine `Error` object — tested with the
+  /// Node-API native-error check (`napi_is_error`, a pure V8 `IsNativeError`
+  /// test) — whose `code` is a real member of the `GitErrorCode` enum. The
+  /// native check recognizes cross-realm and subclassed errors while rejecting
+  /// look-alike proxies and plain objects. Membership is validated against that
+  /// generated enum (the single source of truth), so a non-git `Error` (e.g.
+  /// Node's `ENOENT`) or an `AbortSignal` cancellation (`code: 'Cancelled'`,
+  /// which is a napi-level token, NOT a `GitErrorCode`) returns `false`.
+  /// Non-errors, plain objects, `null`/`undefined`, and `Error`s without a
+  /// member `code` all return `false`.
   ///
-  /// The guard is TOTAL: it never throws for any input. An `Error` whose `code`
-  /// is a throwing getter yields `false` (the pending exception is cleared), so
-  /// it is always safe to call inside a `catch`.
+  /// The guard is TOTAL: it never throws for any input. Because the `Error`
+  /// check is the native `napi_is_error` (which runs NO JS callbacks), a hostile
+  /// value cannot hijack it — a throwing `[[GetPrototypeOf]]`/proxy trap or a
+  /// throwing `Error[Symbol.hasInstance]` yields `false`, not a thrown error. An
+  /// `Error` whose `code` is a throwing getter likewise yields `false` (the
+  /// pending exception is cleared), so it is always safe to call inside a
+  /// `catch`.
   // napi emits the calling wrapper behind `#[cfg(all(not(test), ...))]`, so under
   // `cfg(test)` nothing references this fn. Unlike the other free `#[napi]` fns
   // (which sit in `pub mod`s and are thus part of the crate's public API), this
@@ -203,27 +209,29 @@ pub(crate) mod codes {
     ts_return_type = "e is Error & { code: GitErrorCode }"
   )]
   pub fn is_git_error(env: &Env, e: Unknown) -> napi::Result<bool> {
-    // Only objects can be `Error` instances; short-circuit primitives, `null`,
-    // and `undefined` before touching `instanceof`/`coerce_to_object`.
-    if e.get_type()? != ValueType::Object {
+    // Native `Error`-object check via Node-API `napi_is_error` (a pure V8
+    // `IsNativeError` test). Unlike a JS-level `instanceof`, it invokes NO user
+    // code — no `[[GetPrototypeOf]]`, no proxy traps, no `Symbol.hasInstance` —
+    // so it CANNOT throw, and it still recognizes cross-realm/subclassed errors
+    // while rejecting look-alike proxies and plain objects. `napi_is_error` sets
+    // no pending exception, and a non-ok status carries none either, so collapse
+    // any `Err` to `false` (`unwrap_or`). This subsumes the old
+    // object/`instanceof` short-circuits: primitives, `null`, `undefined`, plain
+    // objects, and proxies all return `false`, totally.
+    if !e.is_error().unwrap_or(false) {
       return Ok(false);
     }
-    // Genuine `e instanceof Error` against this realm's global constructor.
-    let error_ctor = env
-      .get_global()?
-      .get_named_property_unchecked::<Unknown>("Error")?;
-    if !e.instanceof(error_ctor)? {
-      return Ok(false);
-    }
-    // SOUND + TOTAL membership read. Reading `.code` as a `GitErrorCode`
-    // succeeds ONLY when it is a real member of the generated enum (the single
-    // source of truth): the `string_enum` `FromNapiValue` returns `Ok` for a
-    // member and `Err(InvalidArg)` — with NO pending exception — for a
-    // non-member string, a non-string, or a missing property. A THROWING `code`
-    // getter instead surfaces as `Err` WITH a pending JS exception, so clear the
-    // pending exception unconditionally (`napi_get_and_clear_last_exception` is a
-    // no-op when nothing is pending). This keeps the guard total: it returns a
-    // bool and never throws, for every possible input.
+    // SOUND + TOTAL membership read. `napi_is_error` above guarantees `e` is an
+    // object, so `coerce_to_object` is an identity cast that runs no user code.
+    // Reading `.code` as a `GitErrorCode` succeeds ONLY when it is a real member
+    // of the generated enum (the single source of truth): the `string_enum`
+    // `FromNapiValue` returns `Ok` for a member and `Err(InvalidArg)` — with NO
+    // pending exception — for a non-member string, a non-string, or a missing
+    // property. A THROWING `code` getter instead surfaces as `Err` WITH a
+    // pending JS exception, so clear the pending exception unconditionally
+    // (`napi_get_and_clear_last_exception` is a no-op when nothing is pending).
+    // This keeps the guard total: it returns a bool and never throws, for every
+    // possible input.
     match e
       .coerce_to_object()?
       .get_named_property::<GitErrorCode>("code")
