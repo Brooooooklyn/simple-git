@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -149,8 +149,14 @@ test("File-date walkers THROW on a corrupt/missing object mid-walk, not null/wro
     run("commit -q -m second");
 
     // Root (creation) commit's tree; deleting its loose object breaks the
-    // mid-walk tree read that every date family depends on.
-    const rootTree = run("rev-parse 'HEAD~1^{tree}'").toString().trim();
+    // mid-walk tree read that every date family depends on. Resolve it via
+    // execFileSync (no shell) so the `^{tree}` peel syntax survives Windows
+    // cmd.exe, which otherwise eats the `^` and mangles the quotes.
+    const rootTree = execFileSync("git", ["rev-parse", "HEAD~1^{tree}"], {
+      cwd: work,
+    })
+      .toString()
+      .trim();
     const objPath = join(
       work,
       ".git",
