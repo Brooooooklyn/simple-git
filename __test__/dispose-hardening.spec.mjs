@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import test from "ava";
 
-import { Repository, Signature } from "../index.js";
+import { Config, Repository, Signature } from "../index.js";
 
 // Spin up an isolated repo under os.tmpdir() with one commit that stages a file,
 // so every derived handle can be materialized. Caller cleans up.
@@ -274,6 +274,106 @@ test("handles work before dispose; standalone signature survives dispose", (t) =
     const sig = Signature.now("tester", "tester@example.com");
     repo.dispose();
     t.is(sig.name(), "tester", "standalone Signature unaffected by dispose");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const REPO_DISPOSED = { message: /Repository has been disposed/ };
+
+// Index is a derived handle: every one of its 7 methods must throw the uniform
+// "Repository has been disposed" after the owning repo is freed. Before the
+// alive-guard was added, `size`/`write`/`removePath` SILENTLY succeeded (write()
+// even persisted to .git/index) and the others threw misleading libgit2
+// messages ("bare repository") instead of the uniform disposed error.
+test("Index methods throw /disposed/ after repo.dispose()", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const repo = new Repository(dir);
+    const idx = repo.index();
+    // Positive: the guard must not break the live path.
+    t.is(typeof idx.size(), "number", "live Index.size() returns a number");
+
+    repo.dispose();
+
+    t.throws(() => idx.size(), REPO_DISPOSED, "Index.size");
+    t.throws(() => idx.write(), REPO_DISPOSED, "Index.write");
+    t.throws(() => idx.writeTree(), REPO_DISPOSED, "Index.writeTree");
+    t.throws(() => idx.addAll(), REPO_DISPOSED, "Index.addAll");
+    t.throws(() => idx.addPath("x"), REPO_DISPOSED, "Index.addPath");
+    t.throws(() => idx.updateAll(), REPO_DISPOSED, "Index.updateAll");
+    t.throws(() => idx.removePath("x"), REPO_DISPOSED, "Index.removePath");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Config is a derived handle: every method must throw the uniform disposed
+// error once the owning repo is freed. Before the guard, `getString` (and the
+// other reads/writes) silently returned/succeeded against a freed repo.
+test("Config methods throw /disposed/ after repo.dispose()", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const repo = new Repository(dir);
+    const cfg = repo.config();
+    // Positive: the guard must not break the live path.
+    t.is(cfg.getString("user.name"), "tester", "live Config.getString works");
+    t.true(Array.isArray(cfg.entries()), "live Config.entries works");
+
+    repo.dispose();
+
+    t.throws(() => cfg.getString("user.name"), REPO_DISPOSED, "Config.getString");
+    t.throws(() => cfg.getBoolean("core.bare"), REPO_DISPOSED, "Config.getBoolean");
+    t.throws(
+      () => cfg.getNumber("core.repositoryformatversion"),
+      REPO_DISPOSED,
+      "Config.getNumber",
+    );
+    t.throws(() => cfg.setString("x.y", "z"), REPO_DISPOSED, "Config.setString");
+    t.throws(() => cfg.entries(), REPO_DISPOSED, "Config.entries");
+    t.throws(() => cfg.snapshot(), REPO_DISPOSED, "Config.snapshot");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A snapshot minted from a repo-derived config shares the owning repo's liveness
+// flag, so disposing the repo AFTER the snapshot was taken must still make the
+// snapshot throw the disposed error.
+test("Config.snapshot inherits disposal from the owning repo", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const repo = new Repository(dir);
+    const snap = repo.config().snapshot();
+    t.is(snap.getString("user.name"), "tester", "live snapshot reads before dispose");
+
+    repo.dispose();
+
+    t.throws(() => snap.getString("user.name"), REPO_DISPOSED, "snapshot after dispose");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A standalone Config.openDefault() borrows no repository — its liveness flag is
+// fresh and never flipped, so disposing some OTHER repo must not affect it.
+test("standalone Config.openDefault() is unaffected by another repo's dispose", (t) => {
+  const dir = makeTempRepo();
+  try {
+    const repo = new Repository(dir);
+    const cfg = Config.openDefault();
+    repo.dispose();
+    // A missing key is fine; the point is it must NOT throw the disposed error.
+    try {
+      cfg.getString("user.name");
+    } catch (err) {
+      t.notRegex(
+        String(err.message),
+        /Repository has been disposed/,
+        "standalone config must not throw the disposed error",
+      );
+    }
+    t.pass();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

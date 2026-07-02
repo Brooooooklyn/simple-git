@@ -857,6 +857,7 @@ impl Repository {
   pub fn config(&self) -> Result<Config> {
     Ok(Config {
       inner: self.inner()?.config().convert_without_message()?,
+      alive: self.alive.clone(),
     })
   }
 
@@ -1903,6 +1904,7 @@ impl Repository {
   pub fn index(&self) -> Result<Index> {
     Ok(Index {
       inner: self.inner()?.index().convert_without_message()?,
+      alive: self.alive.clone(),
     })
   }
 
