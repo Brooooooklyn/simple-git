@@ -63,7 +63,7 @@ Attempt to open an already-existing repository at or above `path`. This starts a
 static init(p: string): Repository
 ```
 
-Create and initialize a new repository at path `p`, returning a handle to it. Its bare counterpart is `Repository.initBare`.
+Initialize a new Git repository at path `p`, returning a handle to it.
 
 #### Repository.initBare
 
@@ -255,7 +255,7 @@ Read a file from the filesystem and write its content to the object database as 
 findTree(oid: string): Tree | null
 ```
 
-Look up the tree object with the given `oid` hex string, returning a `Tree` handle or `null` when no such object exists.
+Look up the tree object with id `oid`, returning the `Tree`, or `null` if it is not found (per the `Tree | null` return).
 
 #### findCommit
 
@@ -263,7 +263,7 @@ Look up the tree object with the given `oid` hex string, returning a `Tree` hand
 findCommit(oid: string): Commit | null
 ```
 
-Look up the commit object with the given `oid` hex string, returning a `Commit` handle or `null` when no such object exists.
+Look up the commit object with id `oid`, returning the `Commit`, or `null` if it is not found (per the `Commit | null` return).
 
 ### Blame
 
