@@ -2,11 +2,18 @@ name: Deploy to Void
 on:
   push:
     branches: [main]
-    # The Void app lives in website/. Only deploy when that subtree (or this
-    # workflow) changes — skips deploys for Rust/packages-only commits.
+    # The Void app lives in website/, but its dependencies resolve from the
+    # shared ROOT lockfile — so a lockfile-only website dep update (e.g. a
+    # Renovate in-range bump or the monthly lockFileMaintenance) must also
+    # trigger a deploy, or the live site would keep serving stale deps.
+    # (Root/native-only lockfile bumps redeploy an unchanged site — a no-op.)
     paths:
       - 'website/**'
       - '.github/workflows/void-deploy.yml'
+      - 'yarn.lock'
+      - 'package.json'
+      - '.yarnrc.yml'
+      - '.yarn/releases/**'
 
 # Latest push wins: cancel an in-flight deploy for the same repo+branch so a
 # newer commit is never overtaken by an older one.
