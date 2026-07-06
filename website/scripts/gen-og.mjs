@@ -204,7 +204,7 @@ async function ogHtml() {
       <div class="badges">
         <div class="badge">Async I/O</div>
         <div class="badge">Type-safe</div>
-        <div class="badge accent">Zero-copy</div>
+        <div class="badge accent">15 platforms</div>
       </div>
     </div>
   </div>
