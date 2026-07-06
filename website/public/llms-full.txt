@@ -133,7 +133,7 @@ try {
 
 ## Typed errors
 
-Every error thrown by this library — from a synchronous method or a rejected `*Async` promise — is a standard `Error` carrying a `code` string drawn from the **`GitErrorCode`** const enum. Narrow any caught value with the total **`isGitError`** type guard:
+Every Git-layer error this library throws — from a synchronous method or a rejected `*Async` promise — is a standard `Error` carrying a `code` from the **`GitErrorCode`** const enum (the one exception is abort cancellation, covered below). Narrow any caught value with the total **`isGitError`** type guard:
 
 ```ts
 import { isGitError, GitErrorCode } from '@napi-rs/simple-git'
