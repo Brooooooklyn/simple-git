@@ -2,9 +2,6 @@
   "$schema": "./node_modules/void/schema.json",
   "output": "server",
   "routing": {
-    "revalidate": {
-      "*": 0
-    },
     "redirects": {
       "/docs/": {
         "to": "/docs",

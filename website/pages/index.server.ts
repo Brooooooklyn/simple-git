@@ -10,12 +10,16 @@ import {
   docSiteSample,
 } from './_data/samples'
 
-// index.html must never be served from cache — keep it pure SSR (no prerender, plus
-// revalidate:0 in void.json) so a deploy is live on the very next request, with no
-// edge/ISR copy that could go stale. The Shiki highlighter is a module-level
-// singleton (lib/highlight.ts, pure-JS regex engine — no runtime WASM), so
-// per-request rendering stays cheap.
-export const prerender = false
+// This page is fully static (no request- or time-varying data), so prerender it at
+// deploy time and serve it from the edge cache instead of re-running Shiki on every
+// request. `prerender = true` implies a 1-year revalidate TTL, but the ISR cache is
+// cleared on each deploy, so a new build still goes live immediately. The Shiki
+// highlighter (lib/highlight.ts, module-level singleton, pure-JS regex engine — no
+// runtime WASM) runs at BUILD time; its HTML is baked into the prerendered document,
+// so code stays fully highlighted with JS off. Islands (CountUp/InstallSwitcher/tabs)
+// still hydrate client-side. NOTE: void skips prerender for any path whose revalidate
+// TTL resolves to 0, so void.json must NOT force `routing.revalidate: {"*": 0}`.
+export const prerender = true
 
 // Pre-highlight every code sample server-side and hand the resulting HTML strings
 // to the page as props. Section components render them with `dangerouslySetInnerHTML`

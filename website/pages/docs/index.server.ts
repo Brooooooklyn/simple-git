@@ -1,5 +1,12 @@
 import { defineHead } from 'void'
 
+// /docs is fully static markdown, so prerender it at deploy time (served from the edge
+// cache, no per-request render). `prerender = true` implies a 1-year revalidate TTL;
+// the ISR cache is cleared each deploy so new content ships immediately. Islands still
+// hydrate client-side. NOTE: void skips prerender when a path's revalidate TTL is 0, so
+// void.json must NOT force `routing.revalidate: {"*": 0}`.
+export const prerender = true
+
 // Per-route head for /docs. Void's markdown frontmatter carries ONLY title +
 // description — any head/link/og frontmatter keys are silently dropped — so the
 // docs-specific canonical + og:url MUST live here, in a co-located server head.
