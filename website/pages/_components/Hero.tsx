@@ -7,14 +7,15 @@ import { benchSpeedup } from '../_data/benchmarks'
 import { platformCount } from '../_data/platforms'
 import { heroSample } from '../_data/samples'
 
-// Stat tiles. Numbers are grounded, not hard-coded:
+// Stat tiles. Numbers are grounded, not hard-coded — the CountUp number renders
+// first, then the label, so each tile reads e.g. "29× faster":
 //   • benchSpeedup (29) is derived in _data/benchmarks.ts (1.9 s / 65 ms).
 //   • platformCount (15) is derived from _data/platforms.ts.
 //   • 0 = the package's runtime `dependencies` count (root package.json is `{}`).
 const stats = [
-  { node: <CountUp to={benchSpeedup} suffix="×" />, label: 'faster than the git CLI' },
-  { node: <CountUp to={platformCount} />, label: 'prebuilt platforms' },
-  { node: <CountUp to={0} />, label: 'runtime dependencies' },
+  { node: <CountUp to={benchSpeedup} suffix="×" />, label: 'faster' },
+  { node: <CountUp to={platformCount} />, label: 'platforms' },
+  { node: <CountUp to={0} />, label: 'dependencies' },
 ]
 
 export default function Hero({ codeHtml }: { codeHtml: string }) {

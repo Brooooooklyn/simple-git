@@ -72,8 +72,9 @@ export default function Benchmark() {
                 <CountUp to={benchSpeedup} suffix="×" />
               </p>
               <p className="mt-4 max-w-xs text-sm text-(--color-muted)">
-                {benchIterations.toLocaleString()} reads drop from <span className="text-(--color-fg)">1.9 s</span> of
-                child processes to <span className="text-(--color-accent)">65 ms</span> in-process.
+                {benchIterations.toLocaleString()} reads drop from{' '}
+                <span className="text-(--color-fg)">{benchBars[0].display}</span> of child processes to{' '}
+                <span className="text-(--color-accent)">{benchBars[1].display}</span> in-process.
               </p>
             </div>
 
