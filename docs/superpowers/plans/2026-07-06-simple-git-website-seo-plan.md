@@ -266,6 +266,51 @@ pass; content still visible with JS off. Commit.
 
 ---
 
+## Task 7: Agent-friendliness — llms.txt, llms-full.txt, robots pointer
+
+**Goal:** expose the site/library to LLM agents via the llms.txt convention (llmstxt.org),
+plus a full-text fetch and a robots pointer. Static assets only — served from `website/public/`.
+
+**Read first:** website/pages/docs/index.md (the source of the full docs text),
+/Users/brooklyn/workspace/github/simple-git/README.md and index.d.ts and package.json
+(ground the API names / facts), and website/public/robots.txt.
+
+**Create `website/public/llms.txt`** — follow the llmstxt.org format:
+- H1: `# @napi-rs/simple-git`
+- a blockquote one-line summary (reuse the site description: "Native Git for Node.js via
+  libgit2 — no git shell-out. Read a file's last-updated commit date, run status, blame,
+  stage, commit, branch and push, all in-process.")
+- a short prose block: native libgit2 binding for Node (no `git` child process); flagship =
+  fast per-file "last updated" commit dates for doc-site generators; v1.0.0, MIT, 15 prebuilt
+  platform triples, Node ≥ 10.
+- `## Documentation` — a list of `- [name](absolute-url): note` links: Getting Started
+  (https://simple-git.napi.rs/docs), README
+  (https://github.com/Brooooooklyn/simple-git#readme), Type definitions
+  (https://github.com/Brooooooklyn/simple-git/blob/main/index.d.ts), npm
+  (https://www.npmjs.com/package/@napi-rs/simple-git).
+- `## Core API` — a concise bullet list of the real surface (Repository open/init/discover/
+  clone; `getFileLatestModifiedDate` / `getFileLastModifiedDate` / `getFilesLatestModified`;
+  `statuses`; index + `commit`; `blameFile`; branches/checkout; remotes; tags; `*Async` variants
+  with `AbortSignal`; `isGitError` + `GitErrorCode`; `dispose()`/`free()`/`using`). Every name
+  grounded in index.d.ts/README — no invented API.
+- `## Install` — the four package managers (`npm install @napi-rs/simple-git`, yarn/pnpm/bun).
+All URLs ABSOLUTE. No fabricated facts.
+
+**Create `website/public/llms-full.txt`** — the FULL docs in one plain-markdown fetch: take the
+content of website/pages/docs/index.md, strip the YAML frontmatter and the `[[toc]]` directive,
+prefix with `# @napi-rs/simple-git — Getting Started` and the one-line summary. Keep all code
+blocks intact. (Keep it to the docs content to avoid drift with the rendered docs page.)
+
+**Modify `website/public/robots.txt`** — add a comment pointer after the `Sitemap:` line (a
+comment, so no parser is affected):
+`# LLM-friendly content: https://simple-git.napi.rs/llms.txt`
+Keep the existing `User-agent`/`Allow`/`Sitemap` lines intact.
+
+**Verify:** `build` succeeds and llms.txt + llms-full.txt land in `dist/client` (served at
+`/llms.txt` and `/llms-full.txt`, same as robots.txt/sitemap.xml); both are valid markdown with
+resolving absolute links; spot-check the API names against index.d.ts (no fabrication); `test:e2e`
+still passes. Only `website/public/` changed. Commit.
+
 ## Done criteria (whole branch)
 
 Rendered `/` and `/docs` heads carry: unique title/description (no backticks, docs ≤160),
