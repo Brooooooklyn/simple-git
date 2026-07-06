@@ -1,6 +1,14 @@
 import { defineHandler, defineHead, type InferProps } from 'void'
 import { highlight } from '../lib/highlight'
-import { heroSample, statusSample, commitSample, blameSample, pushSample, errorsSample } from './_data/samples'
+import {
+  heroSample,
+  statusSample,
+  commitSample,
+  blameSample,
+  pushSample,
+  errorsSample,
+  docSiteSample,
+} from './_data/samples'
 
 // index.html must never be served from cache — keep it pure SSR (no prerender, plus
 // revalidate:0 in void.json) so a deploy is live on the very next request, with no
@@ -20,6 +28,7 @@ export const loader = defineHandler(async () => ({
   blameHtml: await highlight(blameSample),
   pushHtml: await highlight(pushSample),
   errorsHtml: await highlight(errorsSample),
+  docSiteHtml: await highlight(docSiteSample),
 }))
 
 export type Props = InferProps<typeof loader>

@@ -79,3 +79,16 @@ try {
   }
 }`
 
+// README.md lines 16, 41-47 — the bulk "last updated" API for the doc-site section.
+// One history walk resolves many paths at once (early-exits once all are found),
+// so a docs build stamps every page without spawning `git` per file.
+export const docSiteSample = `const repo = new Repository('/path/to/repo') // Open an existed repo
+
+// Bulk: resolve many files in a single history walk (early-exits once all are found).
+// Every input path is present as a key; a never-committed path maps to \`null\`.
+const mods = repo.getFilesLatestModified(['build.rs', 'Cargo.toml'])
+console.log(mods['build.rs']?.committerName)
+console.log(mods['Cargo.toml']?.committerTime) // a \`Date\`
+// Empty input returns \`{}\`:
+console.log(repo.getFilesLatestModified([])) // {}`
+
