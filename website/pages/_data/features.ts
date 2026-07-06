@@ -32,7 +32,7 @@ export const features: Feature[] = [
   },
   {
     title: 'Typed, catchable errors',
-    desc: 'Every failure carries a stable `GitErrorCode`, narrowable with the total, never-throwing `isGitError()` guard.',
+    desc: 'Git-layer failures carry a stable `GitErrorCode`, narrowable with the total, never-throwing `isGitError()` guard; an aborted async call rejects with napi\'s `AbortError` instead.',
   },
   {
     title: 'Prebuilt for 15 platforms',
