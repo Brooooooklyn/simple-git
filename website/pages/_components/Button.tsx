@@ -22,9 +22,13 @@ export default function Button({
   variant?: 'primary' | 'secondary' | 'ghost'
   children?: ReactNode
 }) {
+  // Centralized "opens in a new tab" cue for external links — every external
+  // <Button target="_blank"> gets a visually-hidden hint for screen readers.
+  const external = rest.target === '_blank'
   return (
     <a className={cx(base, variants[variant], className)} {...rest}>
       {children}
+      {external && <span className="sr-only"> (opens in a new tab)</span>}
     </a>
   )
 }

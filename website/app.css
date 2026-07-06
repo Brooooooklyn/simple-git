@@ -9,21 +9,23 @@
 @font-face {
   font-family: 'Space Grotesk Variable';
   font-style: normal;
-  font-display: swap;
+  /* `optional`: with the head preload the web font almost always wins first paint;
+     if it can't, the browser keeps the fallback and never swaps mid-view — no CLS. */
+  font-display: optional;
   font-weight: 300 700;
   src: url('/fonts/space-grotesk-var.woff2') format('woff2');
 }
 @font-face {
   font-family: 'Inter Variable';
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
   font-weight: 100 900;
   src: url('/fonts/inter-var.woff2') format('woff2');
 }
 @font-face {
   font-family: 'JetBrains Mono Variable';
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
   font-weight: 100 800;
   src: url('/fonts/jetbrains-mono-var.woff2') format('woff2');
 }
@@ -96,6 +98,13 @@ body {
      avoids creating a scroll container, so position:sticky keeps working. */
   overflow-x: clip;
 }
+/* Visible keyboard focus ring (WCAG 2.4.7). Zero-specificity :where so it never
+   clashes with the more specific #nav-toggle focus rule further down. */
+:where(a, button, [role='tab'], summary, input):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 ::selection {
   background: var(--color-accent-muted);
   color: var(--color-fg);
@@ -118,7 +127,6 @@ body::after {
   z-index: 60;
   pointer-events: none;
   opacity: 0.022;
-  mix-blend-mode: soft-light;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 @media (prefers-reduced-motion: reduce) {

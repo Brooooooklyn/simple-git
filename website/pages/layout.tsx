@@ -51,6 +51,14 @@ const WEBSITE_LD = {
 export default function Layout({ children }: { children: ReactNode }) {
   return (
     <>
+      {/* Skip link (WCAG A): first focusable element; sr-only until focused, then it
+          surfaces top-left so keyboard users can jump straight to <main>. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[100] focus:rounded-lg focus:bg-(--color-accent) focus:px-4 focus:py-2 focus:text-(--color-accent-fg)"
+      >
+        Skip to content
+      </a>
       {/* Mark JS-capable clients before first paint so scroll-reveal hidden state
           (gated behind html.js in app.css) only applies when JS can reveal it —
           no-JS / crawler HTML stays fully visible. Also closes the (CSS-only)
@@ -79,7 +87,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <a href="/" className="font-mono text-sm font-medium tracking-tight whitespace-nowrap text-(--color-fg)">
               @napi-rs/simple-git
             </a>
-            <nav className="hidden items-center gap-6 text-sm text-(--color-muted) md:flex">
+            <nav aria-label="Primary" className="hidden items-center gap-6 text-sm text-(--color-muted) md:flex">
               {NAV.map((item) => (
                 <a
                   key={item.href}
@@ -88,6 +96,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   {...(item.external ? { target: '_blank', rel: 'noreferrer' } : {})}
                 >
                   {item.label}
+                  {item.external && <span className="sr-only"> (opens in a new tab)</span>}
                 </a>
               ))}
             </nav>
@@ -123,7 +132,11 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
           {/* Drawer — hidden by default; the #nav-toggle:checked rule in app.css
               reveals it. id is targeted by the inline auto-close script above. */}
-          <nav id="nav-menu" className="nav-drawer hidden border-t border-(--color-border) bg-(--color-bg) md:!hidden">
+          <nav
+            id="nav-menu"
+            aria-label="Primary"
+            className="nav-drawer hidden border-t border-(--color-border) bg-(--color-bg) md:!hidden"
+          >
             <div className="container-page flex flex-col py-2">
               {NAV.map((item) => (
                 <a
@@ -133,12 +146,13 @@ export default function Layout({ children }: { children: ReactNode }) {
                   {...(item.external ? { target: '_blank', rel: 'noreferrer' } : {})}
                 >
                   {item.label}
+                  {item.external && <span className="sr-only"> (opens in a new tab)</span>}
                 </a>
               ))}
             </div>
           </nav>
         </header>
-        <main>{children}</main>
+        <main id="main-content">{children}</main>
         <Footer />
       </div>
     </>

@@ -2,7 +2,6 @@ import Button from './Button'
 import CodeBlock from './CodeBlock'
 import CountUp from './_CountUp'
 import InstallSwitcher from './_InstallSwitcher'
-import Reveal from './_Reveal'
 import { benchSpeedup } from '../_data/benchmarks'
 import { platformCount } from '../_data/platforms'
 import { heroSample } from '../_data/samples'
@@ -54,7 +53,9 @@ export default function Hero({ codeHtml }: { codeHtml: string }) {
           </div>
         </div>
 
-        <Reveal className="flex min-w-0 flex-col gap-6" delay={120}>
+        {/* Above the fold: rendered as a plain <div> (not <Reveal>) so the LCP code
+            block is never opacity:0 gated behind JS hydration. */}
+        <div className="flex min-w-0 flex-col gap-6">
           <CodeBlock html={codeHtml} filename="last-updated.ts" copyText={heroSample} />
           <div className="grid grid-cols-3 gap-2 sm:gap-3">
             {stats.map((s) => (
@@ -71,7 +72,7 @@ export default function Hero({ codeHtml }: { codeHtml: string }) {
               </div>
             ))}
           </div>
-        </Reveal>
+        </div>
       </div>
     </section>
   )

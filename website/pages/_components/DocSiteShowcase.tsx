@@ -60,6 +60,7 @@ export default function DocSiteShowcase({ codeHtml }: { codeHtml: string }) {
                   <span className="text-sm text-(--color-muted) transition-colors group-hover:text-(--color-fg)">
                     {site.name}
                   </span>
+                  <span className="sr-only"> (opens in a new tab)</span>
                 </a>
               ))}
             </div>
