@@ -1386,6 +1386,1001 @@ get(): Reference
 
 Return the reference backing this branch as a live `Reference`. Branches are direct references, so the resolved direct reference is returned (e.g. `refs/heads/main`).
 
+### Remote
+
+A handle to a configured or anonymous remote — where fetches and pushes actually happen. Obtained from `Repository.findRemote()`, `Repository.remote()`, `Repository.remoteWithFetch()` or `Repository.remoteAnonymous()`. The repository-level `remote*` methods (see the `Repository` "Remotes" section) create, rename and reconfigure remotes; the transfer operations live here.
+
+#### Remote.isValidName
+
+```ts
+static isValidName(name: string): boolean
+```
+
+Ensure the remote `name` is well-formed.
+
+#### name
+
+```ts
+name(): string | null
+```
+
+Get the remote's name. Returns `null` if this remote has not yet been named or if the name is not valid UTF-8 (per the `string | null` return).
+
+#### url
+
+```ts
+url(): string | null
+```
+
+Get the remote's URL. Returns `null` if the URL is not valid UTF-8 (per the `string | null` return).
+
+#### pushUrl
+
+```ts
+pushUrl(): string | null
+```
+
+Get the remote's push URL. Returns `null` if the push URL is not valid UTF-8 (per the `string | null` return).
+
+#### defaultBranch
+
+```ts
+defaultBranch(): string
+```
+
+Get the remote's default branch. The remote (or more exactly its transport) must have connected to the remote repository: this default branch is available as soon as the connection to the remote is initiated and it remains available after disconnecting.
+
+#### connect
+
+```ts
+connect(dir: Direction): void
+```
+
+Open a connection to a remote in the given `Direction` (fetch or push).
+
+#### connected
+
+```ts
+connected(): boolean
+```
+
+Check whether the remote is connected.
+
+#### disconnect
+
+```ts
+disconnect(): void
+```
+
+Disconnect from the remote.
+
+#### stop
+
+```ts
+stop(): void
+```
+
+Cancel the operation. At certain points in its operation, the network code checks whether the operation has been cancelled and if so stops the operation.
+
+#### fetch
+
+```ts
+fetch(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null): void
+```
+
+Download new data and update tips. A convenience function to connect to a remote, download the data, disconnect and update the remote-tracking branches. `fetchOptions` may carry `RemoteCallbacks` (for credentials/progress); it is single-use and consumed by this call.
+
+#### push
+
+```ts
+push(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null): void
+```
+
+Perform a push. If `refspecs` is empty the configured push refspecs are used. Delete a remote ref by pushing `":refs/heads/branch"`. To detect per-ref server rejections, set a `pushUpdateReference` callback on the `RemoteCallbacks`. `pushOptions` is single-use and consumed by this call.
+
+#### fetchAsync
+
+```ts
+fetchAsync(refspecs: Array<string>, fetchOptions?: FetchOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<void>
+```
+
+Asynchronous variant of `fetch`, performed off the main thread. `fetchOptions` may carry data-only settings (depth, prune, proxy URL, headers, ...) but **must not** carry `RemoteCallbacks`: those hold JS-backed callbacks bound to the main JS thread and cannot be invoked safely from a worker thread — use the synchronous `fetch` when callbacks are required. Unlike the synchronous `fetch` (which operates on the already-loaded snapshot), this resolves the remote by name against the repository's **current** on-disk configuration at the moment the async work actually runs, so a `remoteSetUrl`/`remoteAddFetch`/`remoteDelete` applied after this `Remote` was loaded but before the call completes **is** observed. Do not use the same `Remote` from the main thread while this is pending; the underlying git2 handle is not `Sync`.
+
+Argument/state validation runs synchronously on the calling thread: although the declared return is `Promise<void>`, the **call itself throws** (it does not return a rejected promise) when `fetchOptions` has already been consumed by a prior async call or carries `RemoteCallbacks` — wrap the call, `try { await remote.fetchAsync(...) }`, not just the awaited promise. Passing an aborted (or later-aborted) `signal` rejects with napi's `AbortError`, whose `code === 'Cancelled'` — not a `GitErrorCode` (see the shared `*Async` contract in the `Repository` intro).
+
+#### pushAsync
+
+```ts
+pushAsync(refspecs: Array<string>, pushOptions?: PushOptions | undefined | null, signal?: AbortSignal | undefined | null): Promise<void>
+```
+
+Asynchronous variant of `push`, performed off the main thread. `pushOptions` may carry data-only settings (packbuilder parallelism, proxy URL, headers, ...) but **must not** carry `RemoteCallbacks` — use the synchronous `push` when callbacks (e.g. `pushUpdateReference`) are required. Unlike `fetchAsync`, this resolves against a URL/refspec snapshot captured from this loaded `Remote` at call time (using the configured `pushurl` when set, else `url`) rather than re-resolving the remote by name; a later `remoteSetUrl`/`remoteSetPushUrl`/`remoteAddPush` on the same name is **not** observed by an already-scheduled `pushAsync`, matching the synchronous `push` contract. This asymmetry is intentional: libgit2's local transport ignores a configured `pushurl` for the actual push and re-derives the destination from the fetch `url`, so re-resolving by name (as `fetchAsync` does) would silently push to the wrong destination for a local/file-path remote with a configured `pushurl`. One accepted gap of the snapshot approach: per-remote HTTP proxy auto-detection (`remote.<name>.proxy`) is not picked up, so `pushAsync` combined with `ProxyOptions.auto()` will not consult that per-remote proxy config the way the synchronous, named-remote `push` does. Do not use the same `Remote` from the main thread while this is pending; the underlying git2 handle is not `Sync`.
+
+As with `fetchAsync`, argument/state validation is synchronous: the **call itself throws** (it does not return a rejected promise) when `pushOptions` has already been consumed or carries `RemoteCallbacks`, or when this remote's push URL is unreadable/absent or its configured push refspecs cannot be read — wrap the call, `try { await remote.pushAsync(...) }`. An aborted `signal` rejects with napi's `AbortError` (`code === 'Cancelled'`, not a `GitErrorCode`).
+
+#### updateTips
+
+```ts
+updateTips(updateFlags: number, downloadTags: AutotagOption, callbacks?: RemoteCallbacks | undefined | null, msg?: string | undefined | null): void
+```
+
+Update the tips to the new state. `updateFlags` is a raw bitset of `RemoteUpdateFlags` OR-ed together (e.g. `RemoteUpdateFlags.UpdateFetchHead`); unknown bits are ignored. `downloadTags` selects the tag-following behavior as an `AutotagOption`. Optional `callbacks` and `msg` may also be supplied. Unlike `FetchOptions`/`PushOptions`, `updateTips` does **not** consume the `RemoteCallbacks` it is given (the same instance may be reused).
+
+### Index
+
+A git index (the staging area). Obtain one with `Repository.index()`. Mutating methods change the in-memory index only; call `write()` to persist it to disk, or `writeTree()` to write its current state to the object database as a tree (whose OID can then be used to create a commit).
+
+#### addPath
+
+```ts
+addPath(path: string): void
+```
+
+Add or update an index entry from a file on disk. The `path` is relative to the repository's working directory and must be readable. This forces the file to be added to the index even if it is ignored.
+
+#### addAll
+
+```ts
+addAll(pathspecs?: Array<string> | undefined | null, force?: boolean | undefined | null): void
+```
+
+Add or update index entries matching files in the working directory. `pathspecs` defaults to `["*"]` (everything) when omitted. Ignored files are skipped unless `force` is `true`, which maps to `IndexAddOption::FORCE`.
+
+#### updateAll
+
+```ts
+updateAll(pathspecs?: Array<string> | undefined | null): void
+```
+
+Update all index entries to match the working directory. Existing entries are refreshed and entries whose file no longer exists are removed. `pathspecs` defaults to `["*"]` when omitted. This will fail on a bare index.
+
+#### removePath
+
+```ts
+removePath(path: string): void
+```
+
+Remove an index entry corresponding to a file on disk.
+
+#### size
+
+```ts
+size(): number
+```
+
+Get the count of entries currently in the index.
+
+#### write
+
+```ts
+write(): void
+```
+
+Write the in-memory index back to disk using an atomic file lock.
+
+#### writeTree
+
+```ts
+writeTree(): string
+```
+
+Write the index as a tree to the object database and return its OID. The index must be associated with an existing repository and must not contain any conflicted entries. The returned OID can be used to create a commit.
+
+### Config
+
+A git configuration store. Obtain one with `Repository.config()` (a prioritized view of system, global and repository config) or `Config.openDefault()` (system/global/XDG only).
+
+#### Config.openDefault
+
+```ts
+static openDefault(): Config
+```
+
+Open the global, XDG and system configuration files into a single prioritized config object that can be used when accessing default config data outside a repository.
+
+#### getString
+
+```ts
+getString(name: string): string
+```
+
+Get the value of a string config variable as an owned string. All config files are searched in order of their level (highest priority first) and the first occurrence is returned. Errors if the value is not valid UTF-8 or the key is missing.
+
+#### getBoolean
+
+```ts
+getBoolean(name: string): boolean
+```
+
+Get the value of a boolean config variable.
+
+#### getNumber
+
+```ts
+getNumber(name: string): number
+```
+
+Get the value of an integer config variable, as a JS `number`. Reads the value as a 64-bit integer. Errors with `InvalidArg` when it lies outside the JS safe-integer range (±(2^53 − 1)), where a `number` would lose precision — use `getBigInt` for those.
+
+#### getBigInt
+
+```ts
+getBigInt(name: string): bigint
+```
+
+Get the value of an i64 config variable, as a JS `bigint`. Returns a `bigint` rather than a `number` so values beyond `Number.MAX_SAFE_INTEGER` (2^53 − 1) survive without truncation.
+
+#### setString
+
+```ts
+setString(name: string, value: string): void
+```
+
+Set the value of a string config variable in the config file with the highest level (usually the local one).
+
+#### setBoolean
+
+```ts
+setBoolean(name: string, value: boolean): void
+```
+
+Set the value of a boolean config variable in the config file with the highest level (usually the local one).
+
+#### setNumber
+
+```ts
+setNumber(name: string, value: number): void
+```
+
+Set the value of an integer config variable in the config file with the highest level (usually the local one). Takes a JS `number`. Errors with `InvalidArg` when `value` is not an integer or lies outside the JS safe-integer range (±(2^53 − 1)) — use `setBigInt` for larger magnitudes rather than silently truncating.
+
+#### setBigInt
+
+```ts
+setBigInt(name: string, value: bigint): void
+```
+
+Set the value of an i64 config variable in the config file with the highest level (usually the local one). Takes a JS `bigint`. Errors with `InvalidArg` if the `bigint` does not fit losslessly in an i64 rather than silently truncating it.
+
+#### removeEntry
+
+```ts
+removeEntry(name: string): void
+```
+
+Delete a config variable from the config file with the highest level (usually the local one).
+
+#### snapshot
+
+```ts
+snapshot(): Config
+```
+
+Create a read-only point-in-time snapshot of this configuration. A snapshot gives a consistent view for looking up complex values. Note that the `get*` methods on a live (non-snapshot) config re-read the underlying files on each call.
+
+#### entries
+
+```ts
+entries(glob?: string | undefined | null): Array<ConfigEntry>
+```
+
+List configuration entries, optionally filtered by a glob pattern. Each borrowed entry is eagerly materialized into an owned `ConfigEntry`. Entries whose name or value is not valid UTF-8 are skipped.
+
+### RevWalk
+
+A revision walker over the commit graph, created by `Repository.revWalk()`. It yields commit OID hex strings (`extends Iterator<string, void, void>`) in an order controlled by `setSorting`, the `push*`/`hide*` seed methods and `simplifyFirstParent`; the chainable configuration methods return `this`.
+
+```ts
+export declare class RevWalk extends Iterator<string, void, void> {
+  /**
+   * Reset a revwalk to allow re-configuring it.
+   *
+   * The revwalk is automatically reset when iteration of its commits
+   * completes.
+   */
+  reset(): this
+  /**
+   * Set the sorting mode for a revwalk.
+   *
+   * `sorting` is a raw bitset of `Sort` flags OR-ed together (e.g.
+   * `Sort.Time | Sort.Reverse`). Unknown bits are ignored.
+   */
+  setSorting(sorting: number): this
+  /**
+   * Simplify the history by first-parent
+   *
+   * No parents other than the first for each commit will be enqueued.
+   */
+  simplifyFirstParent(): this
+  /**
+   * Mark a commit to start traversal from.
+   *
+   * The given OID must belong to a commitish on the walked repository.
+   *
+   * The given commit will be used as one of the roots when starting the
+   * revision walk. At least one commit must be pushed onto the walker before
+   * a walk can be started.
+   */
+  push(oid: string): this
+  /**
+   * Push the repository's HEAD
+   *
+   * For more information, see `push`.
+   */
+  pushHead(): this
+  /**
+   * Push matching references
+   *
+   * The OIDs pointed to by the references that match the given glob pattern
+   * will be pushed to the revision walker.
+   *
+   * A leading 'refs/' is implied if not present as well as a trailing `/ \
+   * *` if the glob lacks '?', ' \ *' or '['.
+   *
+   * Any references matching this glob which do not point to a commitish
+   * will be ignored.
+   */
+  pushGlob(glob: string): this
+  /**
+   * Push and hide the respective endpoints of the given range.
+   *
+   * The range should be of the form `<commit>..<commit>` where each
+   * `<commit>` is in the form accepted by `revparse_single`. The left-hand
+   * commit will be hidden and the right-hand commit pushed.
+   */
+  pushRange(range: string): this
+  /**
+   * Push the OID pointed to by a reference
+   *
+   * The reference must point to a commitish.
+   */
+  pushRef(reference: string): this
+  /** Mark a commit as not of interest to this revwalk. */
+  hide(oid: string): this
+  /**
+   * Hide the repository's HEAD
+   *
+   * For more information, see `hide`.
+   */
+  hideHead(): this
+  /**
+   * Hide matching references.
+   *
+   * The OIDs pointed to by the references that match the given glob pattern
+   * and their ancestors will be hidden from the output on the revision walk.
+   *
+   * A leading 'refs/' is implied if not present as well as a trailing `/ \
+   * *` if the glob lacks '?', ' \ *' or '['.
+   *
+   * Any references matching this glob which do not point to a commitish
+   * will be ignored.
+   */
+  hideGlob(glob: string): this
+  /**
+   * Hide the OID pointed to by a reference.
+   *
+   * The reference must point to a commitish.
+   */
+  hideRef(reference: string): this
+  next(value?: void): IteratorResult<string, void>
+}
+```
+
+This type extends JavaScript's `Iterator`, and so has the iterator helper methods. It may extend the upcoming TypeScript `Iterator` class in the future. (See the [MDN iterator helper methods](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator#iterator_helper_methods) and the [TypeScript 5.6 notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-6.html#iterator-helper-methods).)
+
+#### reset
+
+```ts
+reset(): this
+```
+
+Reset a revwalk to allow re-configuring it. The revwalk is automatically reset when iteration of its commits completes.
+
+#### setSorting
+
+```ts
+setSorting(sorting: number): this
+```
+
+Set the sorting mode for a revwalk. `sorting` is a raw bitset of `Sort` flags OR-ed together (e.g. `Sort.Time | Sort.Reverse`); unknown bits are ignored.
+
+#### simplifyFirstParent
+
+```ts
+simplifyFirstParent(): this
+```
+
+Simplify the history by first-parent: no parents other than the first for each commit will be enqueued.
+
+#### push
+
+```ts
+push(oid: string): this
+```
+
+Mark a commit to start traversal from. The given `oid` must belong to a commitish on the walked repository and will be used as one of the roots when starting the revision walk. At least one commit must be pushed onto the walker before a walk can be started.
+
+#### pushHead
+
+```ts
+pushHead(): this
+```
+
+Push the repository's HEAD. For more information, see `push`.
+
+#### pushGlob
+
+```ts
+pushGlob(glob: string): this
+```
+
+Push matching references: the OIDs pointed to by the references that match the given `glob` pattern will be pushed to the revision walker. A leading `refs/` is implied if not present, as well as a trailing `/*` if the glob lacks `?`, `*` or `[`. Any references matching this glob which do not point to a commitish will be ignored.
+
+#### pushRange
+
+```ts
+pushRange(range: string): this
+```
+
+Push and hide the respective endpoints of the given range. The `range` should be of the form `<commit>..<commit>` where each `<commit>` is in the form accepted by `revparse_single`. The left-hand commit will be hidden and the right-hand commit pushed.
+
+#### pushRef
+
+```ts
+pushRef(reference: string): this
+```
+
+Push the OID pointed to by a reference. The reference must point to a commitish.
+
+#### hide
+
+```ts
+hide(oid: string): this
+```
+
+Mark a commit as not of interest to this revwalk.
+
+#### hideHead
+
+```ts
+hideHead(): this
+```
+
+Hide the repository's HEAD. For more information, see `hide`.
+
+#### hideGlob
+
+```ts
+hideGlob(glob: string): this
+```
+
+Hide matching references: the OIDs pointed to by the references that match the given `glob` pattern and their ancestors will be hidden from the output on the revision walk. A leading `refs/` is implied if not present, as well as a trailing `/*` if the glob lacks `?`, `*` or `[`. Any references matching this glob which do not point to a commitish will be ignored.
+
+#### hideRef
+
+```ts
+hideRef(reference: string): this
+```
+
+Hide the OID pointed to by a reference. The reference must point to a commitish.
+
+#### next
+
+```ts
+next(value?: void): IteratorResult<string, void>
+```
+
+Advance the walk, returning the next commit OID hex string as an `IteratorResult`.
+
+### Diff
+
+The set of deltas between two trees, or a tree and the working directory. Obtained from `Repository.diffTreeToWorkdir()` or `Repository.diffTreeToWorkdirWithIndex()`; iterate its per-file deltas with `deltas()`.
+
+#### merge
+
+```ts
+merge(diff: Diff): void
+```
+
+Merge one diff into another. This merges items from the "from" list (`diff`) into the "self" list. The resulting diff will have all items that appear in either list. If an item appears in both lists, then it will be "merged" to appear as if the old version was from the "onto" list and the new version is from the "from" list (with the exception that if the item has a pending DELETE in the middle, then it will show as deleted).
+
+#### deltas
+
+```ts
+deltas(): Deltas
+```
+
+Returns an iterator over the deltas in this diff.
+
+#### isSortedIcase
+
+```ts
+isSortedIcase(): boolean
+```
+
+Check if deltas are sorted case sensitively or insensitively.
+
+### DiffDelta
+
+A single delta within a `Diff` — one changed (added, deleted, modified, ...) path with its old and new file sides. Obtained by iterating `Diff.deltas()` (a `Deltas` iterator yields `DiffDelta`).
+
+#### flags
+
+```ts
+flags(): number
+```
+
+Returns the flags on the delta. The value is the raw `git2::DiffFlags` bitset (an OR-able `number`); test individual bits with `diffFlagsContains` and the `DiffFlags` constants.
+
+#### numFiles
+
+```ts
+numFiles(): number
+```
+
+Returns the number of files in this delta.
+
+#### status
+
+```ts
+status(): Delta
+```
+
+Returns the status of this entry as a `Delta` discriminant.
+
+#### oldFile
+
+```ts
+oldFile(): DiffFile
+```
+
+Return the file which represents the "from" side of the diff. What side this means depends on the function that was used to generate the diff and will be documented on the function itself.
+
+#### newFile
+
+```ts
+newFile(): DiffFile
+```
+
+Return the file which represents the "to" side of the diff. What side this means depends on the function that was used to generate the diff and will be documented on the function itself.
+
+### DiffFile
+
+One side (old or new) of a `DiffDelta`, obtained from `DiffDelta.oldFile()` or `DiffDelta.newFile()`.
+
+#### id
+
+```ts
+id(): string
+```
+
+Returns the OID of this item. If this entry represents an absent side of a diff (e.g. the `old_file` of an `Added` delta), then the OID returned will be zeroes.
+
+#### path
+
+```ts
+path(): string | null
+```
+
+Returns the path of the entry relative to the working directory of the repository, as a lossily-decoded (UTF-8) string. Returns `null` when the path is absent or not representable (per the `string | null` return).
+
+#### size
+
+```ts
+size(): number
+```
+
+Returns the size of this entry, in bytes.
+
+#### isBinary
+
+```ts
+isBinary(): boolean
+```
+
+Returns `true` if file(s) are treated as binary data.
+
+#### isNotBinary
+
+```ts
+isNotBinary(): boolean
+```
+
+Returns `true` if file(s) are treated as text data.
+
+#### isValidId
+
+```ts
+isValidId(): boolean
+```
+
+Returns `true` if the `id` value is known correct.
+
+#### exists
+
+```ts
+exists(): boolean
+```
+
+Returns `true` if the file exists at this side of the delta.
+
+#### mode
+
+```ts
+mode(): FileMode
+```
+
+Returns the file mode as a `FileMode`.
+
+### Deltas
+
+An iterator over the diffs in a delta, returned by `Diff.deltas()`.
+
+```ts
+export declare class Deltas extends Iterator<DiffDelta, void, void> {
+
+  next(value?: void): IteratorResult<DiffDelta, void>
+}
+```
+
+This type extends JavaScript's `Iterator`, and so has the iterator helper methods. It may extend the upcoming TypeScript `Iterator` class in the future. (See the [MDN iterator helper methods](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator#iterator_helper_methods) and the [TypeScript 5.6 notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-6.html#iterator-helper-methods).)
+
+#### next
+
+```ts
+next(value?: void): IteratorResult<DiffDelta, void>
+```
+
+Advance the iterator, returning the next `DiffDelta` as an `IteratorResult`.
+
+### Cred
+
+A credential object for remote authentication. Constructed directly (`new Cred()` for a Negotiate/default credential) or via the static factories, and returned from a `RemoteCallbacks.credentials()` callback (whose argument is a `CredInfo`).
+
+#### new Cred()
+
+```ts
+constructor()
+```
+
+Create a "default" credential usable for Negotiate mechanisms like NTLM or Kerberos authentication.
+
+#### Cred.sshKeyFromAgent
+
+```ts
+static sshKeyFromAgent(username: string): Cred
+```
+
+Create a new ssh key credential object used for querying an ssh-agent. The `username` specified is the username to authenticate.
+
+#### Cred.sshKey
+
+```ts
+static sshKey(username: string, publickey: string | undefined | null, privatekey: string, passphrase?: string | undefined | null): Cred
+```
+
+Create a new passphrase-protected ssh key credential object.
+
+#### Cred.sshKeyFromMemory
+
+```ts
+static sshKeyFromMemory(username: string, publickey: string | undefined | null, privatekey: string, passphrase?: string | undefined | null): Cred
+```
+
+Create a new ssh key credential object reading the keys from memory.
+
+#### Cred.userpassPlaintext
+
+```ts
+static userpassPlaintext(username: string, password: string): Cred
+```
+
+Create a new plain-text username and password credential object.
+
+#### Cred.username
+
+```ts
+static username(username: string): Cred
+```
+
+Create a credential to specify a username. This is used with ssh authentication to query for the username if none is specified in the URL.
+
+#### hasUsername
+
+```ts
+hasUsername(): boolean
+```
+
+Check whether a credential object contains username information.
+
+#### credType
+
+```ts
+credType(): number
+```
+
+Return the type of credentials that this object represents. The value is the raw `CredentialType` bitset (an OR-able `number`); test individual bits with `credTypeContains` and the `CredentialType` constants.
+
+### RepoBuilder
+
+A builder that configures and performs a clone. Construct one with `new RepoBuilder()`, chain the configuration methods (each returns `this`), then call `clone()`; `Repository.clone` delegates to a fresh `RepoBuilder` internally.
+
+#### new RepoBuilder()
+
+```ts
+constructor()
+```
+
+Create a new `RepoBuilder` with default clone options.
+
+#### bare
+
+```ts
+bare(bare: boolean): this
+```
+
+Indicate whether the repository will be cloned as a bare repository or not.
+
+#### branch
+
+```ts
+branch(branch: string): this
+```
+
+Specify the name of the branch to check out after the clone. If not specified, the remote's default branch will be used.
+
+#### cloneLocal
+
+```ts
+cloneLocal(cloneLocal: CloneLocal): this
+```
+
+Configure options for bypassing the git-aware transport on clone. Bypassing it means that instead of a fetch, libgit2 will copy the object database directory instead of figuring out what it needs, which is faster. If possible, it will hardlink the files to save space.
+
+#### fetchOptions
+
+```ts
+fetchOptions(fetchOptions: FetchOptions): this
+```
+
+Options which control the fetch, including callbacks. The callbacks are used for reporting fetch progress, and for acquiring credentials in the event they are needed.
+
+#### clone
+
+```ts
+clone(url: string, path: string): Repository
+```
+
+Clone the repository at `url` into `path` using the configured options, returning the resulting `Repository`.
+
+### FetchOptions
+
+Data-and-callback options for a fetch, passed to `Remote.fetch`/`Remote.fetchAsync` or `RepoBuilder.fetchOptions`. **Single-use:** consumed by the first `fetch()`/`fetchAsync()` call — reusing the same instance throws (`InvalidArg`, "FetchOptions can only be used once"), synchronously at the call site even for `fetchAsync` (it does **not** reject the returned promise). Construct a fresh instance per call. The configuration methods each return `this` for chaining.
+
+#### new FetchOptions()
+
+```ts
+constructor()
+```
+
+Create a new `FetchOptions` with default fetch settings.
+
+#### remoteCallback
+
+```ts
+remoteCallback(callback: RemoteCallbacks): this
+```
+
+Set the callbacks to use for the fetch operation. (Attaching a `RemoteCallbacks` consumes it — see the `RemoteCallbacks` single-use note; and callbacks make these options unusable with `fetchAsync`.)
+
+#### proxyOptions
+
+```ts
+proxyOptions(options: ProxyOptions): this
+```
+
+Set the proxy options to use for the fetch operation.
+
+#### prune
+
+```ts
+prune(prune: FetchPrune): this
+```
+
+Set whether to perform a prune after the fetch.
+
+#### updateFetchhead
+
+```ts
+updateFetchhead(update: boolean): this
+```
+
+Set whether to write the results to `FETCH_HEAD`. Defaults to `true`.
+
+#### depth
+
+```ts
+depth(depth: number): this
+```
+
+Set fetch depth; a value less than or equal to 0 is interpreted as pull everything (effectively the same as not declaring a limit depth).
+
+#### downloadTags
+
+```ts
+downloadTags(opt: AutotagOption): this
+```
+
+Set how to behave regarding tags on the remote, such as auto-downloading tags for objects we're downloading or downloading all of them. The default is to auto-follow tags.
+
+#### followRedirects
+
+```ts
+followRedirects(opt: RemoteRedirect): this
+```
+
+Set remote redirection settings; whether redirects to another host are permitted. By default, git will follow a redirect on the initial request (`/info/refs`), but not subsequent requests.
+
+#### customHeaders
+
+```ts
+customHeaders(headers: Array<string>): this
+```
+
+Set extra headers for this fetch operation. Throws if any header contains an interior NUL byte.
+
+### PushOptions
+
+Data-and-callback options for a push, passed to `Remote.push`/`Remote.pushAsync`. **Single-use:** consumed by the first `push()`/`pushAsync()` call — reusing the same instance throws (`InvalidArg`, "PushOptions can only be used once"), synchronously at the call site even for `pushAsync` (it does **not** reject the returned promise). Construct a fresh instance per call. The configuration methods each return `this` for chaining.
+
+#### new PushOptions()
+
+```ts
+constructor()
+```
+
+Create a new `PushOptions` with default push settings.
+
+#### remoteCallback
+
+```ts
+remoteCallback(callback: RemoteCallbacks): this
+```
+
+Set the callbacks to use for the push operation. (Attaching a `RemoteCallbacks` consumes it — see the `RemoteCallbacks` single-use note; and callbacks make these options unusable with `pushAsync`.)
+
+#### proxyOptions
+
+```ts
+proxyOptions(options: ProxyOptions): this
+```
+
+Set the proxy options to use for the push operation.
+
+#### packbuilderParallelism
+
+```ts
+packbuilderParallelism(parallel: number): this
+```
+
+If the transport being used to push to the remote requires the creation of a pack file, this controls the number of worker threads used by the packbuilder when creating that pack file to be sent to the remote. If set to 0 the packbuilder will auto-detect the number of threads to create, and the default value is 1.
+
+#### followRedirects
+
+```ts
+followRedirects(opt: RemoteRedirect): this
+```
+
+Set remote redirection settings; whether redirects to another host are permitted. By default, git will follow a redirect on the initial request (`/info/refs`), but not subsequent requests.
+
+#### customHeaders
+
+```ts
+customHeaders(headers: Array<string>): this
+```
+
+Set extra headers for this push operation. Throws if any header contains an interior NUL byte.
+
+#### remotePushOptions
+
+```ts
+remotePushOptions(options: Array<string>): this
+```
+
+Set "push options" to deliver to the remote. Throws if any push option contains an interior NUL byte.
+
+### ProxyOptions
+
+Proxy configuration for a fetch or push, attached to a `FetchOptions`/`PushOptions` via their `proxyOptions()` method. Construct with `new ProxyOptions()`; the configuration methods return `this`.
+
+#### new ProxyOptions()
+
+```ts
+constructor()
+```
+
+Create a new `ProxyOptions` with no proxy configured.
+
+#### auto
+
+```ts
+auto(): this
+```
+
+Try to auto-detect the proxy from the git configuration. Note that this will override a `url` specified before.
+
+#### url
+
+```ts
+url(url: string): this
+```
+
+Specify the exact URL of the proxy to use. Note that this will override `auto` specified before.
+
+### RemoteCallbacks
+
+The JS callbacks (credentials, transfer/push progress, per-ref push status) that drive an authenticated or monitored fetch/push, attached to a `FetchOptions`/`PushOptions` via their `remoteCallback()` method. **Single-use for attachment:** attaching via `remoteCallback()` consumes it; a second attach throws (`InvalidArg`, "RemoteCallbacks can only be used once"). Construct a fresh instance per attach. (`Remote.updateTips` does **not** consume it and may reuse the same instance.) Because these callbacks are bound to the main JS thread, options carrying them cannot be used with `fetchAsync`/`pushAsync`. Each setter returns `this` for chaining.
+
+#### new RemoteCallbacks()
+
+```ts
+constructor()
+```
+
+Create a new `RemoteCallbacks` with no callbacks set.
+
+#### credentials
+
+```ts
+credentials(callback: (arg: CredInfo) => Cred): this
+```
+
+The callback through which to fetch credentials if required. The `callback` receives a `CredInfo` (carrying, e.g., the `username` parsed from the URL) and returns a `Cred`. For example, to authenticate using `$HOME/.ssh/id_rsa` and the username extracted from the URL (e.g. `git@github.com:rust-lang/git2-rs.git`):
+
+```js
+import { join } from 'node:path'
+import { homedir } from 'node:os'
+
+import { Cred, FetchOptions, RemoteCallbacks, RepoBuilder, credTypeContains } from '@napi-rs/simple-git'
+
+const builder = new RepoBuilder()
+
+const remoteCallbacks = new RemoteCallbacks()
+.credentials((cred) => {
+  return Cred.sshKey(cred.username, null, join(homedir(), '.ssh', 'id_rsa'), null)
+})
+
+const fetchOptions = new FetchOptions().depth(0).remoteCallback(remoteCallbacks)
+
+const repo = builder.branch('master')
+ .fetchOptions(fetchOptions)
+ .clone("git@github.com:rust-lang/git2-rs.git", "git2-rs")
+```
+
+#### transferProgress
+
+```ts
+transferProgress(callback: (arg: Progress) => void): this
+```
+
+The callback through which progress is monitored. The `callback` receives a `Progress` object.
+
+#### pushTransferProgress
+
+```ts
+pushTransferProgress(callback: (arg: PushTransferProgress) => void): this
+```
+
+The callback through which progress of push transfer is monitored. The callback receives a single `PushTransferProgress` object describing how many objects have been processed and how many bytes have been sent.
+
+#### pushUpdateReference
+
+```ts
+pushUpdateReference(callback: (arg: PushUpdateReference) => void): this
+```
+
+Set a callback to get invoked for each updated reference on a push. The callback is invoked once per reference with a single `PushUpdateReference` object. Its `status` is `null` when the reference was updated successfully; otherwise it is the server's rejection reason.
+
 ## Options & result types
 
 The plain-object option bags passed into methods and the result shapes they return.
