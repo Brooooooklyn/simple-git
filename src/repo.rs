@@ -16,7 +16,8 @@ use crate::config::Config;
 use crate::diff::{Diff, DiffOptions};
 use crate::error::IntoNapiError;
 use crate::file_modification::{
-  FileModMap, FileModification, get_file_modification, get_files_modification, time_to_date,
+  FileModMap, FileModification, get_file_modification, get_file_modification_with_created,
+  get_files_modification, time_to_date,
 };
 use crate::index::Index;
 use crate::object::GitObject;
@@ -404,7 +405,9 @@ impl GitModificationTask {
   fn run(&mut self) -> Result<Option<FileModification>> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    get_file_modification(&repo, &self.filepath).convert_without_message()
+    // Same enriched wrapper as the sync method (created merged in), so the async
+    // result is identical -- computed AFTER reopen + restore.
+    get_file_modification_with_created(&repo, &self.filepath).convert_without_message()
   }
 }
 
@@ -2086,8 +2089,14 @@ impl Repository {
   /// commits are skipped. `committerTime` equals `getFileLastModifiedDate`.
   /// Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
   /// timestamp).
+  ///
+  /// The result also carries `created`: the commit that FIRST added the file,
+  /// from a SEPARATE oldest-first ancestry walk resolving the EXACT
+  /// repo-root-relative path. When `filepath` is a glob/directory, the flat
+  /// fields still resolve via pathspec but `created` may be `null` (the exact
+  /// path was never a tree entry).
   pub fn get_file_latest_modified(&self, filepath: String) -> Result<Option<FileModification>> {
-    get_file_modification(self.inner()?, &filepath).convert_without_message()
+    get_file_modification_with_created(self.inner()?, &filepath).convert_without_message()
   }
 
   #[napi]

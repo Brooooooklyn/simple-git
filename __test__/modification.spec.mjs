@@ -34,6 +34,14 @@ function makeRepo(files) {
   return { root, repo: new Repository(work) };
 }
 
+// The bulk `getFilesLatestModified` path does not yet populate `created` (that
+// enrichment lands in a later task); strip `created` from a single-file record
+// so the bulk-vs-single cross-checks compare only the modification fields.
+const withoutCreated = (mod) => {
+  const { created, ...rest } = mod;
+  return rest;
+};
+
 test.beforeEach((t) => {
   t.context.repo = new Repository(workDir);
 });
@@ -71,6 +79,34 @@ test("getFileLatestModified returns enriched metadata", (t) => {
     t.is(typeof mod.summary, "string");
   }
   t.true(mod.authorTime instanceof Date);
+});
+
+// Test #1b — `created` = the commit that FIRST added the file (oldest-first
+// creation walk), separate from the newest-first modification walk. build.rs's
+// creating commit differs from its latest-modifying commit, catching a
+// created/modified swap.
+test("getFileLatestModified attaches the creating commit as `created`", (t) => {
+  const { repo } = t.context;
+  const mod = repo.getFileLatestModified("build.rs");
+  t.truthy(mod);
+
+  // Shape (runs unconditionally, incl. CI): truthy CommitInfo, 40-hex OID,
+  // author/committer times are Dates.
+  t.truthy(mod.created);
+  t.regex(mod.created.commitId, /^[0-9a-f]{40}$/);
+  t.true(mod.created.authorTime instanceof Date);
+  t.true(mod.created.committerTime instanceof Date);
+
+  // Value parity with git CLI; skip on CI where the checkout may be shallow.
+  if (!process.env.CI) {
+    // First commit that ADDED build.rs (oldest of --diff-filter=A --reverse).
+    const firstAdd = git(
+      "log --diff-filter=A --format=%H --reverse -- build.rs",
+    ).split("\n")[0];
+    t.is(mod.created.commitId, firstAdd);
+    // Creation predates (or equals) the latest modification, and here differs.
+    t.not(mod.created.commitId, mod.commitId);
+  }
 });
 
 // Test #2 — async matches sync.
@@ -146,8 +182,8 @@ test("getFilesLatestModified resolves many paths in one pass", (t) => {
     Object.keys(result).sort(),
     ["Cargo.toml", "bogus-zzz.txt", "build.rs"],
   );
-  t.deepEqual(result["build.rs"], repo.getFileLatestModified("build.rs"));
-  t.deepEqual(result["Cargo.toml"], repo.getFileLatestModified("Cargo.toml"));
+  t.deepEqual(result["build.rs"], withoutCreated(repo.getFileLatestModified("build.rs")));
+  t.deepEqual(result["Cargo.toml"], withoutCreated(repo.getFileLatestModified("Cargo.toml")));
   t.is(result["bogus-zzz.txt"], null);
 });
 
@@ -162,7 +198,7 @@ test("getFilesLatestModified returns {} for empty input", (t) => {
 test("getFilesLatestModified matches a nested forward-slash path", (t) => {
   const { repo } = t.context;
   const result = repo.getFilesLatestModified(["src/lib.rs"]);
-  t.deepEqual(result["src/lib.rs"], repo.getFileLatestModified("src/lib.rs"));
+  t.deepEqual(result["src/lib.rs"], withoutCreated(repo.getFileLatestModified("src/lib.rs")));
   t.truthy(result["src/lib.rs"]);
 });
 
@@ -170,7 +206,7 @@ test("getFilesLatestModified matches a nested forward-slash path", (t) => {
 test("getFilesLatestModified resolves a root-only file (LICENSE)", (t) => {
   const { repo } = t.context;
   const result = repo.getFilesLatestModified(["LICENSE"]);
-  t.deepEqual(result["LICENSE"], repo.getFileLatestModified("LICENSE"));
+  t.deepEqual(result["LICENSE"], withoutCreated(repo.getFileLatestModified("LICENSE")));
   t.truthy(result["LICENSE"]);
 });
 

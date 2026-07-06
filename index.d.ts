@@ -1417,6 +1417,12 @@ export declare class Repository {
    * commits are skipped. `committerTime` equals `getFileLastModifiedDate`.
    * Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
    * timestamp).
+   *
+   * The result also carries `created`: the commit that FIRST added the file,
+   * from a SEPARATE oldest-first ancestry walk resolving the EXACT
+   * repo-root-relative path. When `filepath` is a glob/directory, the flat
+   * fields still resolve via pathspec but `created` may be `null` (the exact
+   * path was never a tree entry).
    */
   getFileLatestModified(filepath: string): FileModification | null
   /**
@@ -1863,6 +1869,30 @@ export declare const enum CloneLocal {
 }
 
 /**
+ * A single commit's identity/time metadata, reused for the commit that CREATED
+ * a file (`FileModification::created`). Same 8 fields as `FileModification`'s
+ * commit metadata. All times are `Date`s (UTC; timezone offset ignored).
+ */
+export interface CommitInfo {
+  /** 40-char lowercase hex OID of the commit that first added the file. */
+  commitId: string
+  /** Commit summary (first line). Undefined if absent or not valid UTF-8. */
+  summary?: string
+  /** Author name. Undefined if not valid UTF-8. */
+  authorName?: string
+  /** Author email. Undefined if not valid UTF-8. */
+  authorEmail?: string
+  /** Author time, as a `Date`. */
+  authorTime: Date
+  /** Committer name. Undefined if not valid UTF-8. */
+  committerName?: string
+  /** Committer email. Undefined if not valid UTF-8. */
+  committerEmail?: string
+  /** Committer time, as a `Date`. */
+  committerTime: Date
+}
+
+/**
  * A single configuration entry: its fully-qualified name, value, and the
  * level (file) it was read from.
  */
@@ -2058,6 +2088,16 @@ export interface FileModification {
   committerEmail?: string
   /** Committer time, as a `Date`. Identical to `getFileLastModifiedDate`. */
   committerTime: Date
+  /**
+   * The commit that FIRST added this file (its creation), resolved by EXACT
+   * repo-root-relative path over an oldest-first ancestry walk -- SEPARATE from
+   * the newest-first modification walk above. `null` when the path has no
+   * ordinary-commit history, or when a glob/directory was passed to
+   * `getFileLatestModified` (the flat fields resolve via pathspec, but
+   * `created` resolves the exact path only). A delete-then-re-add returns the
+   * ORIGINAL add; merge commits are included; no rename-follow.
+   */
+  created?: CommitInfo
 }
 
 /**

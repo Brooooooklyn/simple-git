@@ -5,6 +5,29 @@ use chrono::{DateTime, Utc};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+/// A single commit's identity/time metadata, reused for the commit that CREATED
+/// a file (`FileModification::created`). Same 8 fields as `FileModification`'s
+/// commit metadata. All times are `Date`s (UTC; timezone offset ignored).
+#[napi(object)]
+pub struct CommitInfo {
+  /// 40-char lowercase hex OID of the commit that first added the file.
+  pub commit_id: String,
+  /// Commit summary (first line). Undefined if absent or not valid UTF-8.
+  pub summary: Option<String>,
+  /// Author name. Undefined if not valid UTF-8.
+  pub author_name: Option<String>,
+  /// Author email. Undefined if not valid UTF-8.
+  pub author_email: Option<String>,
+  /// Author time, as a `Date`.
+  pub author_time: DateTime<Utc>,
+  /// Committer name. Undefined if not valid UTF-8.
+  pub committer_name: Option<String>,
+  /// Committer email. Undefined if not valid UTF-8.
+  pub committer_email: Option<String>,
+  /// Committer time, as a `Date`.
+  pub committer_time: DateTime<Utc>,
+}
+
 /// Last commit that modified a file, with author/committer identity.
 /// All times are `Date`s (UTC; timezone offset ignored).
 #[napi(object)]
@@ -25,6 +48,14 @@ pub struct FileModification {
   pub committer_email: Option<String>,
   /// Committer time, as a `Date`. Identical to `getFileLastModifiedDate`.
   pub committer_time: DateTime<Utc>,
+  /// The commit that FIRST added this file (its creation), resolved by EXACT
+  /// repo-root-relative path over an oldest-first ancestry walk -- SEPARATE from
+  /// the newest-first modification walk above. `null` when the path has no
+  /// ordinary-commit history, or when a glob/directory was passed to
+  /// `getFileLatestModified` (the flat fields resolve via pathspec, but
+  /// `created` resolves the exact path only). A delete-then-re-add returns the
+  /// ORIGINAL add; merge commits are included; no rename-follow.
+  pub created: Option<CommitInfo>,
 }
 
 /// Convert git2 epoch seconds into a UTC `Date`. Errors (as a `git2::Error`, to
@@ -35,15 +66,18 @@ pub(crate) fn time_to_date(seconds: i64) -> std::result::Result<DateTime<Utc>, g
     .ok_or_else(|| git2::Error::from_str(&format!("Invalid commit timestamp: {seconds}")))
 }
 
-pub(crate) fn build_modification(
+/// Extract a commit's identity/time metadata once, shared by both the
+/// modification record (`build_modification`) and the creation record
+/// (`get_file_creation`). `committer_time` mirrors the legacy value
+/// (repo.rs get_file_modified_date): `commit.time()`, NOT `committer.when()`.
+pub(crate) fn build_commit_info(
   commit: &git2::Commit,
-) -> std::result::Result<FileModification, git2::Error> {
+) -> std::result::Result<CommitInfo, git2::Error> {
   let author = commit.author();
   let committer = commit.committer();
-  // Mirrors the legacy value (repo.rs get_file_modified_date): commit.time(), NOT committer.when().
   let committer_time = time_to_date(commit.time().seconds())?;
   let author_time = time_to_date(author.when().seconds())?;
-  Ok(FileModification {
+  Ok(CommitInfo {
     commit_id: commit.id().to_string(),
     summary: commit.summary().ok().flatten().map(|s| s.to_owned()),
     author_name: author.name().ok().map(|s| s.to_owned()),
@@ -52,6 +86,25 @@ pub(crate) fn build_modification(
     committer_name: committer.name().ok().map(|s| s.to_owned()),
     committer_email: committer.email().ok().map(|s| s.to_owned()),
     committer_time,
+  })
+}
+
+pub(crate) fn build_modification(
+  commit: &git2::Commit,
+) -> std::result::Result<FileModification, git2::Error> {
+  // Reuse the shared 8-field extraction; `created` is merged in later by
+  // get_file_modification_with_created (None until then).
+  let info = build_commit_info(commit)?;
+  Ok(FileModification {
+    commit_id: info.commit_id,
+    summary: info.summary,
+    author_name: info.author_name,
+    author_email: info.author_email,
+    author_time: info.author_time,
+    committer_name: info.committer_name,
+    committer_email: info.committer_email,
+    committer_time: info.committer_time,
+    created: None,
   })
 }
 
@@ -110,6 +163,65 @@ pub(crate) fn get_file_modification(
     }
   }
   Ok(None)
+}
+
+/// Single-file creation walk: find the OLDEST commit that first added
+/// `filepath` (its creation commit). Walks history from HEAD in
+/// `Sort::TOPOLOGICAL | Sort::REVERSE` order (oldest-first ancestry; NO
+/// `Sort::TIME`) and, for each commit, checks whether the tree contains the
+/// EXACT repo-root-relative `path` via `tree.get_path` -- NOT pathspec/glob and
+/// NOT parent-diffing, so merge commits are included on equal footing. Returns
+/// the first (oldest) containing commit, early-exiting on that hit; a
+/// delete-then-re-add therefore returns the ORIGINAL add. `Ok(None)` when no
+/// commit in history ever contained the path. Mirrors the modification walk's
+/// error-propagation: revwalk iterator + object-read failures propagate, and
+/// only a genuine `NotFound` (path absent from a tree) is a non-error skip.
+pub(crate) fn get_file_creation(
+  repo: &git2::Repository,
+  filepath: &str,
+) -> std::result::Result<Option<CommitInfo>, git2::Error> {
+  let mut rev_walk = repo.revwalk()?;
+  rev_walk.push_head()?;
+  // Oldest-first: the first commit whose tree contains the path is the one that
+  // first added it, so we can early-exit on that hit.
+  rev_walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)?;
+  let path = PathBuf::from(filepath);
+  for oid in rev_walk.by_ref() {
+    // Propagate revwalk iterator errors instead of silently skipping them.
+    let oid = oid?;
+    // A real object-read failure is an error, not a "no match" -- propagate it.
+    let commit = repo.find_commit(oid)?;
+    let tree = commit.tree()?;
+    // NotFound == path absent from this commit's tree (no match); any other
+    // lookup error is real and must propagate.
+    match tree.get_path(&path) {
+      // Present in the oldest commit seen so far == the creation commit.
+      Ok(_) => return Ok(Some(build_commit_info(&commit)?)),
+      Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+      Err(e) => return Err(e),
+    }
+  }
+  Ok(None)
+}
+
+/// Single-file modification lookup enriched with the file's `created` commit.
+/// Runs the newest-first modification walk (`get_file_modification`) and, ONLY
+/// when that yields a record (`Some`), the SEPARATE oldest-first creation walk
+/// (`get_file_creation`), merging its result into `FileModification::created`.
+/// A never-committed path returns `None` (the whole record) and is never walked
+/// for creation. Shared by the sync method and the async task so both produce
+/// identical results.
+pub(crate) fn get_file_modification_with_created(
+  repo: &git2::Repository,
+  filepath: &str,
+) -> std::result::Result<Option<FileModification>, git2::Error> {
+  match get_file_modification(repo, filepath)? {
+    Some(mut fm) => {
+      fm.created = get_file_creation(repo, filepath)?;
+      Ok(Some(fm))
+    }
+    None => Ok(None),
+  }
 }
 
 /// Bulk walk: resolve the last commit that modified each of `filepaths` in a
