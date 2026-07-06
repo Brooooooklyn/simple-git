@@ -325,3 +325,63 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # --- Website (Void) deploy -------------------------------------------------
+  # Folded in from the former void-deploy.yml. Runs on push to main only,
+  # independently of the native build/test jobs above (no `needs` on them) so a
+  # Rust CI failure never blocks a website deploy. CI already runs on every
+  # non-docs push to main, so `changes` scopes the deploy to commits that
+  # actually affect the site — website/** or the shared root package-manager
+  # files (a lockfile-only website dep bump still deploys). GitHub cannot
+  # path-filter a single job of a multi-job workflow, hence this gate job.
+  changes:
+    name: Detect website changes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      website: ${{ steps.filter.outputs.website }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            website:
+              - 'website/**'
+              - 'yarn.lock'
+              - 'package.json'
+              - '.yarnrc.yml'
+              - '.yarn/releases/**'
+
+  deploy:
+    name: Deploy to Void
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
+    runs-on: ubuntu-latest
+    # id-token: write lets `void deploy` mint a GitHub OIDC token and exchange
+    # it (audience "void") for a short-lived, project-scoped deploy token — no
+    # long-lived VOID_TOKEN secret. Scoped to this job so the native jobs keep
+    # their default token permissions.
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      # Override with a VOID_API_URL repository variable to target staging.
+      VOID_API_URL: ${{ vars.VOID_API_URL || 'https://api.void.cloud' }}
+      VOID_PROJECT: napi-simple-git
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      # Activate the repo-pinned yarn@4.17.0 (packageManager field) before any
+      # yarn call, so install uses Berry, not the runner's global classic yarn.
+      - run: corepack enable
+      # Install at the repo ROOT — yarn workspaces monorepo, so the lockfile and
+      # workspace graph live at the root, not in website/.
+      - run: yarn install --immutable
+      # `void deploy` (>= 0.10.2) detects GitHub Actions, mints the OIDC token,
+      # exchanges it for a deploy token, and deploys — no curl/jq, no secret.
+      - name: Deploy
+        working-directory: website
+        run: yarn void deploy --project "$VOID_PROJECT"
