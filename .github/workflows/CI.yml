@@ -392,7 +392,14 @@ jobs:
 
   deploy:
     name: Deploy to Void
-    needs: changes
+    # Depend on `website` as well as `changes`: the build + Playwright smoke must
+    # pass BEFORE we publish. With `needs: changes` alone, deploy ran in parallel
+    # with the website job and could push a broken site to production before e2e
+    # finished. When website changed, the website job always runs, so this needs
+    # is satisfiable; when it didn't, the `if` below skips deploy regardless.
+    needs:
+      - changes
+      - website
     # Deploy only on a push to main (never on pull_request); the `changes` gate
     # now also fires for PRs, so this event/ref guard keeps deploy main-only.
     if: needs.changes.outputs.website == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
