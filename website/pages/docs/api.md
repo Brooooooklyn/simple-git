@@ -1014,7 +1014,9 @@ Convert a tree entry to the `GitObject` it points to, looked up in `repo`.
 Iterator over a tree's entries, returned by `Tree.entries()`.
 
 ```ts
-export declare class TreeIter extends Iterator<TreeEntry, void, void>
+export declare class TreeIter extends Iterator<TreeEntry, void, void> {
+  next(value?: void): IteratorResult<TreeEntry, void>
+}
 ```
 
 This type extends JavaScript's `Iterator`, and so has the iterator helper methods. It may extend the upcoming TypeScript `Iterator` class in the future. (See the [MDN iterator helper methods](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator#iterator_helper_methods) and the [TypeScript 5.6 notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-6.html#iterator-helper-methods).)
@@ -1285,7 +1287,7 @@ Resolve a symbolic reference to a direct reference. This method iteratively peel
 rename(newName: string, force: boolean, msg: string): Reference
 ```
 
-Rename an existing reference to `newName`. This works for both direct and symbolic references. If `force` is not enabled and there is already a reference with the given name, the renaming fails. `msg` is recorded in the reflog.
+Rename an existing reference to `newName`. This works for both direct and symbolic references. If `force` is not enabled and there is already a reference with the given name, the renaming fails.
 
 ### Signature
 
