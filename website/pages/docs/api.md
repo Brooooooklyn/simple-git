@@ -1015,6 +1015,7 @@ Iterator over a tree's entries, returned by `Tree.entries()`.
 
 ```ts
 export declare class TreeIter extends Iterator<TreeEntry, void, void> {
+
   next(value?: void): IteratorResult<TreeEntry, void>
 }
 ```
