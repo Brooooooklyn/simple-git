@@ -16,7 +16,7 @@
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/space-grotesk": "^5.2.10",
     "@void/md": "0.10.5",
-    "@void/react": "0.10.2",
+    "@void/react": "0.10.5",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "void": "0.10.2"
