@@ -27,6 +27,11 @@ test('docs api (/docs/api) renders 200 with the heading and the docs sidebar', a
 
   await expect(page.getByRole('heading', { name: 'API Reference', level: 1 })).toBeVisible()
 
+  // Assert the markdown BODY rendered (not just the frontmatter H1): the `## Repository`
+  // and `## Error handling` section headings are real H2s produced by the page content.
+  await expect(page.getByRole('heading', { name: 'Repository', level: 2 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Error handling', level: 2 })).toBeVisible()
+
   // The two-column docs shell: a desktop sidebar <nav aria-label="Documentation"> with
   // links to both docs routes. The mobile <details> nav shares the label, so scope the
   // link assertion to the visible (desktop) sidebar to keep it deterministic.

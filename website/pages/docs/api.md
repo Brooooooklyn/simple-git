@@ -2563,7 +2563,7 @@ The argument passed to a `RemoteCallbacks.credentials` callback, describing the 
 
 ## Enums
 
-The bitflag and discriminant enums used across statuses, resets, revision-walk sorts and error codes.
+The bitflag and discriminant enums used across the surface — diff deltas, remote and clone options, revision-walk sorts, object/reference kinds and error codes.
 
 Discriminant enums are single values; the bitflag enums (`CredentialType`, `DiffFlags`, `RemoteUpdateFlags`, `RepositoryOpenFlags`, `Sort`) are OR-ed together into a raw `number` and passed/returned as such.
 
@@ -2997,3 +2997,51 @@ Check whether a raw diff-flags bitset contains a given `DiffFlags` bit. `flags` 
 ## Error handling
 
 How Git-layer failures surface as typed `Error`s carrying a `GitErrorCode`, and how to narrow them safely inside a `catch`.
+
+Every Git-layer error this library throws — whether from a synchronous method or as a rejected `*Async` promise — is a standard `Error` carrying a `code` string drawn from the [`GitErrorCode`](#giterrorcode) const enum (abort cancellation is the one exception, covered below). Narrow any caught value to a coded error with the total [`isGitError`](#isgiterror) type guard:
+
+```ts
+import { isGitError, GitErrorCode } from '@napi-rs/simple-git'
+
+try {
+  repo.findRemote('does-not-exist')
+} catch (e) {
+  if (isGitError(e) && e.code === GitErrorCode.NotFound) {
+    // handle the missing remote
+  }
+}
+```
+
+[`isGitError(e)`](#isgiterror) returns `true` **only** when `e` is a genuine `Error` whose `code` is a real member of the [`GitErrorCode`](#giterrorcode) enum, and narrows it to `Error & { code: GitErrorCode }` in TypeScript. The `Error` test is the native Node-API `napi_is_error` check (not a JS-level `instanceof`), so it recognizes cross-realm and subclassed errors while rejecting look-alike proxies and plain objects; membership is validated against the generated enum (the single source of truth), so a non-git `Error` that merely exposes some other string `code` (e.g. Node's `ENOENT`) returns `false`. The guard is **total** — it never throws for any input, even a hostile value with a throwing proxy trap or `Symbol.hasInstance`, or an `Error` whose `code` is a throwing getter (all yield `false`) — so it is always safe to call inside a `catch`. See the [`isGitError`](#isgiterror) function entry for the full contract, and the [`GitErrorCode`](#giterrorcode) enum for the token table.
+
+Synchronous methods and `*Async` promise rejections expose the same [`GitErrorCode`](#giterrorcode) token set, so you can branch on `e.code` either way:
+
+```ts
+// Asynchronous — the rejection carries the same coded error as the sync call.
+await repo.getFileLatestModifiedDateAsync('build.rs').catch((e) => {
+  if (isGitError(e) && e.code === GitErrorCode.GenericError) {
+    // unclassified failure
+  }
+})
+```
+
+### Cancellation is not a GitErrorCode
+
+An **aborted** `*Async` call is the one exception to the rule above. When the `AbortSignal` passed to an `*Async` method fires, the call rejects with napi's own `AbortError`, whose `code === 'Cancelled'` — a napi-level runtime token, **not** a [`GitErrorCode`](#giterrorcode) member (cancellation bypasses the task's own reject hook). Because `'Cancelled'` is not a `GitErrorCode`, [`isGitError`](#isgiterror) returns `false` for it. Detect an aborted call separately — via the `AbortSignal`'s `aborted` flag / `abort` event, or by checking `e.code === 'Cancelled'` — rather than through `isGitError`:
+
+```ts
+const ac = new AbortController()
+setTimeout(() => ac.abort(), 1_000)
+
+try {
+  await repo.getFilesLatestModifiedAsync(['docs/api.md'], ac.signal)
+} catch (e) {
+  if (isGitError(e)) {
+    // a real Git-layer error, narrowed to `Error & { code: GitErrorCode }`
+  } else if ((e as { code?: string }).code === 'Cancelled') {
+    // the AbortSignal fired — this is napi's AbortError, not a GitErrorCode
+  }
+}
+```
+
+The synchronous-validation `*Async` methods (`fetchAsync`, `pushAsync`) can also **throw at the call site** — rather than reject — when their options are misused (a consumed `FetchOptions`/`PushOptions`, or `RemoteCallbacks` passed to an async transfer); those throws carry the `InvalidArg` code. Wrap the whole call in `try` (`try { await remote.fetchAsync(...) }`), not just the awaited promise, so both the synchronous throw and the later rejection are caught.
