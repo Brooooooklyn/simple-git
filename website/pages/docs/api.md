@@ -717,6 +717,672 @@ Alias for `dispose()`. Eagerly releases the underlying git2 repository handle; i
 
 The handle types a `Repository` hands back: commits, trees, references, remotes, the index, blame results and their kin.
 
+### Commit
+
+A commit object, obtained from `Repository.findCommit(oid)` or another commit's `parent(i)`.
+
+#### id
+
+```ts
+id(): string
+```
+
+Get the id (SHA1) of this repository object.
+
+#### treeId
+
+```ts
+treeId(): string
+```
+
+Get the id of the tree pointed to by this commit. No attempts are made to fetch an object from the ODB.
+
+#### tree
+
+```ts
+tree(): Tree
+```
+
+Get the tree pointed to by this commit.
+
+#### message
+
+```ts
+message(): string | null
+```
+
+Get the full message of a commit. The returned message is slightly prettified by removing any potential leading newlines. Returns `null` if the message is not valid UTF-8 (per the `string | null` return).
+
+#### messageBytes
+
+```ts
+messageBytes(): Buffer
+```
+
+Get the full message of a commit as a byte slice. The returned message is slightly prettified by removing any potential leading newlines.
+
+#### messageEncoding
+
+```ts
+messageEncoding(): string | null
+```
+
+Get the encoding for the message of a commit, as a string representing a standard encoding name. Returns `null` if the encoding is not known (per the `string | null` return).
+
+#### messageRaw
+
+```ts
+messageRaw(): string | null
+```
+
+Get the full raw message of a commit. Returns `null` if the message is not valid UTF-8 (per the `string | null` return).
+
+#### messageRawBytes
+
+```ts
+messageRawBytes(): Buffer
+```
+
+Get the full raw message of a commit.
+
+#### rawHeader
+
+```ts
+rawHeader(): string | null
+```
+
+Get the full raw text of the commit header. Returns `null` if the message is not valid UTF-8 (per the `string | null` return).
+
+#### headerFieldBytes
+
+```ts
+headerFieldBytes(field: string): Buffer
+```
+
+Get an arbitrary header `field`.
+
+#### rawHeaderBytes
+
+```ts
+rawHeaderBytes(): Buffer
+```
+
+Get the full raw text of the commit header.
+
+#### summary
+
+```ts
+summary(): string | null
+```
+
+Get the short "summary" of the git commit message — the first paragraph of the message with whitespace trimmed and squashed. Returns `null` if an error occurs or if the summary is not valid UTF-8 (per the `string | null` return).
+
+#### summaryBytes
+
+```ts
+summaryBytes(): Buffer | null
+```
+
+Get the short "summary" of the git commit message — the first paragraph of the message with whitespace trimmed and squashed. Returns `null` if an error occurs (per the `Buffer | null` return).
+
+#### body
+
+```ts
+body(): string | null
+```
+
+Get the long "body" of the git commit message — everything but the first paragraph of the message, with leading and trailing whitespace trimmed. Returns `null` if an error occurs or if the summary is not valid UTF-8 (per the `string | null` return).
+
+#### bodyBytes
+
+```ts
+bodyBytes(): Buffer | null
+```
+
+Get the long "body" of the git commit message — everything but the first paragraph of the message, with leading and trailing whitespace trimmed. Returns `null` if an error occurs (per the `Buffer | null` return).
+
+#### time
+
+```ts
+time(): Date
+```
+
+Get the commit time (i.e. committer time) of a commit. Returns the committer time as a UTC `Date`; the committer's timezone offset is not preserved (the value is normalized to UTC).
+
+#### author
+
+```ts
+author(): Signature
+```
+
+Get the author of this commit.
+
+#### committer
+
+```ts
+committer(): Signature
+```
+
+Get the committer of this commit.
+
+#### amend
+
+```ts
+amend(updateRef?: string | undefined | null, author?: Signature | undefined | null, committer?: Signature | undefined | null, messageEncoding?: string | undefined | null, message?: string | undefined | null, tree?: Tree | undefined | null): string
+```
+
+Amend this existing commit with all non-`null` values, returning the new commit's OID hex string. This creates a new commit that is exactly the same as the old commit, except that any non-`null` values are updated. The new commit has the same parents as the old commit. For information about `updateRef`, see `Repository.commit`.
+
+#### parentCount
+
+```ts
+parentCount(): number
+```
+
+Get the number of parents of this commit. Use `parent`/`parentId` to read a specific parent.
+
+#### parent
+
+```ts
+parent(i: number): Commit
+```
+
+Get the parent of the commit at index `i`. This attempts to load the parent commit from the ODB.
+
+#### parentId
+
+```ts
+parentId(i: number): string
+```
+
+Get the id of the parent of the commit at index `i`. This is different from `parent`, which attempts to load the parent commit from the ODB.
+
+#### asObject
+
+```ts
+asObject(): GitObject
+```
+
+Casts this `Commit` to be usable as a `GitObject`.
+
+### Tree
+
+A tree object, obtained from `Repository.findTree(oid)`, `Commit.tree()` or `Reference.peelToTree()`; iterate its entries with `entries()`.
+
+#### id
+
+```ts
+id(): string
+```
+
+Get the id (SHA1) of this repository object.
+
+#### size
+
+```ts
+size(): number
+```
+
+Get the number of entries listed in a tree.
+
+#### isEmpty
+
+```ts
+isEmpty(): boolean
+```
+
+Return `true` if there is no entry.
+
+#### entries
+
+```ts
+entries(): TreeIter
+```
+
+Returns a `TreeIter` iterator over the entries in this tree.
+
+#### getId
+
+```ts
+getId(id: string): TreeEntry | null
+```
+
+Look up a tree entry by SHA value, returning the `TreeEntry`, or `null` when no entry matches (per the `TreeEntry | null` return).
+
+#### get
+
+```ts
+get(index: number): TreeEntry | null
+```
+
+Look up a tree entry by its position in the tree, returning the `TreeEntry`, or `null` when the index is out of range (per the `TreeEntry | null` return).
+
+#### getName
+
+```ts
+getName(name: string): TreeEntry | null
+```
+
+Look up a direct child entry of this tree by its `name`, returning the `TreeEntry`, or `null` when no such child exists (per the `TreeEntry | null` return). `name` is a single path component (a filename), not a multi-component path; this does not descend into subtrees. To follow a relative path through nested subtrees, use `getPath`.
+
+#### getPath
+
+```ts
+getPath(name: string): TreeEntry | null
+```
+
+Look up a tree entry by a relative path, descending through subtrees, returning the `TreeEntry`, or `null` when the path does not resolve (per the `TreeEntry | null` return). `name` is a path relative to this tree and may contain multiple components (e.g. `src/lib.rs`); each component is resolved in turn, walking into nested subtrees. To look up a direct child by its name, use `getName`.
+
+### TreeEntry
+
+An entry in a tree, obtained from `Tree.get`/`getId`/`getName`/`getPath` or by iterating `Tree.entries()`.
+
+#### id
+
+```ts
+id(): string
+```
+
+Get the id of the object pointed to by the entry.
+
+#### name
+
+```ts
+name(): string
+```
+
+Get the name of a tree entry.
+
+#### nameBytes
+
+```ts
+nameBytes(): Buffer
+```
+
+Get the filename of a tree entry.
+
+#### toObject
+
+```ts
+toObject(repo: Repository): GitObject
+```
+
+Convert a tree entry to the `GitObject` it points to, looked up in `repo`.
+
+### TreeIter
+
+Iterator over a tree's entries, returned by `Tree.entries()`.
+
+```ts
+export declare class TreeIter extends Iterator<TreeEntry, void, void>
+```
+
+This type extends JavaScript's `Iterator`, and so has the iterator helper methods. It may extend the upcoming TypeScript `Iterator` class in the future. (See the [MDN iterator helper methods](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator#iterator_helper_methods) and the [TypeScript 5.6 notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-6.html#iterator-helper-methods).)
+
+#### next
+
+```ts
+next(value?: void): IteratorResult<TreeEntry, void>
+```
+
+Advance the iterator, returning the next `TreeEntry` as an `IteratorResult`.
+
+### Blob
+
+A blob object, obtained by peeling a `GitObject` to a blob with `GitObject.peelToBlob()`.
+
+#### id
+
+```ts
+id(): string
+```
+
+Get the id (SHA1) of a repository blob.
+
+#### isBinary
+
+```ts
+isBinary(): boolean
+```
+
+Determine if the blob content is most certainly binary or not.
+
+#### content
+
+```ts
+content(): Buffer
+```
+
+Get the content of this blob.
+
+#### size
+
+```ts
+size(): number
+```
+
+Get the size in bytes of the contents of this blob.
+
+### GitObject
+
+A generic git object of any kind, obtained from `Commit.asObject()`, `Tag.peel()`, `TreeEntry.toObject(repo)` or `GitObject.peel(kind)`; inspect its type with `kind()`.
+
+#### id
+
+```ts
+id(): string
+```
+
+Get the id (SHA1) of this repository object.
+
+#### kind
+
+```ts
+kind(): ObjectType | null
+```
+
+Get the type of the object as an `ObjectType`, or `null` when the type is unknown (per the `ObjectType | null` return).
+
+#### peel
+
+```ts
+peel(kind: ObjectType): GitObject
+```
+
+Recursively peel an object until an object of the specified `kind` is met. If you pass `Any` as the target type, then the object is peeled until the type changes (e.g. a tag is chased until the referenced object is no longer a tag).
+
+#### peelToBlob
+
+```ts
+peelToBlob(): Blob
+```
+
+Recursively peel an object until a blob is found.
+
+### Tag
+
+A tag object, obtained from `Repository.findTag(oid)` or `Repository.findTagByPrefix(prefixHash)`.
+
+#### Tag.isValidName
+
+```ts
+static isValidName(name: string): boolean
+```
+
+Determine whether a tag `name` is valid, meaning that (when prefixed with `refs/tags/`) it is a valid reference name, and that any additional tag name restrictions are imposed (e.g. it cannot start with a `-`).
+
+#### id
+
+```ts
+id(): string
+```
+
+Get the id (SHA1) of this repository object.
+
+#### message
+
+```ts
+message(): string | null
+```
+
+Get the message of a tag. Returns `null` if there is no message or if it is not valid UTF-8 (per the `string | null` return).
+
+#### messageBytes
+
+```ts
+messageBytes(): Buffer | null
+```
+
+Get the message of a tag. Returns `null` if there is no message (per the `Buffer | null` return).
+
+#### name
+
+```ts
+name(): string | null
+```
+
+Get the name of a tag. Returns `null` if it is not valid UTF-8 (per the `string | null` return).
+
+#### nameBytes
+
+```ts
+nameBytes(): Buffer
+```
+
+Get the name of a tag.
+
+#### peel
+
+```ts
+peel(): GitObject
+```
+
+Recursively peel a tag until a non-tag `GitObject` is found.
+
+### Reference
+
+A git reference (branch, tag, note or symbolic ref), obtained from `Repository.head()`, `Repository.reference`/`referenceSymbolic`, `Branch.get()` or `Reference.resolve()`.
+
+#### Reference.isValidName
+
+```ts
+static isValidName(name: string): boolean
+```
+
+Ensure the reference `name` is well-formed. Validation is performed as if `ReferenceFormat::ALLOW_ONELEVEL` was given to `Reference.normalize_name`. No normalization is performed, however.
+
+```ts
+import { Reference } from '@napi-rs/simple-git'
+
+console.assert(Reference.isValidName("HEAD"));
+console.assert(Reference.isValidName("refs/heads/main"));
+
+// But:
+console.assert(!Reference.isValidName("main"));
+console.assert(!Reference.isValidName("refs/heads/*"));
+console.assert(!Reference.isValidName("foo//bar"));
+```
+
+#### isBranch
+
+```ts
+isBranch(): boolean
+```
+
+Check if a reference is a local branch.
+
+#### isNote
+
+```ts
+isNote(): boolean
+```
+
+Check if a reference is a note.
+
+#### isRemote
+
+```ts
+isRemote(): boolean
+```
+
+Check if a reference is a remote tracking branch.
+
+#### isTag
+
+```ts
+isTag(): boolean
+```
+
+Check if a reference is a tag.
+
+#### kind
+
+```ts
+kind(): ReferenceType
+```
+
+Get the type of the reference as a `ReferenceType`.
+
+#### name
+
+```ts
+name(): string | null
+```
+
+Get the full name of a reference. Returns `null` if the name is not valid UTF-8 (per the `string | null` return).
+
+#### shorthand
+
+```ts
+shorthand(): string | null
+```
+
+Get the full shorthand of a reference. This transforms the reference name into a "human-readable" version; if no shortname is appropriate, it returns the full name. Returns `null` if the shorthand is not valid UTF-8 (per the `string | null` return).
+
+#### target
+
+```ts
+target(): string | null
+```
+
+Get the OID pointed to by a direct reference. Only available if the reference is direct (i.e. an object id reference, not a symbolic one); returns `null` otherwise (per the `string | null` return).
+
+#### targetPeel
+
+```ts
+targetPeel(): string | null
+```
+
+Return the peeled OID target of this reference. This peeled OID only applies to direct references that point to a hard Tag object: it is the result of peeling such a Tag; otherwise `null` (per the `string | null` return).
+
+#### peelToTree
+
+```ts
+peelToTree(): Tree
+```
+
+Peel a reference to a tree. This method recursively peels the reference until it reaches a `Tree`.
+
+#### symbolicTarget
+
+```ts
+symbolicTarget(): string | null
+```
+
+Get the full name of the reference pointed to by a symbolic reference. Returns `null` if the reference is either not symbolic or not a valid UTF-8 string (per the `string | null` return).
+
+#### resolve
+
+```ts
+resolve(): Reference
+```
+
+Resolve a symbolic reference to a direct reference. This method iteratively peels a symbolic reference until it resolves to a direct reference to an OID. If a direct reference is passed as an argument, a copy of that reference is returned.
+
+#### rename
+
+```ts
+rename(newName: string, force: boolean, msg: string): Reference
+```
+
+Rename an existing reference to `newName`. This works for both direct and symbolic references. If `force` is not enabled and there is already a reference with the given name, the renaming fails. `msg` is recorded in the reflog.
+
+### Signature
+
+An author/committer signature — a name, email and timestamp. Construct one with `new Signature(...)` or `Signature.now(...)`, or read one from `Repository.signature()`, `Commit.author()` or `Commit.committer()`.
+
+#### Signature.now
+
+```ts
+static now(name: string, email: string): Signature
+```
+
+Create a new action signature with a timestamp of 'now'. See the constructor for more information.
+
+#### new Signature(name, email, time)
+
+```ts
+constructor(name: string, email: string, time: Date)
+```
+
+Create a new action signature. The `time` is a JS `Date`; it is recorded at whole-second resolution with a zero time-zone offset (UTC). Returns an error if either `name` or `email` contain angle brackets.
+
+#### name
+
+```ts
+name(): string | null
+```
+
+Get the name on the signature. Returns `null` if the name is not valid UTF-8 (per the `string | null` return).
+
+#### email
+
+```ts
+email(): string | null
+```
+
+Get the email on the signature. Returns `null` if the email is not valid UTF-8 (per the `string | null` return).
+
+#### when
+
+```ts
+when(): Date
+```
+
+Return the time the signature was recorded, as a `Date`.
+
+### Branch
+
+A git branch — a thin wrapper around an underlying reference; the full reference name is available via `referenceName()`. Obtained from `Repository.branches()`, `Repository.findBranch()`, `Repository.branch()` or `Branch.upstream()`.
+
+#### name
+
+```ts
+name(): string | null
+```
+
+Return the name of the given local or remote branch. Returns `null` if the name is not valid UTF-8 (per the `string | null` return).
+
+#### isHead
+
+```ts
+isHead(): boolean
+```
+
+Determine if the current local branch is pointed at by HEAD.
+
+#### referenceName
+
+```ts
+referenceName(): string | null
+```
+
+Get the full name of the reference backing this branch (e.g. `refs/heads/main`). Returns `null` if the reference name is not valid UTF-8 (per the `string | null` return).
+
+#### delete
+
+```ts
+delete(): void
+```
+
+Delete an existing branch reference.
+
+#### upstream
+
+```ts
+upstream(): Branch | null
+```
+
+Return the reference supporting the remote tracking branch, given a local branch reference. Returns `null` when the branch has no configured upstream (per the `Branch | null` return).
+
+#### get
+
+```ts
+get(): Reference
+```
+
+Return the reference backing this branch as a live `Reference`. Branches are direct references, so the resolved direct reference is returned (e.g. `refs/heads/main`).
+
 ## Options & result types
 
 The plain-object option bags passed into methods and the result shapes they return.
