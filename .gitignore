@@ -151,3 +151,10 @@ Cargo.lock
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# website (void) build artifacts — node_modules/ and dist/ are already ignored above
+website/.void
+website/.wrangler
+website/test-results
+website/playwright-report
+website/.playwright-mcp
