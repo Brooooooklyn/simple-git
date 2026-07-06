@@ -10,12 +10,21 @@ env:
       - main
     tags-ignore:
       - "**"
-    paths-ignore:
-      - "**/*.md"
-      - LICENSE
-      - "**/*.gitignore"
-      - .editorconfig
-      - docs/**
+    # The deploy job now lives in this workflow, so a website-docs-only push
+    # (e.g. website/pages/docs/index.md) must still start the run — a blanket
+    # `paths-ignore: **/*.md` would skip the whole workflow before the deploy
+    # gate could match `website/**`. Use a positive `paths` filter instead:
+    # everything triggers except root docs/markdown, but `website/**` is
+    # re-included last so website markdown wins over the markdown exclusion.
+    # (Order matters: last matching pattern decides inclusion per file.)
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "!LICENSE"
+      - "!**/*.gitignore"
+      - "!.editorconfig"
+      - "!docs/**"
+      - "website/**"
   pull_request: null
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -325,3 +334,100 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # --- Website (Void): PR build/e2e gate + main deploy -----------------------
+  # `changes` detects website-affecting paths for BOTH pull requests and pushes
+  # to main (GitHub cannot path-filter a single job of a multi-job workflow, so
+  # the former on.paths filter lives here). `website` builds + e2e-smokes the
+  # site whenever those paths change — a pre-merge gate on PRs, so a
+  # Vite/TS/markdown break fails here instead of only at deploy time. `deploy`
+  # runs only on push to main, independently of the native build/test jobs above
+  # (no `needs` on them) so a Rust CI failure never blocks a website deploy.
+  changes:
+    name: Detect website changes
+    runs-on: ubuntu-latest
+    outputs:
+      website: ${{ steps.filter.outputs.website }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            website:
+              - 'website/**'
+              - 'yarn.lock'
+              - 'package.json'
+              - '.yarnrc.yml'
+              - '.yarn/releases/**'
+
+  website:
+    name: Website build & e2e
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: yarn
+      - run: corepack enable
+      - name: Install dependencies
+        run: yarn install --immutable
+      - name: Build website (void:prepare + vite build)
+        run: |
+          yarn workspace @napi-rs/simple-git-website void:prepare
+          yarn workspace @napi-rs/simple-git-website build
+      - name: Install Playwright chromium
+        run: yarn workspace @napi-rs/simple-git-website exec playwright install --with-deps chromium
+      # test:e2e is self-contained — playwright.config.ts boots a fresh `yarn dev`
+      # SSR server (reuseExistingServer is false under CI) and smokes / , /docs
+      # and /docs/api.
+      - name: e2e smoke
+        run: yarn workspace @napi-rs/simple-git-website test:e2e
+        env:
+          CI: '1'
+
+  deploy:
+    name: Deploy to Void
+    # Depend on `website` as well as `changes`: the build + Playwright smoke must
+    # pass BEFORE we publish. With `needs: changes` alone, deploy ran in parallel
+    # with the website job and could push a broken site to production before e2e
+    # finished. When website changed, the website job always runs, so this needs
+    # is satisfiable; when it didn't, the `if` below skips deploy regardless.
+    needs:
+      - changes
+      - website
+    # Deploy only on a push to main (never on pull_request); the `changes` gate
+    # now also fires for PRs, so this event/ref guard keeps deploy main-only.
+    if: needs.changes.outputs.website == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # id-token: write lets `void deploy` mint a GitHub OIDC token and exchange
+    # it (audience "void") for a short-lived, project-scoped deploy token — no
+    # long-lived VOID_TOKEN secret. Scoped to this job so the native jobs keep
+    # their default token permissions.
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      # Override with a VOID_API_URL repository variable to target staging.
+      VOID_API_URL: ${{ vars.VOID_API_URL || 'https://api.void.cloud' }}
+      VOID_PROJECT: simple-git
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      # Activate the repo-pinned yarn@4.17.0 (packageManager field) before any
+      # yarn call, so install uses Berry, not the runner's global classic yarn.
+      - run: corepack enable
+      # Install at the repo ROOT — yarn workspaces monorepo, so the lockfile and
+      # workspace graph live at the root, not in website/.
+      - run: yarn install --immutable
+      # `void deploy` (>= 0.10.2) detects GitHub Actions, mints the OIDC token,
+      # exchanges it for a deploy token, and deploys — no curl/jq, no secret.
+      - name: Deploy
+        working-directory: website
+        run: yarn void deploy --project "$VOID_PROJECT"

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.void
+.wrangler
+test-results
+playwright-report
+.playwright-mcp

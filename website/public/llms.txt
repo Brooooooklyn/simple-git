@@ -1,0 +1,46 @@
+# @napi-rs/simple-git
+
+> Native Git for Node.js via libgit2 — no git shell-out. Read a file's last-updated commit date, run status, blame, stage, commit, branch and push, all in-process.
+
+`@napi-rs/simple-git` is a native [libgit2](https://libgit2.org/) binding for Node.js: it works with your repository in-process, with no `git` child process and no shelling out. Its flagship job is computing fast per-file "last updated" commit dates for documentation-site generators such as Nextra, Docusaurus, Starlight, Fumadocs and Rspress — one in-process history walk instead of a `git log` per page. Version 1.0.0, MIT licensed, shipped as prebuilt native binaries for 15 platform triples (resolved at `import` time, no toolchain or `node-gyp`), and runs on Node.js >= 10.
+
+**Install**
+
+```bash
+npm install @napi-rs/simple-git
+```
+
+```bash
+yarn add @napi-rs/simple-git
+```
+
+```bash
+pnpm add @napi-rs/simple-git
+```
+
+```bash
+bun add @napi-rs/simple-git
+```
+
+**Core API**
+
+- **Open / create a repository** — `new Repository(gitDir)` opens an existing repo; `Repository.init` / `Repository.initBare`, `Repository.discover`, `Repository.openExt`, `Repository.clone` / `Repository.cloneRecurse` (and async `Repository.cloneAsync`).
+- **File "last updated" dates** — `getFileLatestModifiedDate` (ms since epoch, throws when the path has no history), `getFileLastModifiedDate` (null-safe `Date`), `getFileLatestModified` (author/committer identity, summary, OID as `FileModification`), and the bulk `getFilesLatestModified` (many files resolved in one early-exiting history walk). Also `getFileCreatedDate`.
+- **Status** — `statuses` and single-path `statusFile` (like `git status`), with `statusesAsync` and `StatusOptions`.
+- **Index + commit** — `index()` (the staging area: `addPath`, `addAll`, `write`, `writeTree`), then `commit` / `commitAsync`; write objects with `blob` / `blobPath`; look up with `findTree` / `findCommit`.
+- **Blame** — `blameFile`, `blameLine`, `blameFileAsync` returning `BlameHunk`s.
+- **Branches + checkout** — `branches`, `branch`, `findBranch`, `checkoutTree`, `checkoutHead`, `checkoutIndex`, `setHead`, `setHeadDetached`, `reference`, `referenceSymbolic`.
+- **Remotes** — `remotes`, `findRemote`, `remote`, `remoteWithFetch`, `remoteAnonymous`; `Remote.fetch` / `Remote.push` (with `RemoteCallbacks`, `FetchOptions`, `PushOptions`).
+- **Tags** — `tag`, `tagAnnotation`, `tagLightweight`, `findTag`, `findTagByPrefix`, `tagNames`, `tagForeach`, `tagDelete`.
+- **Config** — `config()` returns a `Config` (system + global + repo, prioritized) with typed `getString`/`getNumber`/`getBigInt`/`getBoolean` and `set*` accessors; `signature()` builds the default author/committer signature.
+- **Async + AbortSignal** — the expensive operations have `*Async` twins that run on a worker thread and return a `Promise`: `cloneAsync`, `commitAsync`, `statusesAsync`, `getFilesLatestModifiedAsync`, `blameFileAsync`, `fetchAsync`, `pushAsync`, and more; each accepts an optional `AbortSignal` as its last argument (an aborted call rejects with napi's `AbortError`, `code === 'Cancelled'`).
+- **Typed errors** — git-layer errors carry a `code` from `GitErrorCode` (narrow with `isGitError`); an aborted `*Async` call rejects with napi's `AbortError` (`code === 'Cancelled'`), which `isGitError` does not match.
+- **Resource cleanup** — `dispose()` (alias `free()`) eagerly releases the native git2 handle; both are idempotent. Opt into `using` with `Repository.prototype[Symbol.dispose] ??= Repository.prototype.dispose`.
+
+## Documentation
+
+- [Getting Started](https://simple-git.napi.rs/docs): quick tour — install, the 60-second example, doc-site last-updated, async + AbortSignal, typed errors, resource cleanup.
+- [Full text for LLMs](https://simple-git.napi.rs/llms-full.txt): the complete Getting Started guide in one markdown file.
+- [README](https://github.com/Brooooooklyn/simple-git#readme): full API reference, usage examples and the complete `GitErrorCode` table.
+- [Type definitions](https://github.com/Brooooooklyn/simple-git/blob/main/index.d.ts): every method and option, documented inline in `index.d.ts`.
+- [npm package](https://npmx.dev/package/@napi-rs/simple-git): install and version info.

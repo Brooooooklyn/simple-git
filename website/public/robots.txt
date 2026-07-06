@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://simple-git.napi.rs/sitemap.xml
+# LLM-friendly content: https://simple-git.napi.rs/llms.txt

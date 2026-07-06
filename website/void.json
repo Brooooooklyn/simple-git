@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/void/schema.json",
+  "output": "server",
+  "routing": {
+    "redirects": {
+      "/docs/": {
+        "to": "/docs",
+        "status": 308
+      }
+    }
+  },
+  "head": {
+    "titleTemplate": "%s | @napi-rs/simple-git",
+    "htmlAttrs": {
+      "lang": "en",
+      "data-theme": "dark"
+    },
+    "meta": [
+      { "charset": "utf-8" },
+      { "name": "viewport", "content": "width=device-width, initial-scale=1" },
+      { "name": "theme-color", "content": "#0a0b0d" },
+      { "property": "og:type", "content": "website" },
+      { "property": "og:site_name", "content": "@napi-rs/simple-git" },
+      { "name": "twitter:card", "content": "summary_large_image" },
+      { "property": "og:image", "content": "https://simple-git.napi.rs/og.png" },
+      { "property": "og:image:width", "content": "1200" },
+      { "property": "og:image:height", "content": "630" },
+      { "property": "og:image:alt", "content": "@napi-rs/simple-git — Git for Node, at native speed" },
+      { "name": "twitter:image", "content": "https://simple-git.napi.rs/og.png" }
+    ],
+    "link": [
+      { "rel": "icon", "href": "/favicon.svg" },
+      { "rel": "icon", "type": "image/png", "href": "/favicon.png" },
+      { "rel": "apple-touch-icon", "href": "/apple-touch-icon.png" },
+      { "rel": "preload", "href": "/fonts/inter-var.woff2", "as": "font", "type": "font/woff2", "crossorigin": "anonymous" },
+      { "rel": "preload", "href": "/fonts/jetbrains-mono-var.woff2", "as": "font", "type": "font/woff2", "crossorigin": "anonymous" },
+      { "rel": "preload", "href": "/fonts/space-grotesk-var.woff2", "as": "font", "type": "font/woff2", "crossorigin": "anonymous" }
+    ]
+  },
+  "worker": {
+    "compatibility_date": "2026-02-24"
+  }
+}

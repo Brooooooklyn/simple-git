@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "types": "./index.d.ts",
+  "workspaces": [
+    "website"
+  ],
   "repository": {
     "url": "https://github.com/Brooooooklyn/simple-git"
   },
