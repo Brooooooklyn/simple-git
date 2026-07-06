@@ -335,17 +335,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # --- Website (Void) deploy -------------------------------------------------
-  # Folded in from the former void-deploy.yml. Runs on push to main only,
-  # independently of the native build/test jobs above (no `needs` on them) so a
-  # Rust CI failure never blocks a website deploy. CI already runs on every
-  # non-docs push to main, so `changes` scopes the deploy to commits that
-  # actually affect the site — website/** or the shared root package-manager
-  # files (a lockfile-only website dep bump still deploys). GitHub cannot
-  # path-filter a single job of a multi-job workflow, hence this gate job.
+  # --- Website (Void): PR build/e2e gate + main deploy -----------------------
+  # `changes` detects website-affecting paths for BOTH pull requests and pushes
+  # to main (GitHub cannot path-filter a single job of a multi-job workflow, so
+  # the former on.paths filter lives here). `website` builds + e2e-smokes the
+  # site whenever those paths change — a pre-merge gate on PRs, so a
+  # Vite/TS/markdown break fails here instead of only at deploy time. `deploy`
+  # runs only on push to main, independently of the native build/test jobs above
+  # (no `needs` on them) so a Rust CI failure never blocks a website deploy.
   changes:
     name: Detect website changes
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       website: ${{ steps.filter.outputs.website }}
@@ -362,10 +361,41 @@ jobs:
               - '.yarnrc.yml'
               - '.yarn/releases/**'
 
+  website:
+    name: Website build & e2e
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: yarn
+      - run: corepack enable
+      - name: Install dependencies
+        run: yarn install --immutable
+      - name: Build website (void:prepare + vite build)
+        run: |
+          yarn workspace @napi-rs/simple-git-website void:prepare
+          yarn workspace @napi-rs/simple-git-website build
+      - name: Install Playwright chromium
+        run: yarn workspace @napi-rs/simple-git-website exec playwright install --with-deps chromium
+      # test:e2e is self-contained — playwright.config.ts boots a fresh `yarn dev`
+      # SSR server (reuseExistingServer is false under CI) and smokes / , /docs
+      # and /docs/api.
+      - name: e2e smoke
+        run: yarn workspace @napi-rs/simple-git-website test:e2e
+        env:
+          CI: '1'
+
   deploy:
     name: Deploy to Void
     needs: changes
-    if: needs.changes.outputs.website == 'true'
+    # Deploy only on a push to main (never on pull_request); the `changes` gate
+    # now also fires for PRs, so this event/ref guard keeps deploy main-only.
+    if: needs.changes.outputs.website == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # id-token: write lets `void deploy` mint a GitHub OIDC token and exchange
     # it (audience "void") for a short-lived, project-scoped deploy token — no
