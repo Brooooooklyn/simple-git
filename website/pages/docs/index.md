@@ -144,10 +144,10 @@ Every Git-layer error this library throws — from a synchronous method or a rej
 import { isGitError, GitErrorCode } from '@napi-rs/simple-git'
 
 try {
-  repo.findRemote('does-not-exist')
+  // …a Git operation that can fail, e.g. looking up a missing object…
 } catch (e) {
   if (isGitError(e) && e.code === GitErrorCode.NotFound) {
-    // handle the missing remote
+    // handle the missing object/reference/config entry
   }
 }
 ```
