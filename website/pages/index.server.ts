@@ -34,16 +34,15 @@ export const loader = defineHandler(async () => ({
 export type Props = InferProps<typeof loader>
 
 const DESCRIPTION =
-  'Open, inspect, stage, commit, blame, branch and push real repositories through libgit2 — no `git` shell-out, with JS-native Date / number / Buffer types.'
+  "Native Git for Node.js via libgit2 — no git shell-out. Read a file's last-updated commit date, run status, blame, stage, commit, branch and push, all in-process."
 
 export const head = defineHead<Props>(() => ({
   title: 'Git for Node, at native speed',
+  link: [{ rel: 'canonical', href: 'https://simple-git.napi.rs/' }],
   meta: [
     { name: 'description', content: DESCRIPTION },
-    { property: 'og:type', content: 'website' },
-    { property: 'og:site_name', content: '@napi-rs/simple-git' },
-    { property: 'og:title', content: '@napi-rs/simple-git' },
+    { property: 'og:title', content: 'Git for Node, at native speed' },
     { property: 'og:description', content: DESCRIPTION },
-    { name: 'twitter:card', content: 'summary_large_image' },
+    { property: 'og:url', content: 'https://simple-git.napi.rs/' },
   ],
 }))
