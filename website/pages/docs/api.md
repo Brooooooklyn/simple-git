@@ -2708,7 +2708,7 @@ export declare const enum DiffFlags {
 }
 ```
 
-The flags on a `DiffFile`. This is a **bitflag** enum: values are OR-ed together into the raw `number` returned by `DiffDelta.flags()`; test individual bits with `diffFlagsContains`.
+The flags on a `DiffDelta`. This is a **bitflag** enum: values are OR-ed together into the raw `number` returned by `DiffDelta.flags()`; test individual bits with `diffFlagsContains`.
 
 - `Binary` (`1`, `1 << 0`) — file(s) treated as binary data.
 - `NotBinary` (`2`, `1 << 1`) — file(s) treated as text data.
