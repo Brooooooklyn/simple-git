@@ -1778,7 +1778,7 @@ Advance the walk, returning the next commit OID hex string as an `IteratorResult
 
 ### Diff
 
-The set of deltas between two trees, or a tree and the working directory. Obtained from `Repository.diffTreeToWorkdir()` or `Repository.diffTreeToWorkdirWithIndex()`; iterate its per-file deltas with `deltas()`.
+The set of deltas between a tree and the working directory. Obtained from `Repository.diffTreeToWorkdir()` or `Repository.diffTreeToWorkdirWithIndex()`; iterate its per-file deltas with `deltas()`.
 
 #### merge
 
