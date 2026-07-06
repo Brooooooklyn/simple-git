@@ -2289,13 +2289,710 @@ Set a callback to get invoked for each updated reference on a push. The callback
 
 The plain-object option bags passed into methods and the result shapes they return.
 
+### StatusOptions
+
+```ts
+export interface StatusOptions {
+  includeUntracked?: boolean
+  includeIgnored?: boolean
+  includeUnmodified?: boolean
+  excludeSubmodules?: boolean
+  recurseUntrackedDirs?: boolean
+  renamesHeadToIndex?: boolean
+  renamesIndexToWorkdir?: boolean
+  pathspec?: Array<string>
+}
+```
+
+Options controlling how a working-tree status scan is performed, passed to `Repository.statuses`/`statusesAsync`. Every field is optional; omitted fields fall back to the git CLI defaults (`includeUntracked` is `true`, everything else `false`).
+
+- `includeUntracked` — include untracked files in the status. Defaults to `true`.
+- `includeIgnored` — include ignored files in the status. Defaults to `false`.
+- `includeUnmodified` — include unmodified files in the status. Defaults to `false`.
+- `excludeSubmodules` — skip submodules. Defaults to `false`.
+- `recurseUntrackedDirs` — recurse into untracked directories instead of reporting the directory itself. Defaults to `false`.
+- `renamesHeadToIndex` — detect renames between the HEAD tree and the index. Defaults to `false`.
+- `renamesIndexToWorkdir` — detect renames between the index and the working directory. Defaults to `false`.
+- `pathspec` — restrict the scan to the given pathspecs.
+
+### CheckoutOptions
+
+```ts
+export interface CheckoutOptions {
+  force?: boolean
+  recreateMissing?: boolean
+  allowConflicts?: boolean
+  paths?: Array<string>
+  targetDir?: string
+}
+```
+
+Options controlling how a checkout writes files into the working directory, passed to `Repository.checkoutTree`/`checkoutHead`/`checkoutIndex`. The default is a **safe** checkout (matching `git checkout`): files with local modifications are left untouched. Set `force` to overwrite them, which can discard uncommitted changes — use it deliberately.
+
+- `force` — force the checkout, overwriting any local changes in the working tree. Defaults to a safe checkout when omitted or `false`.
+- `recreateMissing` — recreate files that are missing from the working tree even in a safe checkout.
+- `allowConflicts` — allow the checkout to write files that conflict with the working tree.
+- `paths` — restrict the checkout to these pathspecs. When omitted, all paths are checked out.
+- `targetDir` — write the checked-out files into this directory instead of the repository's working directory.
+
+### DiffOptions
+
+```ts
+export interface DiffOptions {
+  showUnmodified?: boolean
+}
+```
+
+Options for the `Repository.diffTreeToWorkdir`/`diffTreeToWorkdirWithIndex` diffs.
+
+- `showUnmodified` — include unmodified files in the diff. Normally unmodified entries are skipped entirely; when this is `true` they are pulled into the diff (so they appear in `Diff.deltas()` with an `Unmodified` status) and are also shown in the listing output formats (name-only, name-status, raw). They are still never emitted in the patch format.
+
+### BlameOptions
+
+```ts
+export interface BlameOptions {
+  trackCopiesSameFile?: boolean
+  trackCopiesSameCommitMoves?: boolean
+  newestCommit?: string
+  oldestCommit?: string
+  firstParent?: boolean
+  useMailmap?: boolean
+  ignoreWhitespace?: boolean
+  minLine?: number
+  maxLine?: number
+}
+```
+
+Options controlling how a blame is computed, passed to `Repository.blameFile`/`blameLine`/`blameFileAsync`. Every field is optional; omitted fields fall back to libgit2's defaults (no copy tracking, the whole file, starting from the current HEAD).
+
+- `trackCopiesSameFile` — track lines that have moved within a file. Defaults to `false`. Note: libgit2 1.9.4 does not implement blame copy/move tracking, so setting this flag has no effect today (accepted for forward-compat; effectively a no-op).
+- `trackCopiesSameCommitMoves` — track lines that have moved across files in the same commit. Defaults to `false`. Same libgit2 1.9.4 no-op caveat as `trackCopiesSameFile`.
+- `newestCommit` — 40-char hex OID of the newest commit to consider (the blame starts here).
+- `oldestCommit` — 40-char hex OID of the oldest commit to consider (a boundary).
+- `firstParent` — restrict the search to first-parent history only. Defaults to `false`.
+- `useMailmap` — map names/emails through the repository's mailmap. Defaults to `false`.
+- `ignoreWhitespace` — ignore whitespace differences. Defaults to `false`.
+- `minLine` — the first line in the file to blame (1-based).
+- `maxLine` — the last line in the file to blame (1-based).
+
+### FileStatus
+
+```ts
+export interface FileStatus {
+  path?: string
+  bits: number
+  isIndexNew: boolean
+  isIndexModified: boolean
+  isIndexDeleted: boolean
+  isIndexRenamed: boolean
+  isIndexTypechange: boolean
+  isWtNew: boolean
+  isWtModified: boolean
+  isWtDeleted: boolean
+  isWtTypechange: boolean
+  isWtRenamed: boolean
+  isIgnored: boolean
+  isConflicted: boolean
+}
+```
+
+Status of a single file in the working tree and/or index, returned by `Repository.statuses`/`statusesAsync`/`statusFile`. The boolean flags mirror the `git2::Status` bits; `bits` carries the raw value as a forward-compatible escape hatch for flags not surfaced here.
+
+- `path` — workdir-relative path. Undefined if the path is not valid UTF-8.
+- `bits` — raw `git2::Status` bits — forward-compat escape hatch.
+- `isIndexNew` — staged: a new file was added to the index.
+- `isIndexModified` — staged: a tracked file was modified in the index.
+- `isIndexDeleted` — staged: a tracked file was deleted from the index.
+- `isIndexRenamed` — staged: a tracked file was renamed in the index.
+- `isIndexTypechange` — staged: a tracked file changed type in the index.
+- `isWtNew` — unstaged: an untracked file (new in the working directory).
+- `isWtModified` — unstaged: a tracked file was modified in the working directory.
+- `isWtDeleted` — unstaged: a tracked file was deleted from the working directory.
+- `isWtTypechange` — unstaged: a tracked file changed type in the working directory.
+- `isWtRenamed` — unstaged: a tracked file was renamed in the working directory.
+- `isIgnored` — the file is ignored.
+- `isConflicted` — the file has merge conflicts.
+
+### FileModification
+
+```ts
+export interface FileModification {
+  commitId: string
+  summary?: string
+  authorName?: string
+  authorEmail?: string
+  authorTime: Date
+  committerName?: string
+  committerEmail?: string
+  committerTime: Date
+}
+```
+
+The last commit that modified a file, with author/committer identity — returned by `Repository.getFileLatestModified`/`getFilesLatestModified` and their async twins. All times are `Date`s (UTC; timezone offset ignored).
+
+- `commitId` — 40-char lowercase hex OID of the last commit that modified the file.
+- `summary` — commit summary (first line). Undefined if absent or not valid UTF-8.
+- `authorName` — author name. Undefined if not valid UTF-8.
+- `authorEmail` — author email. Undefined if not valid UTF-8.
+- `authorTime` — author time, as a `Date`.
+- `committerName` — committer name. Undefined if not valid UTF-8.
+- `committerEmail` — committer email. Undefined if not valid UTF-8.
+- `committerTime` — committer time, as a `Date`. Identical to `getFileLastModifiedDate`.
+
+### BlameHunk
+
+```ts
+export interface BlameHunk {
+  linesInHunk: number
+  finalCommitId: string
+  finalStartLine: number
+  finalAuthorName?: string
+  finalAuthorEmail?: string
+  finalTime: Date
+  origCommitId: string
+  origStartLine: number
+  origPath?: string
+  isBoundary: boolean
+}
+```
+
+A single blame hunk — a contiguous run of lines attributed to one commit — returned by `Repository.blameFile`/`blameLine`/`blameFileAsync`. All identity fields are copied out of the borrowed `git2::BlameHunk` so the value can safely outlive the underlying `git2::Blame`.
+
+- `linesInHunk` — number of lines covered by this hunk.
+- `finalCommitId` — 40-char lowercase hex OID of the commit where these lines were last changed.
+- `finalStartLine` — line number where this hunk begins in the final file (1-based).
+- `finalAuthorName` — author name of the final commit. Undefined if absent or not valid UTF-8.
+- `finalAuthorEmail` — author email of the final commit. Undefined if absent or not valid UTF-8.
+- `finalTime` — author time of the final commit, as a `Date`. The Unix epoch if no signature.
+- `origCommitId` — 40-char lowercase hex OID of the commit where this hunk was found.
+- `origStartLine` — line number where this hunk begins in the original file (1-based).
+- `origPath` — path to the file where this hunk originated. Undefined if not valid UTF-8.
+- `isBoundary` — whether this hunk was tracked to a boundary commit (root or `oldest_commit`).
+
+### ConfigEntry
+
+```ts
+export interface ConfigEntry {
+  name: string
+  value: string
+  level: ConfigLevel
+}
+```
+
+A single configuration entry, returned by `Config.entries`: its fully-qualified name, value, and the level (file) it was read from.
+
+- `name` — the fully-qualified variable name.
+- `value` — the variable's value.
+- `level` — the `ConfigLevel` (file) this entry was read from.
+
+### Progress
+
+```ts
+export interface Progress {
+  totalObjects: number
+  indexedObjects: number
+  receivedObjects: number
+  localObjects: number
+  totalDeltas: number
+  indexedDeltas: number
+  receivedBytes: number
+}
+```
+
+Transfer-progress counters — the argument passed to a `RemoteCallbacks.transferProgress` callback. Every field is a `number`: `totalObjects`, `indexedObjects`, `receivedObjects`, `localObjects`, `totalDeltas`, `indexedDeltas` and `receivedBytes`.
+
+### PushTransferProgress
+
+```ts
+export interface PushTransferProgress {
+  current: number
+  total: number
+  bytes: number
+}
+```
+
+The argument passed to a `RemoteCallbacks.pushTransferProgress` callback, describing how many objects have been processed and how many bytes have been sent.
+
+- `current` — objects processed so far.
+- `total` — total number of objects.
+- `bytes` — bytes sent.
+
+### PushUpdateReference
+
+```ts
+export interface PushUpdateReference {
+  refname: string
+  status: string | null
+}
+```
+
+A single reference update reported during a push — the argument passed to a `RemoteCallbacks.pushUpdateReference` callback.
+
+- `refname` — the full name of the reference that was updated (e.g. `refs/heads/main`).
+- `status` — `null` when the reference was updated successfully; otherwise the server's rejection reason.
+
+### TagForeachItem
+
+```ts
+export interface TagForeachItem {
+  id: string
+  nameBytes: Buffer
+}
+```
+
+A single tag visited during `Repository.tagForeach` — the argument passed to its callback.
+
+- `id` — the tag's OID as a 40-char hex string.
+- `nameBytes` — the tag's raw reference name (e.g. `refs/tags/v1.0.0`) as bytes, since it is not guaranteed to be valid UTF-8.
+
+### CredInfo
+
+```ts
+export interface CredInfo {
+  credType: number
+  url: string
+  username: string
+}
+```
+
+The argument passed to a `RemoteCallbacks.credentials` callback, describing the credential request.
+
+- `credType` — raw `CredentialType` bitset of the credential types the server will accept. OR-able; test bits with `credTypeContains`.
+- `url` — the remote URL.
+- `username` — the username parsed from the URL.
+
 ## Enums
 
 The bitflag and discriminant enums used across statuses, resets, revision-walk sorts and error codes.
 
+Discriminant enums are single values; the bitflag enums (`CredentialType`, `DiffFlags`, `RemoteUpdateFlags`, `RepositoryOpenFlags`, `Sort`) are OR-ed together into a raw `number` and passed/returned as such.
+
+### AutotagOption
+
+```ts
+export declare const enum AutotagOption {
+  Unspecified = 0,
+  Auto = 1,
+  None = 2,
+  All = 3
+}
+```
+
+Automatic tag following options.
+
+- `Unspecified` (`0`) — use the setting from the remote's configuration.
+- `Auto` (`1`) — ask the server for tags pointing to objects we're already downloading.
+- `None` (`2`) — don't ask for any tags beyond the refspecs.
+- `All` (`3`) — ask for all the tags.
+
+### BranchType
+
+```ts
+export declare const enum BranchType {
+  Local = 0,
+  Remote = 1
+}
+```
+
+An enumeration for the possible types of branches.
+
+- `Local` (`0`) — a local branch not on a remote.
+- `Remote` (`1`) — a branch for a remote.
+
+### CloneLocal
+
+```ts
+export declare const enum CloneLocal {
+  Auto = 0,
+  Local = 1,
+  None = 2,
+  NoLinks = 3
+}
+```
+
+- `Auto` (`0`) — auto-detect (default). libgit2 bypasses the git-aware transport for local paths, but uses a normal fetch for `file://` URLs.
+- `Local` (`1`) — bypass the git-aware transport even for `file://` URLs.
+- `None` (`2`) — never bypass the git-aware transport.
+- `NoLinks` (`3`) — bypass the git-aware transport, but don't try to use hardlinks.
+
+### ConfigLevel
+
+```ts
+export declare const enum ConfigLevel {
+  ProgramData = 0,
+  System = 1,
+  Xdg = 2,
+  Global = 3,
+  Local = 4,
+  Worktree = 5,
+  App = 6,
+  Highest = 7
+}
+```
+
+The priority level a configuration entry or file applies to. Higher levels take precedence; `Local` (the repository's own `.git/config`) is where `set_*`/`remove_entry` write by default.
+
+- `ProgramData` (`0`) — system-wide on Windows, for compatibility with portable git.
+- `System` (`1`) — system-wide configuration file, e.g. `/etc/gitconfig`.
+- `Xdg` (`2`) — XDG-compatible configuration file, e.g. `~/.config/git/config`.
+- `Global` (`3`) — user-specific configuration, e.g. `~/.gitconfig`.
+- `Local` (`4`) — repository specific config, e.g. `$PWD/.git/config`.
+- `Worktree` (`5`) — worktree specific configuration file, e.g. `$GIT_DIR/config.worktree`.
+- `App` (`6`) — application specific configuration file.
+- `Highest` (`7`) — highest level available.
+
+### CredentialType
+
+```ts
+export declare const enum CredentialType {
+  UserPassPlaintext = 1,
+  SshKey = 2,
+  SshMemory = 64,
+  SshCustom = 4,
+  Default = 8,
+  SshInteractive = 16,
+  Username = 32
+}
+```
+
+Types of credentials that can be requested by a credential callback. This is a **bitflag** enum: values are OR-ed together into a raw `number` (as carried by `CredInfo.credType` and returned by `Cred.credType()`); test individual bits with `credTypeContains`.
+
+- `UserPassPlaintext` (`1`, `1 << 0`)
+- `SshKey` (`2`, `1 << 1`)
+- `SshMemory` (`64`, `1 << 6`)
+- `SshCustom` (`4`, `1 << 2`)
+- `Default` (`8`, `1 << 3`)
+- `SshInteractive` (`16`, `1 << 4`)
+- `Username` (`32`, `1 << 5`)
+
+### Delta
+
+```ts
+export declare const enum Delta {
+  Unmodified = 0,
+  Added = 1,
+  Deleted = 2,
+  Modified = 3,
+  Renamed = 4,
+  Copied = 5,
+  Ignored = 6,
+  Untracked = 7,
+  Typechange = 8,
+  Unreadable = 9,
+  Conflicted = 10
+}
+```
+
+The status of a single `DiffDelta`, returned by `DiffDelta.status()`.
+
+- `Unmodified` (`0`) — no changes.
+- `Added` (`1`) — entry does not exist in old version.
+- `Deleted` (`2`) — entry does not exist in new version.
+- `Modified` (`3`) — entry content changed between old and new.
+- `Renamed` (`4`) — entry was renamed between old and new.
+- `Copied` (`5`) — entry was copied from another old entry.
+- `Ignored` (`6`) — entry is ignored item in workdir.
+- `Untracked` (`7`) — entry is untracked item in workdir.
+- `Typechange` (`8`) — type of entry changed between old and new.
+- `Unreadable` (`9`) — entry is unreadable.
+- `Conflicted` (`10`) — entry in the index is conflicted.
+
+### DiffFlags
+
+```ts
+export declare const enum DiffFlags {
+  Binary = 1,
+  NotBinary = 2,
+  ValidId = 4,
+  Exists = 8
+}
+```
+
+The flags on a `DiffFile`. This is a **bitflag** enum: values are OR-ed together into the raw `number` returned by `DiffDelta.flags()`; test individual bits with `diffFlagsContains`.
+
+- `Binary` (`1`, `1 << 0`) — file(s) treated as binary data.
+- `NotBinary` (`2`, `1 << 1`) — file(s) treated as text data.
+- `ValidId` (`4`, `1 << 2`) — `id` value is known correct.
+- `Exists` (`8`, `1 << 3`) — file exists at this side of the delta.
+
+### Direction
+
+```ts
+export declare const enum Direction {
+  Fetch = 0,
+  Push = 1
+}
+```
+
+An enumeration of the possible directions for a remote, passed to `Remote.connect`.
+
+- `Fetch` (`0`) — data will be fetched (read) from this remote.
+- `Push` (`1`) — data will be pushed (written) to this remote.
+
+### FetchPrune
+
+```ts
+export declare const enum FetchPrune {
+  Unspecified = 0,
+  On = 1,
+  Off = 2
+}
+```
+
+Configuration for how pruning is done on a fetch.
+
+- `Unspecified` (`0`) — use the setting from the configuration.
+- `On` (`1`) — force pruning on.
+- `Off` (`2`) — force pruning off.
+
+### FileMode
+
+```ts
+export declare const enum FileMode {
+  Unreadable = 0,
+  Tree = 1,
+  Blob = 2,
+  BlobGroupWritable = 3,
+  BlobExecutable = 4,
+  Link = 5,
+  Commit = 6
+}
+```
+
+Valid modes for index and tree entries, returned by `DiffFile.mode`.
+
+- `Unreadable` (`0`) — unreadable.
+- `Tree` (`1`) — tree.
+- `Blob` (`2`) — blob.
+- `BlobGroupWritable` (`3`) — group writable blob. Obsolete mode kept for compatibility reasons.
+- `BlobExecutable` (`4`) — blob executable.
+- `Link` (`5`) — link.
+- `Commit` (`6`) — commit.
+
+### GitErrorCode
+
+```ts
+export declare const enum GitErrorCode {
+  GenericError = 'GenericError',
+  NotFound = 'NotFound',
+  Exists = 'Exists',
+  Ambiguous = 'Ambiguous',
+  BufSize = 'BufSize',
+  User = 'User',
+  BareRepo = 'BareRepo',
+  UnbornBranch = 'UnbornBranch',
+  Unmerged = 'Unmerged',
+  NotFastForward = 'NotFastForward',
+  InvalidSpec = 'InvalidSpec',
+  Conflict = 'Conflict',
+  Locked = 'Locked',
+  Modified = 'Modified',
+  Auth = 'Auth',
+  Certificate = 'Certificate',
+  Applied = 'Applied',
+  Peel = 'Peel',
+  Eof = 'Eof',
+  Invalid = 'Invalid',
+  Uncommitted = 'Uncommitted',
+  Directory = 'Directory',
+  MergeConflict = 'MergeConflict',
+  HashsumMismatch = 'HashsumMismatch',
+  IndexDirty = 'IndexDirty',
+  ApplyFail = 'ApplyFail',
+  Owner = 'Owner',
+  Timeout = 'Timeout',
+  InvalidArg = 'InvalidArg'
+}
+```
+
+Stable string tokens surfaced to JS as `error.code`. The first 28 variants mirror `git2::ErrorCode` (verbatim names); `InvalidArg` is the napi-level token. `GenericError` doubles as the catch-all. Narrow a caught value to one of these with `isGitError` (see [Error handling](#error-handling)). The 29 members are the 28 libgit2 error classes plus one napi-level token:
+
+| Token | Meaning |
+| --- | --- |
+| `GenericError` | Unclassified catch-all. Any unmapped or future libgit2 code collapses here — treat it as "something went wrong" rather than a specific class. |
+| `NotFound` | A requested object/reference/config entry does not exist. |
+| `Exists` | The object already exists and cannot be overwritten. |
+| `Ambiguous` | A short OID or name matched more than one object. |
+| `BufSize` | An output buffer was too small. |
+| `User` | A user-supplied callback returned an error. |
+| `BareRepo` | The operation is not allowed on a bare repository. |
+| `UnbornBranch` | HEAD points at a branch with no commits yet. |
+| `Unmerged` | The index contains unmerged entries. |
+| `NotFastForward` | A reference update was rejected because it was not fast-forward. |
+| `InvalidSpec` | A refspec/name is not well-formed. |
+| `Conflict` | A checkout/merge conflict prevents the operation. |
+| `Locked` | The resource is locked by another operation. |
+| `Modified` | The reference/object was modified concurrently. |
+| `Auth` | Authentication failed. |
+| `Certificate` | The server TLS certificate was rejected. |
+| `Applied` | The patch/commit was already applied. |
+| `Peel` | An object could not be peeled to the requested type. |
+| `Eof` | Unexpected end of file/stream. |
+| `Invalid` | An invalid operation or input for the current state. |
+| `Uncommitted` | Uncommitted changes prevent the operation. |
+| `Directory` | The operation is not valid on a directory. |
+| `MergeConflict` | A merge produced conflicts. |
+| `HashsumMismatch` | A hash verification failed. |
+| `IndexDirty` | The index has unsaved changes. |
+| `ApplyFail` | A patch failed to apply. |
+| `Owner` | The repository is owned by an unexpected user. |
+| `Timeout` | The operation timed out. |
+| `InvalidArg` | napi-level argument validation / API misuse (e.g. an option object reused across two `*Async` calls, or `RemoteCallbacks` passed to `fetchAsync`/`pushAsync`). Not a libgit2 class. |
+
+### ObjectType
+
+```ts
+export declare const enum ObjectType {
+  Any = 0,
+  Commit = 1,
+  Tree = 2,
+  Blob = 3,
+  Tag = 4
+}
+```
+
+The kind of a `GitObject`, returned by `GitObject.kind` and used as the target of `GitObject.peel`.
+
+- `Any` (`0`) — any kind of git object.
+- `Commit` (`1`) — an object which corresponds to a git commit.
+- `Tree` (`2`) — an object which corresponds to a git tree.
+- `Blob` (`3`) — an object which corresponds to a git blob.
+- `Tag` (`4`) — an object which corresponds to a git tag.
+
+### ReferenceType
+
+```ts
+export declare const enum ReferenceType {
+  Direct = 0,
+  Symbolic = 1,
+  Unknown = 2
+}
+```
+
+An enumeration of all possible kinds of references, returned by `Reference.kind`.
+
+- `Direct` (`0`) — a reference which points at an object id.
+- `Symbolic` (`1`) — a reference which points at another reference.
+- `Unknown` (`2`).
+
+### RemoteRedirect
+
+```ts
+export declare const enum RemoteRedirect {
+  None = 0,
+  Initial = 1,
+  All = 2
+}
+```
+
+Remote redirection settings; whether redirects to another host are permitted. By default, git will follow a redirect on the initial request (`/info/refs`), but not subsequent requests.
+
+- `None` (`0`) — do not follow any off-site redirects at any stage of the fetch or push.
+- `Initial` (`1`) — allow off-site redirects only upon the initial request. This is the default.
+- `All` (`2`) — allow redirects at any stage in the fetch or push.
+
+### RemoteUpdateFlags
+
+```ts
+export declare const enum RemoteUpdateFlags {
+  UpdateFetchHead = 1,
+  ReportUnchanged = 2
+}
+```
+
+OR-able flags for `Remote.updateTips`. Each discriminant is the real libgit2 `GIT_REMOTE_UPDATE_*` bit, so they can be combined with `|` into the raw `number` passed as `updateTips`' `updateFlags` argument.
+
+- `UpdateFetchHead` (`1`)
+- `ReportUnchanged` (`2`)
+
+### RepositoryOpenFlags
+
+```ts
+export declare const enum RepositoryOpenFlags {
+  NoSearch = 1,
+  CrossFS = 2,
+  Bare = 4,
+  NoDotGit = 8,
+  FromEnv = 16
+}
+```
+
+OR-able flags for `Repository.openExt`. Each discriminant is the real libgit2 `GIT_REPOSITORY_OPEN_*` bit, so they can be combined with `|` into the raw `number` passed as `openExt`' `flags` argument.
+
+- `NoSearch` (`1`, `1 << 0`) — only open the specified path; don't walk upward searching.
+- `CrossFS` (`2`, `1 << 1`) — search across filesystem boundaries.
+- `Bare` (`4`, `1 << 2`) — force opening as bare repository, and defer loading its config.
+- `NoDotGit` (`8`, `1 << 3`) — don't try appending `/.git` to the specified repository path.
+- `FromEnv` (`16`, `1 << 4`) — respect environment variables like `$GIT_DIR`.
+
+### RepositoryState
+
+```ts
+export declare const enum RepositoryState {
+  Clean = 0,
+  Merge = 1,
+  Revert = 2,
+  RevertSequence = 3,
+  CherryPick = 4,
+  CherryPickSequence = 5,
+  Bisect = 6,
+  Rebase = 7,
+  RebaseInteractive = 8,
+  RebaseMerge = 9,
+  ApplyMailbox = 10,
+  ApplyMailboxOrRebase = 11
+}
+```
+
+The current state of a repository, returned by `Repository.state`: `Clean` (`0`), `Merge` (`1`), `Revert` (`2`), `RevertSequence` (`3`), `CherryPick` (`4`), `CherryPickSequence` (`5`), `Bisect` (`6`), `Rebase` (`7`), `RebaseInteractive` (`8`), `RebaseMerge` (`9`), `ApplyMailbox` (`10`) and `ApplyMailboxOrRebase` (`11`).
+
+### Sort
+
+```ts
+export declare const enum Sort {
+  None = 0,
+  Topological = 1,
+  Time = 2,
+  Reverse = 4
+}
+```
+
+Orderings that may be specified for Revwalk iteration. This is a **bitflag** enum: values are OR-ed together into the raw `number` passed to `RevWalk.setSorting`.
+
+- `None` (`0`) — sort the repository contents in no particular ordering. This sorting is arbitrary, implementation-specific, and subject to change at any time. This is the default sorting for new walkers.
+- `Topological` (`1`, `1 << 0`) — sort the repository contents in topological order (children before parents). This sorting mode can be combined with time sorting.
+- `Time` (`2`, `1 << 1`) — sort the repository contents by commit time. This sorting mode can be combined with topological sorting.
+- `Reverse` (`4`, `1 << 2`) — iterate through the repository contents in reverse order. This sorting mode can be combined with any others.
+
 ## Functions
 
 The standalone functions exported alongside `Repository`, including the `isGitError` type guard.
+
+### isGitError
+
+```ts
+export declare function isGitError(e: unknown): e is Error & { code: GitErrorCode }
+```
+
+Runtime type guard for the coded errors this addon throws. Returns `true` **only** when `e` is a genuine `Error` object — tested with the Node-API native-error check (`napi_is_error`, a pure V8 `IsNativeError` test, not a JS-level `instanceof`) — whose `code` is a real member of the `GitErrorCode` enum, and narrows `e` to `Error & { code: GitErrorCode }`. The native check recognizes cross-realm and subclassed errors while rejecting look-alike proxies and plain objects. Membership is validated against that generated enum (the single source of truth), so a non-git `Error` (e.g. Node's `ENOENT`), an `AbortSignal` cancellation (`code: 'Cancelled'`, a napi-level token that is **not** a `GitErrorCode`), non-errors, plain objects, `null`/`undefined`, and `Error`s without a member `code` all return `false`.
+
+The guard is **total**: it never throws for any input. Because the `Error` check runs no JS callbacks, a hostile value cannot hijack it — a throwing `[[GetPrototypeOf]]`/proxy trap, a throwing `Error[Symbol.hasInstance]`, or an `Error` whose `code` is a throwing getter all yield `false` (the pending exception is cleared) rather than a thrown error — so it is always safe to call inside a `catch`.
+
+### credTypeContains
+
+```ts
+export declare function credTypeContains(credType: number, flag: CredentialType): boolean
+```
+
+Check whether a raw credential-type bitset contains a given `CredentialType` bit. `credType` is the raw value (e.g. `CredInfo.credType` or `Cred.credType()`); `flag` is one of the `CredentialType` constants. Returns `(credType & flag) === flag`.
+
+### diffFlagsContains
+
+```ts
+export declare function diffFlagsContains(flags: number, flag: DiffFlags): boolean
+```
+
+Check whether a raw diff-flags bitset contains a given `DiffFlags` bit. `flags` is the raw value returned by `DiffDelta.flags()`; `flag` is one of the `DiffFlags` constants. Returns `(flags & flag) === flag`.
 
 ## Error handling
 
