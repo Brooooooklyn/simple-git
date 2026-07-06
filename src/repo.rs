@@ -2096,9 +2096,10 @@ impl Repository {
   /// from a SEPARATE oldest-first ancestry walk resolving the EXACT
   /// repo-root-relative path (merge commits are included in this walk, a
   /// delete-then-re-add returns the ORIGINAL add, and there is NO
-  /// rename-follow). When `filepath` is a glob/directory, the flat fields still
-  /// resolve via pathspec but `created` is left undefined (it resolves the exact
-  /// path only, which was never a tree entry).
+  /// rename-follow). `created` resolves an exact FILE (blob) path only: when
+  /// `filepath` is a glob, a DIRECTORY (a tree entry, not a blob), or a submodule
+  /// (a gitlink), the flat fields may still resolve via pathspec but `created` is
+  /// left undefined.
   pub fn get_file_latest_modified(&self, filepath: String) -> Result<Option<FileModification>> {
     get_file_modification_with_created(self.inner()?, &filepath).convert_without_message()
   }

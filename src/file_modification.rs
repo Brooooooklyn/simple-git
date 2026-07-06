@@ -48,16 +48,17 @@ pub struct FileModification {
   pub committer_email: Option<String>,
   /// Committer time, as a `Date`. Identical to `getFileLastModifiedDate`.
   pub committer_time: DateTime<Utc>,
-  /// The commit that FIRST added this file (its creation), resolved by EXACT
-  /// repo-root-relative path over an oldest-first ancestry walk -- SEPARATE from
-  /// the newest-first modification walk above. Undefined ONLY when a
-  /// glob/directory was passed to `getFileLatestModified`: the flat fields
-  /// resolve via pathspec, but `created` resolves the EXACT path only, so it
-  /// matches no tree entry. For an exact path it is always present. (A path with
-  /// no ordinary-commit history yields no record at all -- the whole
-  /// `FileModification` is `null`/absent -- not a present record with this field
-  /// missing.) A delete-then-re-add returns the ORIGINAL add; merge commits are
-  /// included; no rename-follow.
+  /// The commit that FIRST added this file (its creation), resolved by an
+  /// oldest-first ancestry walk over the EXACT repo-root-relative path -- SEPARATE
+  /// from the newest-first modification walk above. `created` resolves an exact
+  /// FILE (blob) path only: Undefined when a glob, a DIRECTORY (a tree entry, not
+  /// a blob), or a submodule (a gitlink/Commit entry) was passed to
+  /// `getFileLatestModified` -- the flat fields may still resolve via pathspec,
+  /// but no non-file entry is a creation. For an exact file path it is always
+  /// present. (A path with no ordinary-commit history yields no record at all --
+  /// the whole `FileModification` is `null`/absent -- not a present record with
+  /// this field missing.) A delete-then-re-add returns the ORIGINAL add; merge
+  /// commits are included; no rename-follow.
   pub created: Option<CommitInfo>,
 }
 
@@ -198,8 +199,12 @@ pub(crate) fn get_file_creation(
     // NotFound == path absent from this commit's tree (no match); any other
     // lookup error is real and must propagate.
     match tree.get_path(&path) {
-      // Present in the oldest commit seen so far == the creation commit.
-      Ok(_) => return Ok(Some(build_commit_info(&commit)?)),
+      // Only an exact FILE (blob) is a creation. A directory (tree) or submodule
+      // (gitlink/Commit) entry is NOT a file -> keep walking (no creation match).
+      Ok(entry) if entry.kind() == Some(git2::ObjectType::Blob) => {
+        return Ok(Some(build_commit_info(&commit)?));
+      }
+      Ok(_) => {}
       Err(e) if e.code() == git2::ErrorCode::NotFound => {}
       Err(e) => return Err(e),
     }
@@ -355,10 +360,15 @@ pub(crate) fn get_files_creation(
       // NotFound == path absent from this commit's tree (no match); any other
       // lookup error is real and must propagate.
       match tree.get_path(Path::new(&p)) {
-        Ok(_) => {
+        // Only an exact FILE (blob) is a creation. A directory (tree) or submodule
+        // (gitlink/Commit) entry is NOT a file: leave the path unresolved so an
+        // older blob could still match (a pure directory never will, so it stays
+        // `None`/undefined).
+        Ok(entry) if entry.kind() == Some(git2::ObjectType::Blob) => {
           result.insert(p.clone(), Some(build_commit_info(&commit)?));
           unresolved.remove(&p);
         }
+        Ok(_) => {}
         Err(e) if e.code() == git2::ErrorCode::NotFound => {}
         Err(e) => return Err(e),
       }

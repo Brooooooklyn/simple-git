@@ -19,7 +19,8 @@ CommitInfo (NEW struct — same 8 fields as FileModification's commit fields)
 
 FileModification (existing) gains ONE field:
   ...existing 8 flat fields = the LAST-MODIFYING commit (unchanged)...
-  created: CommitInfo | null   ← NEW: the commit that first ADDED the file
+  created: CommitInfo | undefined   ← NEW: the commit that first ADDED the file
+                                       (undefined for a non-file/glob input)
 ```
 
 ### Why a separate walk (the "best way", benchmark-proven)
@@ -54,9 +55,13 @@ processes far fewer commits (233→1 for root-era files).
 - no rename-follow (same documented TODO as the rest of the file-history API).
 - times use committer time via `time_to_date(commit.time().seconds())`, matching
   the existing flat fields.
-- exact-path resolution (`tree.get_path`), like `getFilesLatestModified`. When
-  `getFileLatestModified` is given a glob/directory, the flat fields resolve via
-  pathspec but `created` may be `null` — documented.
+- exact-path resolution (`tree.get_path`), like `getFilesLatestModified`, but a
+  creation is an exact FILE (blob) only. When `getFileLatestModified` is given a
+  glob, a DIRECTORY (a tree entry), or a submodule (a gitlink), the flat fields
+  may still resolve via pathspec but the `created` FIELD is left `undefined` —
+  documented. (Distinct from the bulk map VALUE, which is `null` for a
+  never-committed path — that layer stays `Record<string, FileModification |
+  null>`.)
 
 ### File map
 
@@ -283,7 +288,8 @@ Update doc comments (Rust `///`, which regenerate into `index.d.ts` via
 `yarn build:debug`) so the public API documents `created`'s semantics per
 GC5/GC6: oldest commit that first added the file; delete→re-add returns the
 original add; merges included; no rename-follow; exact-path resolution with the
-single-file glob/directory caveat (`created` may be `null` then). Cover it on the
+single-file glob/directory/submodule caveat (`created` is `undefined` then, since
+a creation is an exact FILE/blob only). Cover it on the
 `FileModification.created` field, `CommitInfo`, `get_file_latest_modified`, and
 `get_files_latest_modified`.
 

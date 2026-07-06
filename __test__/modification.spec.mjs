@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import test from "ava";
@@ -27,7 +27,10 @@ function makeRepo(files) {
   run("config commit.gpgsign false");
   run("config core.autocrlf false");
   for (const name of files) {
-    writeFileSync(join(work, name), `${name}\n`);
+    const dest = join(work, name);
+    // Support nested paths like "dir/a.txt": writeFileSync won't create parents.
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, `${name}\n`);
   }
   run("add -A");
   run("commit -q -m seed");
@@ -146,6 +149,38 @@ test("getFileLatestModified leaves created undefined for a glob/pathspec input",
   t.regex(mod.commitId, /^[0-9a-f]{40}$/);
   t.is(mod.created, undefined);         // exact tree.get_path("*.rs") never matches
   t.false(Object.prototype.hasOwnProperty.call(mod, "created"));
+});
+
+// `created` resolves an exact FILE (blob) only: a DIRECTORY input resolves the
+// flat fields via pathspec (a directory pathspec matches files under it), but
+// "src" is a TREE entry (not a blob), so `created` stays undefined -- NOT a
+// bogus record for the directory's own creation commit.
+test("getFileLatestModified leaves created undefined for a directory input", (t) => {
+  const { repo } = t.context;
+  const mod = repo.getFileLatestModified("src");   // a directory, not a file
+  t.truthy(mod);                                    // flat fields resolve via pathspec
+  t.is(mod.created, undefined);                     // src is a tree entry, not a blob
+  t.false(Object.prototype.hasOwnProperty.call(mod, "created"));
+});
+
+// Hermetic file-vs-directory: the exact FILE "dir/a.txt" is a blob -> `created`
+// resolves; its parent "dir" is a TREE entry -> `created` is undefined. Guards
+// the blob-only creation resolution end to end in a throwaway repo.
+test("getFileLatestModified resolves created for a nested file but not its directory", (t) => {
+  const { root, repo } = makeRepo(["dir/a.txt"]);
+  try {
+    const file = repo.getFileLatestModified("dir/a.txt");
+    t.truthy(file);
+    t.truthy(file.created);                         // exact file (blob) resolves
+    t.regex(file.created.commitId, /^[0-9a-f]{40}$/);
+
+    const dir = repo.getFileLatestModified("dir");
+    t.truthy(dir);                                  // flat fields resolve via pathspec
+    t.is(dir.created, undefined);                   // "dir" is a tree entry, not a blob
+    t.false(Object.prototype.hasOwnProperty.call(dir, "created"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // Test #2 — async matches sync.

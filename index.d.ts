@@ -1422,9 +1422,10 @@ export declare class Repository {
    * from a SEPARATE oldest-first ancestry walk resolving the EXACT
    * repo-root-relative path (merge commits are included in this walk, a
    * delete-then-re-add returns the ORIGINAL add, and there is NO
-   * rename-follow). When `filepath` is a glob/directory, the flat fields still
-   * resolve via pathspec but `created` is left undefined (it resolves the exact
-   * path only, which was never a tree entry).
+   * rename-follow). `created` resolves an exact FILE (blob) path only: when
+   * `filepath` is a glob, a DIRECTORY (a tree entry, not a blob), or a submodule
+   * (a gitlink), the flat fields may still resolve via pathspec but `created` is
+   * left undefined.
    */
   getFileLatestModified(filepath: string): FileModification | null
   /**
@@ -2098,16 +2099,17 @@ export interface FileModification {
   /** Committer time, as a `Date`. Identical to `getFileLastModifiedDate`. */
   committerTime: Date
   /**
-   * The commit that FIRST added this file (its creation), resolved by EXACT
-   * repo-root-relative path over an oldest-first ancestry walk -- SEPARATE from
-   * the newest-first modification walk above. Undefined ONLY when a
-   * glob/directory was passed to `getFileLatestModified`: the flat fields
-   * resolve via pathspec, but `created` resolves the EXACT path only, so it
-   * matches no tree entry. For an exact path it is always present. (A path with
-   * no ordinary-commit history yields no record at all -- the whole
-   * `FileModification` is `null`/absent -- not a present record with this field
-   * missing.) A delete-then-re-add returns the ORIGINAL add; merge commits are
-   * included; no rename-follow.
+   * The commit that FIRST added this file (its creation), resolved by an
+   * oldest-first ancestry walk over the EXACT repo-root-relative path -- SEPARATE
+   * from the newest-first modification walk above. `created` resolves an exact
+   * FILE (blob) path only: Undefined when a glob, a DIRECTORY (a tree entry, not
+   * a blob), or a submodule (a gitlink/Commit entry) was passed to
+   * `getFileLatestModified` -- the flat fields may still resolve via pathspec,
+   * but no non-file entry is a creation. For an exact file path it is always
+   * present. (A path with no ordinary-commit history yields no record at all --
+   * the whole `FileModification` is `null`/absent -- not a present record with
+   * this field missing.) A delete-then-re-add returns the ORIGINAL add; merge
+   * commits are included; no rename-follow.
    */
   created?: CommitInfo
 }
