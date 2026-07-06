@@ -17,10 +17,14 @@ export type CodeTab = {
 }
 
 // Tabbed wrapper over several <CodeBlock>s (island — holds the active-tab state).
-// Every panel is rendered into the SSR HTML; inactive panels carry `hidden`, so:
-//   - all snippets are in the HTML (crawler/SEO friendly),
-//   - with JS off the first tab's highlighted code is still visible,
-//   - after hydration, clicking a tab swaps which panel is shown (instant, no refetch).
+// Progressive enhancement: every panel is rendered into the SSR HTML and NONE carry
+// the `hidden` attribute, so the SSR/no-JS/crawler HTML keeps all five samples fully
+// visible. app.css does the show/hide, gated on `html.js` (set before first paint):
+//   - no JS  → tab bar hidden; every panel shown stacked, each with a visible label,
+//   - JS on  → only the active panel shows (data-active), the per-panel labels drop
+//              out, and clicking a tab swaps panels instantly (no refetch).
+// Because `html.js` is present pre-paint, JS-on clients hide the inactive panels
+// immediately — no flash of all five before hydration.
 export default function TabbedCodeBlock({
   tabs,
   className,
@@ -31,7 +35,7 @@ export default function TabbedCodeBlock({
   const [active, setActive] = useState(0)
 
   return (
-    <div className={className}>
+    <div className={cx('code-tabs', className)}>
       <div role="tablist" aria-label="Code examples" className="flex flex-wrap items-center gap-2">
         {tabs.map((tab, i) => {
           const isActive = i === active
@@ -63,8 +67,12 @@ export default function TabbedCodeBlock({
             role="tabpanel"
             id={`panel-${tab.id}`}
             aria-labelledby={`tab-${tab.id}`}
-            hidden={i !== active}
+            data-active={i === active ? 'true' : 'false'}
+            className="code-tab-panel"
           >
+            {/* No-JS affordance: names the sample when the (JS-only) tab bar is hidden.
+                Dropped once `html.js` is set — the tab bar then names it instead. */}
+            <div className="code-tab-label mb-2 font-mono text-xs font-medium text-(--color-accent)">{tab.label}</div>
             <CodeBlock html={tab.html} copyText={tab.copyText} filename={tab.filename} />
           </div>
         ))}

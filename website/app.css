@@ -194,6 +194,36 @@ body::after {
   }
 }
 
+/* ── Tabbed code block (progressive enhancement) ───────────────────────────────
+   The API section renders all five code panels into the SSR HTML with no `hidden`
+   attribute, so the no-JS / crawler HTML shows every sample. These rules do the
+   show/hide, gated on `html.js` (set on <html> before first paint by the layout's
+   inline script — same mechanism as `.reveal`, so JS-on clients hide the inactive
+   panels immediately, with no flash of all five).
+
+   Like the nav disclosure below, these are intentionally UNLAYERED: the tab bar
+   carries Tailwind's `.flex` (an `@layer utilities` rule) and cascade-layer order
+   would let that utility beat any `@layer` rule, so an unlayered rule is required to
+   hide it. The panel/label rules are unlayered for the same defensive reason. */
+
+/* No JS: hide the (non-functional without JS) tab bar — the per-panel label names
+   each sample instead. */
+html:not(.js) .code-tabs [role='tablist'] {
+  display: none;
+}
+/* No JS: stack the panels with breathing room between them. */
+html:not(.js) .code-tab-panel + .code-tab-panel {
+  margin-top: 1.5rem;
+}
+/* JS on: the tab bar names the active sample, so the per-panel label is redundant. */
+.js .code-tab-label {
+  display: none;
+}
+/* JS on: show only the active panel (React keeps data-active in sync on tab click). */
+.js .code-tab-panel[data-active='false'] {
+  display: none;
+}
+
 /* ── Mobile nav (CSS-only disclosure) ──────────────────────────────────────────
    #nav-toggle (a visually-hidden checkbox in the header) toggles the drawer and
    swaps the hamburger for a close icon. Works without JS.
