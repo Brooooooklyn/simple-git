@@ -368,7 +368,7 @@ jobs:
     env:
       # Override with a VOID_API_URL repository variable to target staging.
       VOID_API_URL: ${{ vars.VOID_API_URL || 'https://api.void.cloud' }}
-      VOID_PROJECT: napi-simple-git
+      VOID_PROJECT: simple-git
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6

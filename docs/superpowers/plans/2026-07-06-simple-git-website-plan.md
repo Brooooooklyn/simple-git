@@ -359,7 +359,7 @@ blocks highlighted; all internal/external links resolve. Commit.
 **Create / modify:**
 - `.github/workflows/void-deploy.yml` — trigger on push to `main` when `website/**`
   changes; Node 24; `corepack enable`; `yarn install --immutable` at repo root;
-  `yarn void deploy --project napi-simple-git` with `working-directory: website`; auth
+  `yarn void deploy --project simple-git` with `working-directory: website`; auth
   via GitHub OIDC (`id-token: write`, audience `void`); `VOID_API_URL` default
   `https://api.void.cloud`. Mirror the reference exactly except the project name and the
   path filter.
@@ -375,7 +375,7 @@ blocks highlighted; all internal/external links resolve. Commit.
 
 **Verify (acceptance):** `yarn workspace @napi-rs/simple-git-website build` succeeds;
 `yarn workspace @napi-rs/simple-git-website test:e2e` passes; the deploy workflow is
-present and correctly configured for `napi-simple-git`. Commit.
+present and correctly configured for `simple-git`. Commit.
 
 ---
 

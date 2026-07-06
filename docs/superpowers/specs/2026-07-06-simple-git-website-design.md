@@ -280,7 +280,7 @@ entries — no WASM, no cross-origin isolation needed.
 - `website/` is a Yarn workspace; root `package.json` gains `"workspaces": ["website"]`.
 - CI: `.github/workflows/void-deploy.yml`, triggers on push to `main` when `website/**` changes.
   Node 24, `corepack enable`, `yarn install --immutable` at repo root, then
-  `yarn void deploy --project napi-simple-git` with `working-directory: website`.
+  `yarn void deploy --project simple-git` with `working-directory: website`.
   Auth via GitHub OIDC (`id-token: write`, audience `void`), `VOID_API_URL` default
   `https://api.void.cloud`. Mirrors `../Image/.github/workflows/void-deploy.yml`.
 - Local: `yarn workspace <website> dev` / `build` / `preview`.
@@ -296,7 +296,7 @@ entries — no WASM, no cross-origin isolation needed.
 5. Benchmark bars, CountUp, InstallSwitcher, scroll-reveal, and mobile nav work; page is usable with JS disabled (content visible, no-JS-safe reveals).
 6. Teal accent + cool slate surfaces applied via `app.css` tokens; fonts self-hosted and preloaded.
 7. Responsive down to mobile; no horizontal body scroll.
-8. `dev` runs without COEP/WASM errors. Deploy workflow present and configured for `napi-simple-git`.
+8. `dev` runs without COEP/WASM errors. Deploy workflow present and configured for `simple-git`.
 9. Optional: a Playwright smoke test (home + /docs load, key headings present) mirroring image's `test:e2e`.
 
 ---
