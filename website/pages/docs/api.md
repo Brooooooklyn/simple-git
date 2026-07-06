@@ -2015,7 +2015,7 @@ A builder that configures and performs a clone. Construct one with `new RepoBuil
 constructor()
 ```
 
-Create a new `RepoBuilder` with default clone options.
+Create a new `RepoBuilder`.
 
 #### bare
 
@@ -2067,7 +2067,7 @@ Data-and-callback options for a fetch, passed to `Remote.fetch`/`Remote.fetchAsy
 constructor()
 ```
 
-Create a new `FetchOptions` with default fetch settings.
+Create a new `FetchOptions`.
 
 #### remoteCallback
 
@@ -2143,7 +2143,7 @@ Data-and-callback options for a push, passed to `Remote.push`/`Remote.pushAsync`
 constructor()
 ```
 
-Create a new `PushOptions` with default push settings.
+Create a new `PushOptions`.
 
 #### remoteCallback
 
@@ -2203,7 +2203,7 @@ Proxy configuration for a fetch or push, attached to a `FetchOptions`/`PushOptio
 constructor()
 ```
 
-Create a new `ProxyOptions` with no proxy configured.
+Create a new `ProxyOptions`.
 
 #### auto
 
@@ -2231,7 +2231,7 @@ The JS callbacks (credentials, transfer/push progress, per-ref push status) that
 constructor()
 ```
 
-Create a new `RemoteCallbacks` with no callbacks set.
+Create a new `RemoteCallbacks`.
 
 #### credentials
 
