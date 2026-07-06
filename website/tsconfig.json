@@ -12,5 +12,5 @@
     "noEmit": true,
     "resolveJsonModule": true
   },
-  "include": ["pages", "vite.config.ts", "void.json", ".void"]
+  "include": ["pages", "lib", "vite.config.ts", "void.json", ".void"]
 }

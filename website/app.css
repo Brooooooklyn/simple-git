@@ -1,0 +1,220 @@
+@import 'tailwindcss';
+@import '@void/md/theme-content.css';
+
+/* ── Self-hosted variable fonts (latin subset, woff2 in public/fonts) ─────────
+   Sourced from the @fontsource-variable/* deps and copied to public/fonts so the
+   files ship at stable, preloadable paths (see void.json head.link). Importing the
+   package CSS instead would content-hash the woff2 and make a static preload
+   impossible — this mirrors the reference site's self-host + preload approach. */
+@font-face {
+  font-family: 'Space Grotesk Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url('/fonts/space-grotesk-var.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('/fonts/inter-var.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('/fonts/jetbrains-mono-var.woff2') format('woff2');
+}
+
+/* ── Design tokens (dark-only) ─────────────────────────────────────────────────
+   Cool slate near-black surfaces + cool off-white ink, teal-cyan accent. */
+@theme {
+  /* surfaces & ink */
+  --color-bg: #0a0b0d;
+  --color-surface-1: #101318;
+  --color-surface-2: #181c22;
+  --color-border: rgb(228 240 250 / 0.08);
+  --color-border-strong: rgb(228 240 250 / 0.15);
+  --color-fg: #eef2f5;
+  --color-muted: #9aa4af;
+  /* faint: de-emphasised, still legible for small mono metadata on bg/surface-1 */
+  --color-faint: #79828d;
+
+  /* teal-cyan accent */
+  --color-accent: oklch(74% 0.13 190); /* ≈ #14c7bd */
+  --color-accent-strong: oklch(80% 0.14 190); /* ≈ #35e0d3 */
+  --color-accent-muted: oklch(60% 0.1 190);
+  --color-accent-glow: oklch(72% 0.13 190 / 0.2);
+  /* dark foreground for text/icons on an accent-filled surface */
+  --color-accent-fg: #04211f;
+
+  /* type families */
+  --font-display: 'Space Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /* fluid display scale */
+  --text-eyebrow: 0.78rem;
+  --text-eyebrow--line-height: 1;
+  --text-eyebrow--letter-spacing: 0.14em;
+
+  --text-display-xl: clamp(2.5rem, 6vw, 4.5rem);
+  --text-display-xl--line-height: 1.02;
+  --text-display-xl--letter-spacing: -0.02em;
+  --text-display-xl--font-weight: 600;
+
+  --text-display-lg: clamp(2rem, 4.5vw, 3rem);
+  --text-display-lg--line-height: 1.05;
+  --text-display-lg--letter-spacing: -0.02em;
+  --text-display-lg--font-weight: 600;
+
+  --text-h2: clamp(1.75rem, 3vw, 2.5rem);
+  --text-h2--line-height: 1.1;
+  --text-h2--letter-spacing: -0.01em;
+  --text-h2--font-weight: 600;
+}
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+}
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
+}
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+  /* Backstop only — real overflow sources are fixed at the root. clip (not hidden)
+     avoids creating a scroll container, so position:sticky keeps working. */
+  overflow-x: clip;
+}
+::selection {
+  background: var(--color-accent-muted);
+  color: var(--color-fg);
+}
+code,
+kbd,
+pre {
+  font-family: var(--font-mono);
+}
+/* Markdown link colour for @void/md-rendered docs content. */
+.void-md {
+  --vmd-link: var(--color-accent);
+}
+
+/* faint film grain — fixed, decorative, never intercepts pointer events */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.022;
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* ── Reusable primitives layer ─────────────────────────────────────────────── */
+@layer components {
+  /* page gutter — every section's inner wrapper */
+  .container-page {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 1140px;
+    padding-inline: 1.5rem;
+  }
+  @media (min-width: 768px) {
+    .container-page {
+      padding-inline: 2rem;
+    }
+  }
+
+  /* sticky site header — translucent, blurred, hairline */
+  .site-header {
+    background: color-mix(in oklab, var(--color-bg) 82%, transparent);
+    backdrop-filter: saturate(140%) blur(12px);
+    -webkit-backdrop-filter: saturate(140%) blur(12px);
+  }
+
+  /* teal radial glow — drop behind a hero/cta section (position:relative parent) */
+  .accent-glow {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(60% 50% at 50% 0%, var(--color-accent-glow), transparent 70%);
+  }
+
+  /* mono uppercase eyebrow */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: var(--text-eyebrow);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+  }
+
+  /* scroll-reveal. Hidden state is gated behind html.js (set by an inline script
+     in the layout) so no-JS / crawler HTML renders fully visible — SEO-safe.
+     A Reveal observer (added later) sets .is-visible when the block scrolls in. */
+  .reveal {
+    transition:
+      opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
+  }
+  .js .reveal {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  .reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .js .reveal {
+      opacity: 1;
+      transform: none;
+    }
+    .reveal {
+      transition: none;
+    }
+  }
+}
+
+/* ── Mobile nav (CSS-only disclosure) ──────────────────────────────────────────
+   #nav-toggle (a visually-hidden checkbox in the header) toggles the drawer and
+   swaps the hamburger for a close icon. Works without JS.
+
+   These rules are intentionally UNLAYERED: Tailwind's `.hidden` / `.md:hidden`
+   live in `@layer utilities`, and cascade-layer order beats selector specificity —
+   an `@layer components` rule (however specific) loses to a utility. Unlayered
+   declarations outrank every layer, so they win over `.hidden` without
+   `!important`. The drawer keeps `md:!hidden` so a keyboard user focusing the
+   hidden checkbox on desktop can't reveal it (that `!important` beats these). */
+#nav-toggle:checked ~ .nav-drawer {
+  display: block;
+}
+#nav-toggle:checked ~ .container-page .nav-icon-open {
+  display: none;
+}
+#nav-toggle:checked ~ .container-page .nav-icon-close {
+  display: block;
+}
+/* Keyboard focus ring for the (visually-hidden) toggle, surfaced on its label. */
+#nav-toggle:focus-visible ~ .container-page .nav-toggle-btn {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
