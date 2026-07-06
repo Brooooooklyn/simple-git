@@ -291,6 +291,428 @@ blameFileAsync(path: string, options?: BlameOptions | undefined | null, signal?:
 
 Off-the-main-thread variant of `blameFile`.
 
+### Repository state & inspection
+
+Read-only accessors for HEAD, on-disk layout and repository state, plus the workdir, namespace and merge-message mutators.
+
+#### head
+
+```ts
+head(): Reference
+```
+
+Retrieve and resolve the reference pointed at by HEAD, returning it as a `Reference`.
+
+#### path
+
+```ts
+path(): string
+```
+
+Returns the path to the `.git` folder for normal repositories, or the repository itself for bare repositories.
+
+#### state
+
+```ts
+state(): RepositoryState
+```
+
+Returns the current state of this repository as a `RepositoryState` discriminant (e.g. clean, merge, rebase).
+
+#### isShallow
+
+```ts
+isShallow(): boolean
+```
+
+Tests whether this repository is a shallow clone.
+
+#### isEmpty
+
+```ts
+isEmpty(): boolean
+```
+
+Tests whether this repository is empty.
+
+#### isWorktree
+
+```ts
+isWorktree(): boolean
+```
+
+Tests whether this repository is a worktree.
+
+#### workdir
+
+```ts
+workdir(): string | null
+```
+
+Get the path of the working directory for this repository. Returns `null` when the repository is bare (per the `string | null` return). This is one of the `Option`-returning accessors that returns `null` rather than throwing after `dispose()`.
+
+#### setWorkdir
+
+```ts
+setWorkdir(path: string, updateGitlink: boolean): void
+```
+
+Set the path to the working directory for this repository. When `updateGitlink` is `true`, create/update the gitlink file in the workdir and set the `core.worktree` config (when the workdir is not the parent of the `.git` directory).
+
+#### namespace
+
+```ts
+namespace(): string | null
+```
+
+Get the currently active namespace for this repository. Returns `null` when there is no namespace, or when the namespace is not valid UTF-8 (per the `string | null` return). This is one of the `Option`-returning accessors that returns `null` rather than throwing after `dispose()`.
+
+#### setNamespace
+
+```ts
+setNamespace(namespace: string): void
+```
+
+Set the active namespace for this repository.
+
+#### removeNamespace
+
+```ts
+removeNamespace(): void
+```
+
+Remove the active namespace for this repository.
+
+#### mergeMessage
+
+```ts
+mergeMessage(): string
+```
+
+Retrieves the Git merge message (the contents of `.git/MERGE_MSG`). Remember to remove the message when finished, via `removeMergeMessage`.
+
+#### removeMergeMessage
+
+```ts
+removeMergeMessage(): void
+```
+
+Remove the Git merge message (`.git/MERGE_MSG`).
+
+### Config & signature
+
+#### config
+
+```ts
+config(): Config
+```
+
+Get the configuration file for this repository as a `Config` view. If a configuration file has not been set, the default config for the repository is returned, including its global and system configurations.
+
+#### signature
+
+```ts
+signature(): Signature
+```
+
+Create a new action `Signature` with the default user and a now timestamp. This looks up `user.name` and `user.email` from the configuration and uses the current time as the timestamp; it throws when either `user.name` or `user.email` is not set.
+
+### Remotes
+
+Repository-level accessors that list, create, rename, delete and reconfigure remotes. The fetch and push operations themselves live on the `Remote` handle these methods return (see the `Remote` class).
+
+#### remotes
+
+```ts
+remotes(): Array<string>
+```
+
+List all remote names configured for this repository.
+
+#### findRemote
+
+```ts
+findRemote(name: string): Remote | null
+```
+
+Get the information for a particular remote as a `Remote`, or `null` when no remote with that name exists (per the `Remote | null` return). This is one of the `Option`-returning accessors that returns `null` rather than throwing after `dispose()`.
+
+#### remote
+
+```ts
+remote(name: string, url: string): Remote
+```
+
+Add a remote with the default fetch refspec to the repository's configuration, returning the new `Remote`.
+
+#### remoteWithFetch
+
+```ts
+remoteWithFetch(name: string, url: string, refspec: string): Remote
+```
+
+Add a remote with the provided fetch `refspec` to the repository's configuration, returning the new `Remote`.
+
+#### remoteAnonymous
+
+```ts
+remoteAnonymous(url: string): Remote
+```
+
+Create an anonymous remote with the given URL and refspec in memory. Use this when you have a URL instead of a remote's name. Note that anonymous remotes cannot be converted to persisted remotes.
+
+#### remoteRename
+
+```ts
+remoteRename(name: string, newName: string): Array<string>
+```
+
+Give a remote a new name. All remote-tracking branches and configuration settings for the remote are updated. A temporary in-memory remote cannot be given a name with this method, and no already-loaded instances of the remote change their name or refspecs. The returned array is the list of non-default refspecs which could not be renamed and are handed back for further processing by the caller.
+
+#### remoteDelete
+
+```ts
+remoteDelete(name: string): this
+```
+
+Delete an existing persisted remote. All remote-tracking branches and configuration settings for the remote are removed. Returns the same `Repository` for chaining.
+
+#### remoteAddFetch
+
+```ts
+remoteAddFetch(name: string, refspec: string): this
+```
+
+Add the given fetch `refspec` to the fetch list in the configuration for the named remote, without loading it. No already-loaded remote instances are affected. Returns the same `Repository` for chaining.
+
+#### remoteAddPush
+
+```ts
+remoteAddPush(name: string, refspec: string): this
+```
+
+Add the given push `refspec` to the push list in the configuration for the named remote. No already-loaded remote instances are affected. Returns the same `Repository` for chaining.
+
+#### remoteSetUrl
+
+```ts
+remoteSetUrl(name: string, url: string): this
+```
+
+Set the URL of a remote in the repository's configuration, updating the configured fetch URL for the named remote. No already-loaded remote instances are affected. Returns the same `Repository` for chaining.
+
+#### remoteSetPushUrl
+
+```ts
+remoteSetPushUrl(name: string, url?: string | undefined | null): this
+```
+
+Set the remote's push URL in the configuration. Remote objects already in memory are not affected. This assumes the common case of a single-URL remote and otherwise returns an error. Passing `null` (or omitting `url`) clears the push URL. Returns the same `Repository` for chaining.
+
+### Branches, checkout & references
+
+#### branches
+
+```ts
+branches(filter?: BranchType | undefined | null): Array<Branch>
+```
+
+List the branches in the repository. Pass `filter` to restrict the listing to local or remote branches; omit it to list both. Branches whose names are not valid UTF-8 are skipped (they cannot be re-resolved by name).
+
+#### findBranch
+
+```ts
+findBranch(name: string, branchType: BranchType): Branch | null
+```
+
+Look up a branch by its name and type, returning the `Branch`, or `null` when no branch with that name and type exists (per the `Branch | null` return).
+
+#### branch
+
+```ts
+branch(branchName: string, target: Commit, force: boolean): Branch
+```
+
+Create a new branch pointing at a target commit. A new direct reference is created pointing to `target`. If `force` is `true` and a branch already exists with the given name, it is replaced.
+
+#### checkoutTree
+
+```ts
+checkoutTree(treeish: GitObject, options?: CheckoutOptions | undefined | null): void
+```
+
+Check out the tree pointed to by `treeish` (a commit, tag or tree object), updating the working directory to match. This does **not** update HEAD; pair it with `setHead` to switch branches. The checkout is **safe** by default — pass `options.force = true` to overwrite local modifications.
+
+#### checkoutHead
+
+```ts
+checkoutHead(options?: CheckoutOptions | undefined | null): void
+```
+
+Update files in the index and the working tree to match the content of the tree pointed at by HEAD. The checkout is **safe** by default — pass `options.force = true` to overwrite local modifications.
+
+#### checkoutIndex
+
+```ts
+checkoutIndex(options?: CheckoutOptions | undefined | null): void
+```
+
+Update files in the working tree to match the content of the repository's index. The checkout is **safe** by default — pass `options.force = true` to overwrite local modifications.
+
+#### setHead
+
+```ts
+setHead(refname: string): void
+```
+
+Make HEAD point to the reference named `refname`. If `refname` names an existing branch, HEAD becomes a symbolic reference to that branch; otherwise it points to a not-yet-existing branch. This does not touch the working directory — check out separately.
+
+#### setHeadDetached
+
+```ts
+setHeadDetached(oid: string): void
+```
+
+Make HEAD point directly at the commit with the given OID, detaching it from any branch.
+
+#### reference
+
+```ts
+reference(name: string, oid: string, force: boolean, logMessage: string): Reference
+```
+
+Create a new direct reference named `name` pointing at the object `oid`. If `force` is `true` and a reference already exists with the given name, it is overwritten; otherwise the call fails. `logMessage` is recorded in the reflog.
+
+#### referenceSymbolic
+
+```ts
+referenceSymbolic(name: string, target: string, force: boolean, logMessage: string): Reference
+```
+
+Create a new symbolic reference named `name` pointing at the reference named `target` (e.g. `refs/heads/main`). If `force` is `true` and a reference already exists with the given name, it is overwritten; otherwise the call fails. `logMessage` is recorded in the reflog.
+
+### Tags
+
+#### tag
+
+```ts
+tag(name: string, target: GitObject, tagger: Signature, message: string, force: boolean): string
+```
+
+Create a new annotated tag in the repository from an object, returning the new tag object's OID hex string. A new reference is also created pointing to this tag object; if `force` is `true` and a reference already exists with the given name, it is replaced. The `message` is not cleaned up. The tag `name` is checked for validity — avoid the characters `~ ^ : \ ? [ *` and the sequences `..` and `@{`, which have special meaning to revparse.
+
+#### tagAnnotation
+
+```ts
+tagAnnotation(name: string, target: GitObject, tagger: Signature, message: string): string
+```
+
+Create a new annotated tag object from an object **without** creating a reference, returning its OID hex string. The `message` is not cleaned up, and the tag `name` is validated with the same rules as `tag`.
+
+#### tagLightweight
+
+```ts
+tagLightweight(name: string, target: GitObject, force: boolean): string
+```
+
+Create a new lightweight tag pointing at a target object, returning its OID hex string. A new direct reference is created pointing to `target`; if `force` is `true` and a reference already exists with the given name, it is replaced.
+
+#### findTag
+
+```ts
+findTag(oid: string): Tag | null
+```
+
+Look up a tag object from the repository by OID, returning the `Tag`, or `null` when no tag object with that OID exists (per the `Tag | null` return). This is one of the `Option`-returning accessors that returns `null` rather than throwing after `dispose()`.
+
+#### findTagByPrefix
+
+```ts
+findTagByPrefix(prefixHash: string): Tag | null
+```
+
+Look up a tag object by hash prefix, returning the `Tag`, or `null` when no tag object matches the prefix (per the `Tag | null` return). This is one of the `Option`-returning accessors that returns `null` rather than throwing after `dispose()`.
+
+#### tagDelete
+
+```ts
+tagDelete(name: string): void
+```
+
+Delete an existing tag reference. The tag `name` is checked for validity (see `tag` for the naming rules).
+
+#### tagNames
+
+```ts
+tagNames(pattern?: string | undefined | null): Array<string>
+```
+
+Get a list of all the tag names in the repository. An optional fnmatch `pattern` can be specified to filter the results.
+
+#### tagForeach
+
+```ts
+tagForeach(cb: (arg: TagForeachItem) => boolean): void
+```
+
+Iterate over all tags, calling `cb` on each. The callback receives a single `TagForeachItem` carrying the tag's OID (`id`, a 40-char hex string) and its raw reference name (`nameBytes`, a `Buffer`). Return `true` to continue iteration, `false` to stop.
+
+### Diffs
+
+#### diffTreeToWorkdir
+
+```ts
+diffTreeToWorkdir(oldTree?: Tree | undefined | null, options?: DiffOptions | undefined | null): Diff
+```
+
+Create a `Diff` between a tree and the working directory: `oldTree` is used for the "old_file" side of each delta and the working directory for the "new_file" side. This is **not** the same as `git diff <treeish>` or `git diff-index <treeish>` — those use information from the index, whereas this strictly returns the differences between the tree and the working-directory files regardless of the state of the index. Use `diffTreeToWorkdirWithIndex` to emulate those commands. When `null` is passed for `oldTree`, an empty tree is used.
+
+#### diffTreeToWorkdirWithIndex
+
+```ts
+diffTreeToWorkdirWithIndex(oldTree?: Tree | undefined | null, options?: DiffOptions | undefined | null): Diff
+```
+
+Create a `Diff` between a tree and the working directory using index data to account for staged deletes, tracked files, etc. This emulates `git diff <tree>` by diffing the tree to the index and the index to the working directory, then blending the results into a single diff that includes staged deletions and the like.
+
+### Revision walking
+
+#### revWalk
+
+```ts
+revWalk(): RevWalk
+```
+
+Create a `RevWalk` that can be used to traverse the commit graph.
+
+### Resource cleanup
+
+`Symbol.dispose` cannot be generated by napi, so `using` support is opt-in via a single line at startup:
+
+```js
+Repository.prototype[Symbol.dispose] ??= Repository.prototype.dispose
+```
+
+#### dispose
+
+```ts
+dispose(): void
+```
+
+Eagerly release the underlying git2 repository handle (`git_repository_free`), closing any open packfile file descriptors and memory-mapped indexes without waiting for JavaScript garbage collection. It is idempotent: calling it more than once (or calling `free()` afterwards) is a no-op.
+
+After disposal, every throwing method throws `"Repository has been disposed"`, while the `Option`-returning methods (`workdir()`, `namespace()`, `findRemote()`, `findTree()`, `findCommit()`, `findTag()`, `findTagByPrefix()`) return `null` instead. Any handle previously derived from this repository — `Remote`, `Reference`, `Tree`, `TreeEntry`, `Commit`, `Tag`, `Branch`, `GitObject`, `Diff`, `RevWalk` and their descendants — throws the same `"Repository has been disposed"` error on use, whether it is the receiver or an argument passed to another method. This is machine-enforced (mirroring better-sqlite3's `db.close()`), not merely a documented contract.
+
+Disposal does **not** cancel `*Async` operations already in flight: a worker scheduled before `dispose()` reopens the repository from its path on its own thread and runs to completion (its promise still resolves and refs or objects may change on disk), because it never touches this freed handle. New `*Async` calls made after disposal throw synchronously. To cancel a pending async operation, pass an `AbortSignal` to the `*Async` method rather than relying on `dispose()`.
+
+#### free
+
+```ts
+free(): void
+```
+
+Alias for `dispose()`. Eagerly releases the underlying git2 repository handle; idempotent. See `dispose()` for the full disposal contract.
+
 ## Git objects & handles
 
 The handle types a `Repository` hands back: commits, trees, references, remotes, the index, blame results and their kin.
