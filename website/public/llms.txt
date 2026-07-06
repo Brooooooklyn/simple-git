@@ -43,4 +43,4 @@ bun add @napi-rs/simple-git
 - [Full text for LLMs](https://simple-git.napi.rs/llms-full.txt): the complete Getting Started guide in one markdown file.
 - [README](https://github.com/Brooooooklyn/simple-git#readme): full API reference, usage examples and the complete `GitErrorCode` table.
 - [Type definitions](https://github.com/Brooooooklyn/simple-git/blob/main/index.d.ts): every method and option, documented inline in `index.d.ts`.
-- [npm package](https://www.npmjs.com/package/@napi-rs/simple-git): install and version info.
+- [npm package](https://npmx.dev/package/@napi-rs/simple-git): install and version info.

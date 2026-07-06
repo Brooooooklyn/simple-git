@@ -7,7 +7,7 @@ import Footer from './_components/Footer'
 const NAV: { href: string; label: string; external?: boolean }[] = [
   { href: '/docs', label: 'Docs' },
   { href: 'https://github.com/Brooooooklyn/simple-git', label: 'GitHub', external: true },
-  { href: 'https://www.npmjs.com/package/@napi-rs/simple-git', label: 'npm', external: true },
+  { href: 'https://npmx.dev/package/@napi-rs/simple-git', label: 'npm', external: true },
 ]
 
 // schema.org JSON-LD structured data, server-rendered on EVERY route: this is the
@@ -35,7 +35,7 @@ const SOFTWARE_APPLICATION_LD = {
   softwareVersion: '1.0.0',
   license: 'https://opensource.org/licenses/MIT',
   codeRepository: 'https://github.com/Brooooooklyn/simple-git',
-  downloadUrl: 'https://www.npmjs.com/package/@napi-rs/simple-git',
+  downloadUrl: 'https://npmx.dev/package/@napi-rs/simple-git',
   author: { '@type': 'Person', name: 'LongYinan', url: 'https://github.com/Brooooooklyn' },
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
   url: SITE_URL,

@@ -41,7 +41,7 @@ export default function Hero({ codeHtml }: { codeHtml: string }) {
             </Button>
             <Button
               variant="ghost"
-              href="https://www.npmjs.com/package/@napi-rs/simple-git"
+              href="https://npmx.dev/package/@napi-rs/simple-git"
               target="_blank"
               rel="noreferrer"
             >

@@ -1,7 +1,7 @@
 const links: { label: string; href: string; external?: boolean }[] = [
   { label: 'Docs', href: '/docs' },
   { label: 'GitHub', href: 'https://github.com/Brooooooklyn/simple-git', external: true },
-  { label: 'npm', href: 'https://www.npmjs.com/package/@napi-rs/simple-git', external: true },
+  { label: 'npm', href: 'https://npmx.dev/package/@napi-rs/simple-git', external: true },
   { label: 'napi.rs', href: 'https://napi.rs', external: true },
 ]
 

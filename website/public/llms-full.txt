@@ -183,4 +183,4 @@ This page is the quick tour. The complete surface — every `Repository` method,
 
 - [**GitHub README →**](https://github.com/Brooooooklyn/simple-git#readme) — full API reference and usage.
 - [**Type definitions (`index.d.ts`) →**](https://github.com/Brooooooklyn/simple-git/blob/main/index.d.ts) — every method and option, documented inline.
-- [**npm package →**](https://www.npmjs.com/package/@napi-rs/simple-git) — install and version info.
+- [**npm package →**](https://npmx.dev/package/@napi-rs/simple-git) — install and version info.
