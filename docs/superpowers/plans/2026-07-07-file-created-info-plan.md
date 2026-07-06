@@ -56,12 +56,14 @@ processes far fewer commits (233→1 for root-era files).
 - times use committer time via `time_to_date(commit.time().seconds())`, matching
   the existing flat fields.
 - exact-path resolution (`tree.get_path`), like `getFilesLatestModified`, but a
-  creation is an exact FILE (blob) only. When `getFileLatestModified` is given a
-  glob, a DIRECTORY (a tree entry), or a submodule (a gitlink), the flat fields
-  may still resolve via pathspec but the `created` FIELD is left `undefined` —
-  documented. (Distinct from the bulk map VALUE, which is `null` for a
-  never-committed path — that layer stays `Record<string, FileModification |
-  null>`.)
+  creation is a FILE's, decided by the queried path's ENTRY KIND **AT HEAD**. When
+  `getFileLatestModified` is given a glob, or the path is a DIRECTORY (a tree
+  entry) or a submodule (a gitlink) **at HEAD** — even if a FILE of that name
+  existed earlier in history — the flat fields may still resolve via pathspec but
+  the `created` FIELD is left `undefined`. A DELETED file (absent at HEAD but a
+  blob earlier in history) still reports its ORIGINAL creation. (Distinct from the
+  bulk map VALUE, which is `null` for a never-committed path — that layer stays
+  `Record<string, FileModification | null>`.)
 
 ### File map
 

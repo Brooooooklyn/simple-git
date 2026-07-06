@@ -2096,10 +2096,12 @@ impl Repository {
   /// from a SEPARATE oldest-first ancestry walk resolving the EXACT
   /// repo-root-relative path (merge commits are included in this walk, a
   /// delete-then-re-add returns the ORIGINAL add, and there is NO
-  /// rename-follow). `created` resolves an exact FILE (blob) path only: when
-  /// `filepath` is a glob, a DIRECTORY (a tree entry, not a blob), or a submodule
-  /// (a gitlink), the flat fields may still resolve via pathspec but `created` is
-  /// left undefined.
+  /// rename-follow). `created` is a FILE's creation: it is left undefined when
+  /// `filepath` is a glob, or when the path is a DIRECTORY (a tree entry) or a
+  /// submodule (a gitlink) AT HEAD -- even if a FILE of that name existed earlier
+  /// in history -- while the flat fields may still resolve via pathspec. A path
+  /// that is a file at HEAD, AND a DELETED file (absent at HEAD but present
+  /// earlier in history), both still report their ORIGINAL creation commit.
   pub fn get_file_latest_modified(&self, filepath: String) -> Result<Option<FileModification>> {
     get_file_modification_with_created(self.inner()?, &filepath).convert_without_message()
   }

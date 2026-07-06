@@ -50,15 +50,18 @@ pub struct FileModification {
   pub committer_time: DateTime<Utc>,
   /// The commit that FIRST added this file (its creation), resolved by an
   /// oldest-first ancestry walk over the EXACT repo-root-relative path -- SEPARATE
-  /// from the newest-first modification walk above. `created` resolves an exact
-  /// FILE (blob) path only: Undefined when a glob, a DIRECTORY (a tree entry, not
-  /// a blob), or a submodule (a gitlink/Commit entry) was passed to
-  /// `getFileLatestModified` -- the flat fields may still resolve via pathspec,
-  /// but no non-file entry is a creation. For an exact file path it is always
-  /// present. (A path with no ordinary-commit history yields no record at all --
-  /// the whole `FileModification` is `null`/absent -- not a present record with
-  /// this field missing.) A delete-then-re-add returns the ORIGINAL add; merge
-  /// commits are included; no rename-follow.
+  /// from the newest-first modification walk above. `created` is a FILE's
+  /// creation, so whether it resolves is decided by the queried path's ENTRY KIND
+  /// AT HEAD: Undefined when a glob was passed, or when the path is a DIRECTORY (a
+  /// tree entry) or a submodule (a gitlink/Commit entry) AT HEAD -- even if a FILE
+  /// of that name existed earlier in history -- since no such entry is a file (the
+  /// flat fields may still resolve via pathspec in those cases). A path that is a
+  /// blob at HEAD, AND a DELETED file (absent at HEAD but a blob earlier in
+  /// history), BOTH still report their ORIGINAL creation. (A path with no
+  /// ordinary-commit history yields no record at all -- the whole
+  /// `FileModification` is `null`/absent -- not a present record with this field
+  /// missing.) A delete-then-re-add returns the ORIGINAL add; merge commits are
+  /// included; no rename-follow.
   pub created: Option<CommitInfo>,
 }
 
@@ -180,16 +183,33 @@ pub(crate) fn get_file_modification(
 /// commit in history ever contained the path. Mirrors the modification walk's
 /// error-propagation: revwalk iterator + object-read failures propagate, and
 /// only a genuine `NotFound` (path absent from a tree) is a non-error skip.
+///
+/// A HEAD-kind gate runs FIRST: `created` is a FILE's creation, so a path that
+/// resolves to a TREE (directory) or GITLINK (submodule) AT HEAD yields `None`
+/// even if a FILE of that name existed earlier in history. A path ABSENT at HEAD
+/// (a deleted file) is NOT gated -- its original blob creation still resolves.
 pub(crate) fn get_file_creation(
   repo: &git2::Repository,
   filepath: &str,
 ) -> std::result::Result<Option<CommitInfo>, git2::Error> {
+  let path = PathBuf::from(filepath);
+  // HEAD-kind gate: peel HEAD to its tree and inspect the queried path's entry.
+  // `repo.head()` errors on an unborn/empty HEAD, consistent with `push_head()`.
+  let head_tree = repo.head()?.peel_to_commit()?.tree()?;
+  match head_tree.get_path(&path) {
+    // A directory (tree) or submodule (gitlink) at HEAD is not a file -> no
+    // creation, regardless of what history holds under that name.
+    Ok(entry) if entry.kind() != Some(git2::ObjectType::Blob) => return Ok(None),
+    // A real lookup error propagates; NotFound (path absent at HEAD = a deleted
+    // file) is fine -- its original blob creation is still meaningful, so proceed.
+    Err(e) if e.code() != git2::ErrorCode::NotFound => return Err(e),
+    _ => {}
+  }
   let mut rev_walk = repo.revwalk()?;
   rev_walk.push_head()?;
   // Oldest-first: the first commit whose tree contains the path is the one that
   // first added it, so we can early-exit on that hit.
   rev_walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)?;
-  let path = PathBuf::from(filepath);
   for oid in rev_walk.by_ref() {
     // Propagate revwalk iterator errors instead of silently skipping them.
     let oid = oid?;
@@ -327,6 +347,11 @@ pub(crate) fn get_files_modification(
 /// Inputs must be repo-root-relative FILE paths; matching is exact-string, NOT
 /// glob/pathspec. Every input path is a key; a path never present in any tree
 /// maps to `None`. Empty input early-returns before touching the revwalk.
+///
+/// A HEAD-kind gate runs FIRST (bulk form of `get_file_creation`'s): any path
+/// that is a TREE (directory) or GITLINK (submodule) AT HEAD is dropped from
+/// `unresolved` and stays `None` -- it is not a file, so it has no creation. A
+/// path ABSENT at HEAD (a deleted file) or a blob at HEAD stays in `unresolved`.
 pub(crate) fn get_files_creation(
   repo: &git2::Repository,
   filepaths: &[String],
@@ -335,6 +360,26 @@ pub(crate) fn get_files_creation(
     filepaths.iter().map(|p| (p.clone(), None)).collect();
   let mut unresolved: HashSet<String> = filepaths.iter().cloned().collect();
 
+  if unresolved.is_empty() {
+    return Ok(result);
+  }
+
+  // HEAD-kind gate: peel HEAD once and drop any path that is a TREE (directory)
+  // or GITLINK (submodule) AT HEAD -- such a path is not a file, so it has no
+  // creation and stays `None`. A path ABSENT at HEAD (NotFound == a deleted file)
+  // or a blob at HEAD stays in `unresolved` for the oldest-blob reverse walk. A
+  // plain loop (not `retain`) so a non-`NotFound` lookup error can propagate.
+  let head_tree = repo.head()?.peel_to_commit()?.tree()?;
+  for p in unresolved.clone() {
+    match head_tree.get_path(Path::new(&p)) {
+      Ok(entry) if entry.kind() != Some(git2::ObjectType::Blob) => {
+        unresolved.remove(&p);
+      }
+      Ok(_) => {}
+      Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+      Err(e) => return Err(e),
+    }
+  }
   if unresolved.is_empty() {
     return Ok(result);
   }

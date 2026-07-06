@@ -1422,10 +1422,12 @@ export declare class Repository {
    * from a SEPARATE oldest-first ancestry walk resolving the EXACT
    * repo-root-relative path (merge commits are included in this walk, a
    * delete-then-re-add returns the ORIGINAL add, and there is NO
-   * rename-follow). `created` resolves an exact FILE (blob) path only: when
-   * `filepath` is a glob, a DIRECTORY (a tree entry, not a blob), or a submodule
-   * (a gitlink), the flat fields may still resolve via pathspec but `created` is
-   * left undefined.
+   * rename-follow). `created` is a FILE's creation: it is left undefined when
+   * `filepath` is a glob, or when the path is a DIRECTORY (a tree entry) or a
+   * submodule (a gitlink) AT HEAD -- even if a FILE of that name existed earlier
+   * in history -- while the flat fields may still resolve via pathspec. A path
+   * that is a file at HEAD, AND a DELETED file (absent at HEAD but present
+   * earlier in history), both still report their ORIGINAL creation commit.
    */
   getFileLatestModified(filepath: string): FileModification | null
   /**
@@ -2101,15 +2103,18 @@ export interface FileModification {
   /**
    * The commit that FIRST added this file (its creation), resolved by an
    * oldest-first ancestry walk over the EXACT repo-root-relative path -- SEPARATE
-   * from the newest-first modification walk above. `created` resolves an exact
-   * FILE (blob) path only: Undefined when a glob, a DIRECTORY (a tree entry, not
-   * a blob), or a submodule (a gitlink/Commit entry) was passed to
-   * `getFileLatestModified` -- the flat fields may still resolve via pathspec,
-   * but no non-file entry is a creation. For an exact file path it is always
-   * present. (A path with no ordinary-commit history yields no record at all --
-   * the whole `FileModification` is `null`/absent -- not a present record with
-   * this field missing.) A delete-then-re-add returns the ORIGINAL add; merge
-   * commits are included; no rename-follow.
+   * from the newest-first modification walk above. `created` is a FILE's
+   * creation, so whether it resolves is decided by the queried path's ENTRY KIND
+   * AT HEAD: Undefined when a glob was passed, or when the path is a DIRECTORY (a
+   * tree entry) or a submodule (a gitlink/Commit entry) AT HEAD -- even if a FILE
+   * of that name existed earlier in history -- since no such entry is a file (the
+   * flat fields may still resolve via pathspec in those cases). A path that is a
+   * blob at HEAD, AND a DELETED file (absent at HEAD but a blob earlier in
+   * history), BOTH still report their ORIGINAL creation. (A path with no
+   * ordinary-commit history yields no record at all -- the whole
+   * `FileModification` is `null`/absent -- not a present record with this field
+   * missing.) A delete-then-re-add returns the ORIGINAL add; merge commits are
+   * included; no rename-follow.
    */
   created?: CommitInfo
 }

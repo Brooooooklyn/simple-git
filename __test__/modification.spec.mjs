@@ -40,12 +40,15 @@ function makeRepo(files) {
 // Build a hermetic throwaway repo with a controlled MULTI-commit history so the
 // creation walk (`created`, oldest-first) can diverge from the modification walk
 // (newest-first). Each `step` is `{ write?: {name: content}, del?: [names],
-// message }`: it writes/deletes the named files, stages everything (`add -A`),
-// then commits. Same init/config pattern as `makeRepo`. Returns `{ root, repo,
-// git, commits }` where `commits[i]` is the 40-hex OID of step `i`'s commit
-// (captured via `git rev-parse HEAD` right after it lands, oldest first) and
-// `git` runs a command in the work tree for optional CLI cross-checks. Caller
-// removes `root`.
+// message }`: it deletes the named paths, then writes the named files, stages
+// everything (`add -A`), then commits. Deletions run BEFORE writes and `rmSync`
+// is recursive so a single step can delete a FILE and then create a DIRECTORY of
+// the same name (a TYPE transition, and vice-versa: delete a dir, add a file);
+// writes create parent dirs so nested paths like "dir/a.txt" work. Same
+// init/config pattern as `makeRepo`. Returns `{ root, repo, git, commits }` where
+// `commits[i]` is the 40-hex OID of step `i`'s commit (captured via `git
+// rev-parse HEAD` right after it lands, oldest first) and `git` runs a command in
+// the work tree for optional CLI cross-checks. Caller removes `root`.
 function makeRepoWithHistory(steps) {
   const root = mkdtempSync(join(tmpdir(), "simple-git-modification-hist-"));
   const work = join(root, "work");
@@ -59,11 +62,17 @@ function makeRepoWithHistory(steps) {
   run("config core.autocrlf false");
   const commits = [];
   for (const step of steps) {
-    for (const [name, content] of Object.entries(step.write ?? {})) {
-      writeFileSync(join(work, name), content);
-    }
+    // Deletions first (recursive), so a step can delete a FILE named `dir` and
+    // then create the DIRECTORY `dir/a.txt` in the same commit (type transition).
     for (const name of step.del ?? []) {
-      rmSync(join(work, name), { force: true });
+      rmSync(join(work, name), { recursive: true, force: true });
+    }
+    for (const [name, content] of Object.entries(step.write ?? {})) {
+      const dest = join(work, name);
+      // Create parents (idempotent) so a nested write, or a write to a name that
+      // was just deleted as a file, lands even when the parent didn't exist.
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, content);
     }
     run("add -A");
     run(`commit -q -m "${step.message}"`);
@@ -477,6 +486,91 @@ test("bulk created matches single-file created on a multi-commit repo", (t) => {
     t.truthy(single.created);
     t.deepEqual(bulk.created, single.created); // creation record crosses the bulk boundary
     t.deepEqual(bulk, single); // whole record (flat fields + created) matches
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// -------- type-transition `created` semantics (HEAD-kind gate) ---------------
+// `created` is a FILE's creation; whether it resolves is decided by the queried
+// path's ENTRY KIND AT HEAD, not just per-commit history. A path that is a
+// TREE (directory) or GITLINK (submodule) at HEAD yields `undefined` even if a
+// FILE of that name existed earlier; a DELETED file (absent at HEAD) still
+// resolves its original add; a path that BECAME a file resolves that commit.
+
+// file -> directory (THE fix): C1 adds a FILE named `dir`; C2 deletes it and
+// adds `dir/a.txt`, so `dir` is a DIRECTORY (tree) at HEAD. The old FILE `dir`
+// lives on in C1's tree, but because `dir` is a tree AT HEAD, `created` must be
+// undefined -- NOT the bogus C1 add. (Pre-fix this returned C1.)
+test("created is undefined for a path that is a file in history but a directory at HEAD", (t) => {
+  const { root, repo } = makeRepoWithHistory([
+    { write: { dir: "i am a file\n" }, message: "c1 add file dir" },
+    {
+      del: ["dir"],
+      write: { "dir/a.txt": "now inside a directory\n" },
+      message: "c2 dir becomes a directory",
+    },
+  ]);
+  try {
+    const dir = repo.getFileLatestModified("dir");
+    t.truthy(dir); // flat fields still resolve via pathspec (the deletion delta)
+    t.is(dir.created, undefined); // `dir` is a tree AT HEAD -> no creation
+    t.false(Object.prototype.hasOwnProperty.call(dir, "created"));
+
+    // The exact FILE under the directory still resolves its creation (40-hex).
+    const file = repo.getFileLatestModified("dir/a.txt");
+    t.truthy(file);
+    t.truthy(file.created);
+    t.regex(file.created.commitId, /^[0-9a-f]{40}$/);
+
+    // Bulk form: if a record is returned for `dir` at all, its `created` must
+    // also be undefined (the deletion delta gives it a flat record).
+    const bulk = repo.getFilesLatestModified(["dir"]);
+    const rec = bulk["dir"];
+    if (rec) {
+      t.is(rec.created, undefined);
+      t.false(Object.prototype.hasOwnProperty.call(rec, "created"));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// deleted file stays resolved (guards against over-restriction): C1 adds
+// gone.txt; C2 deletes it, so it is ABSENT at HEAD. A gate that keyed on "blob
+// at HEAD" would wrongly drop this; the correct gate only rejects tree/gitlink
+// AT HEAD, so the original add (C1) must still resolve.
+test("created stays resolved for a file deleted at HEAD", (t) => {
+  const { root, repo, commits } = makeRepoWithHistory([
+    { write: { "gone.txt": "v1\n" }, message: "c1 add gone" },
+    { del: ["gone.txt"], message: "c2 delete gone" },
+  ]);
+  try {
+    const [c1] = commits;
+    const mod = repo.getFileLatestModified("gone.txt");
+    t.truthy(mod);
+    t.truthy(mod.created); // deleted-at-HEAD file still reports its creation
+    t.is(mod.created.commitId, c1); // == C1, the ORIGINAL add
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// directory -> file (compose check): C1 adds `x/a.txt` (so `x` is a DIRECTORY);
+// C2 deletes `x/` and adds a FILE named `x`. At HEAD `x` is a blob, so `created`
+// resolves -- to C2, the commit where `x` first became a FILE (the per-commit
+// blob check skips C1's tree entry for `x`), NOT undefined.
+test("created resolves to the commit where a path became a file (directory -> file)", (t) => {
+  const { root, repo, commits } = makeRepoWithHistory([
+    { write: { "x/a.txt": "v1\n" }, message: "c1 add x/a.txt (x is a dir)" },
+    { del: ["x"], write: { x: "now a file\n" }, message: "c2 x becomes a file" },
+  ]);
+  try {
+    const [, c2] = commits;
+    const mod = repo.getFileLatestModified("x");
+    t.truthy(mod);
+    t.truthy(mod.created);
+    t.is(mod.created.commitId, c2); // the commit where x became a FILE
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
