@@ -187,4 +187,5 @@ Disposal does **not** cancel `*Async` operations already in flight — a worker 
 This page is the quick tour. The complete surface — every `Repository` method, plus `Config`, `Index`, `Branch`, blame, push callbacks, diff options and the full `GitErrorCode` table — lives in the project README, and the bundled `index.d.ts` documents each method and option inline so your editor surfaces it as you type.
 
 - [**GitHub README →**](https://github.com/Brooooooklyn/simple-git#readme) — full API reference and usage.
+- [**Type definitions (`index.d.ts`) →**](https://github.com/Brooooooklyn/simple-git/blob/main/index.d.ts) — every method and option, documented inline.
 - [**npm package →**](https://www.npmjs.com/package/@napi-rs/simple-git) — install and version info.
