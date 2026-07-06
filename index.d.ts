@@ -1448,9 +1448,11 @@ export declare class Repository {
    * Each present record also carries `created`: the commit that FIRST added
    * that path, from a SEPARATE oldest-first ancestry walk over the same EXACT
    * path (merge commits are included in this walk, a delete-then-re-add returns
-   * the ORIGINAL add, and there is NO rename-follow). Because inputs are already
-   * exact file paths, a resolved path always has a `created` commit; a
-   * never-committed path stays `null` and is not walked for creation.
+   * the ORIGINAL add, and there is NO rename-follow). A present record's
+   * `created` is `undefined` when the exact path is a directory (tree) or
+   * submodule (gitlink) at HEAD; a deleted path (absent at HEAD) still resolves
+   * its original creation. A never-committed path stays `null` (the whole
+   * record) and is not walked for creation.
    */
   getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | null>
   /**
