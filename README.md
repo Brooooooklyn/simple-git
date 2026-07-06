@@ -251,6 +251,36 @@ export interface FileModification {
   committerEmail?: string
   /** Committer time, as a `Date`. Identical to `getFileLastModifiedDate`. */
   committerTime: Date
+  /**
+   * The commit that FIRST added this file (its creation), or `undefined` for a
+   * glob, or a directory/submodule path at HEAD. A delete-then-re-add returns
+   * the ORIGINAL add; merge commits are included; no rename-follow.
+   */
+  created?: CommitInfo
+}
+
+/**
+ * A single commit's identity/time metadata, reused for the commit that CREATED
+ * a file (`FileModification.created`). Same 8 fields as `FileModification`'s
+ * commit metadata. All times are `Date`s (UTC; timezone offset ignored).
+ */
+export interface CommitInfo {
+  /** 40-char lowercase hex OID of the commit that first added the file. */
+  commitId: string
+  /** Commit summary (first line). Undefined if absent or not valid UTF-8. */
+  summary?: string
+  /** Author name. Undefined if not valid UTF-8. */
+  authorName?: string
+  /** Author email. Undefined if not valid UTF-8. */
+  authorEmail?: string
+  /** Author time, as a `Date`. */
+  authorTime: Date
+  /** Committer name. Undefined if not valid UTF-8. */
+  committerName?: string
+  /** Committer email. Undefined if not valid UTF-8. */
+  committerEmail?: string
+  /** Committer time, as a `Date`. */
+  committerTime: Date
 }
 
 /**

@@ -1440,10 +1440,12 @@ export declare class Repository {
    * history walk (early-exits once every path is resolved).
    *
    * Unlike the single-file methods, each input is matched by EXACT
-   * repo-root-relative file-path string, NOT libgit2 pathspec/glob semantics:
-   * inputs must be file paths (a directory or glob will not match). Every input
-   * path is present as a key in the result; a never-committed path maps to
-   * `null`. Merge commits are skipped; only real errors throw.
+   * repo-root-relative path string, NOT libgit2 pathspec/glob semantics (there
+   * is no glob expansion). A directory (tree) or submodule (gitlink) path is
+   * not a file, and if such a path nonetheless resolves to a present record its
+   * `created` is `undefined` (see below). Every input path is present as a key
+   * in the result; a never-committed path maps to `null`. Merge commits are
+   * skipped; only real errors throw.
    *
    * Each present record also carries `created`: the commit that FIRST added
    * that path, from a SEPARATE oldest-first ancestry walk over the same EXACT
