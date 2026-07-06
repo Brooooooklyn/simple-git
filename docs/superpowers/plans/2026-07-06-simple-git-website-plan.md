@@ -25,9 +25,10 @@ swap content, apply our theme. Do NOT invent void APIs; mirror what the referenc
 ## Global Constraints (binding — reviewers use these as the attention lens)
 
 1. **Do NOT modify the library.** `src/`, `index.js`, `index.d.ts`, `Cargo.*`,
-   `build.rs`, the native build, and root config unrelated to the workspace field
-   stay untouched. The ONLY root change permitted is adding `"workspaces": ["website"]`
-   to `package.json`.
+   `build.rs`, and the native build stay untouched. Root-level changes are limited to:
+   (a) adding `"workspaces": ["website"]` to `package.json`, and (b) the resulting
+   `yarn.lock` update. **All website ignore rules live in a new `website/.gitignore`,
+   NOT the root `.gitignore`.** Nothing else at the repo root changes.
 2. **No WASM, no playground.** Do NOT copy image's `pages/playground/`, `worker.ts`,
    `_engine.ts`, `protocol.ts`, the COOP/COEP/CORP headers in `void.json`, the dev
    COEP middleware or WASM path fixes in `vite.config.ts`, or the `@napi-rs/image*`,
@@ -94,11 +95,13 @@ entries). Note how routing/pages are wired, then reproduce the MINIMAL subset.
   content comes in later tasks).
 - `website/pages/docs/index.md` — minimal frontmatter (`title: Getting Started`) + a
   placeholder paragraph.
-- `.gitignore` entries for `website/` build artifacts (`dist/`, `.wrangler/`,
-  `node_modules/`, `.void/` or whatever the reference ignores).
+- `website/.gitignore` — a self-contained ignore file for the workspace's build
+  artifacts (`node_modules/`, `dist/`, `.void`, `.wrangler`, `test-results`,
+  `playwright-report`, `.playwright-mcp`, or whatever the reference ignores).
+  Do **NOT** edit the root `.gitignore`.
 
 **Modify:** root `package.json` — add `"workspaces": ["website"]`. Change NOTHING else
-in root package.json.
+in root package.json, and do NOT touch the root `.gitignore`.
 
 **Verify (acceptance):**
 - `corepack enable` then `yarn install` at repo root succeeds; the native library is
