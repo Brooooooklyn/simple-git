@@ -34,6 +34,41 @@ function makeRepo(files) {
   return { root, repo: new Repository(work) };
 }
 
+// Build a hermetic throwaway repo with a controlled MULTI-commit history so the
+// creation walk (`created`, oldest-first) can diverge from the modification walk
+// (newest-first). Each `step` is `{ write?: {name: content}, del?: [names],
+// message }`: it writes/deletes the named files, stages everything (`add -A`),
+// then commits. Same init/config pattern as `makeRepo`. Returns `{ root, repo,
+// git, commits }` where `commits[i]` is the 40-hex OID of step `i`'s commit
+// (captured via `git rev-parse HEAD` right after it lands, oldest first) and
+// `git` runs a command in the work tree for optional CLI cross-checks. Caller
+// removes `root`.
+function makeRepoWithHistory(steps) {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-modification-hist-"));
+  const work = join(root, "work");
+  execSync(`git init -q -b main "${work}"`);
+  const run = (args) => execSync(`git ${args}`, { cwd: work });
+  const capture = (args) =>
+    execSync(`git ${args}`, { cwd: work }).toString().trim();
+  run("config user.name tester");
+  run("config user.email tester@example.com");
+  run("config commit.gpgsign false");
+  run("config core.autocrlf false");
+  const commits = [];
+  for (const step of steps) {
+    for (const [name, content] of Object.entries(step.write ?? {})) {
+      writeFileSync(join(work, name), content);
+    }
+    for (const name of step.del ?? []) {
+      rmSync(join(work, name), { force: true });
+    }
+    run("add -A");
+    run(`commit -q -m "${step.message}"`);
+    commits.push(capture("rev-parse HEAD"));
+  }
+  return { root, repo: new Repository(work), git: capture, commits };
+}
+
 test.beforeEach((t) => {
   t.context.repo = new Repository(workDir);
 });
@@ -297,6 +332,104 @@ test("getFilesLatestModified keeps a constructor path as an own key (sync)", (t)
     t.is(result["constructor"], null);
     t.true(Object.prototype.hasOwnProperty.call(result, "constructor"));
     t.is(Object.getPrototypeOf(result), Object.prototype);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// -------- multi-commit `created` semantics (the point of the feature) --------
+// These build a controlled history so the oldest-first creation walk diverges
+// from the newest-first modification walk. They characterize ALREADY-shipped
+// behavior; each would fail if `created` regressed (e.g. collapsed onto the
+// modification commit, or followed the newest add on a delete/re-add).
+
+// Core value: `created` is the FIRST commit to add the file, distinct from the
+// LAST commit to modify it. C1 adds f.txt (v1); C2 modifies it (v2). If `created`
+// regressed to track the modification commit, `.created.commitId` would be C2
+// and this fails.
+test("created is the first-adding commit, distinct from the last modification", (t) => {
+  const { root, repo, git, commits } = makeRepoWithHistory([
+    { write: { "f.txt": "v1\n" }, message: "c1 add f" },
+    { write: { "f.txt": "v2\n" }, message: "c2 modify f" },
+  ]);
+  try {
+    const [c1, c2] = commits;
+    t.not(c1, c2); // real modification -> distinct commits
+
+    const mod = repo.getFileLatestModified("f.txt");
+    t.truthy(mod);
+    t.truthy(mod.created);
+    t.is(mod.created.commitId, c1); // creation == first add (C1)
+    t.is(mod.commitId, c2); // last modification == C2
+    t.not(mod.created.commitId, mod.commitId); // the two genuinely differ
+
+    // Independent CLI cross-check inside the throwaway repo (skipped under CI per
+    // GC11). `--diff-filter=A --reverse` recomputes the first ADD of f.txt.
+    if (!process.env.CI) {
+      const firstAdd = git(
+        "log --diff-filter=A --format=%H --reverse -- f.txt",
+      ).split("\n")[0];
+      t.is(mod.created.commitId, firstAdd);
+      t.is(mod.commitId, git("log -1 --format=%H -- f.txt"));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// delete -> re-add: `created` returns the ORIGINAL add (C1), never the later
+// re-add (C3). C1 adds g.txt; C2 deletes it; C3 re-adds it. The oldest-first walk
+// early-exits at C1, so a regression that returned the newest add would surface.
+test("created returns the ORIGINAL add across a delete-then-re-add", (t) => {
+  const { root, repo, commits } = makeRepoWithHistory([
+    { write: { "g.txt": "v1\n" }, message: "c1 add g" },
+    { del: ["g.txt"], message: "c2 delete g" },
+    { write: { "g.txt": "v3\n" }, message: "c3 re-add g" },
+  ]);
+  try {
+    const [c1, , c3] = commits;
+    t.not(c1, c3);
+
+    const mod = repo.getFileLatestModified("g.txt");
+    t.truthy(mod);
+    t.truthy(mod.created);
+    t.is(mod.created.commitId, c1); // the ORIGINAL add, per GC6
+    t.not(mod.created.commitId, c3); // NOT the re-add
+    t.is(mod.commitId, c3); // last modification is the re-add
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Root-only file: with a single commit, the creation walk and the modification
+// walk resolve the same commit, so `created.commitId === commitId`.
+test("created equals the modification commit for a root-only file", (t) => {
+  const { root, repo } = makeRepo(["only.txt"]);
+  try {
+    const mod = repo.getFileLatestModified("only.txt");
+    t.truthy(mod);
+    t.truthy(mod.created);
+    t.regex(mod.created.commitId, /^[0-9a-f]{40}$/);
+    t.is(mod.created.commitId, mod.commitId); // creation == last modification
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Bulk parity on a multi-commit repo: the bulk creation walk must resolve the
+// exact same `created` record as the single-file path (not just an empty/root
+// match). Deep-equal on the whole record catches any drift in either field set.
+test("bulk created matches single-file created on a multi-commit repo", (t) => {
+  const { root, repo } = makeRepoWithHistory([
+    { write: { "f.txt": "v1\n" }, message: "c1 add f" },
+    { write: { "f.txt": "v2\n" }, message: "c2 modify f" },
+  ]);
+  try {
+    const single = repo.getFileLatestModified("f.txt");
+    const bulk = repo.getFilesLatestModified(["f.txt"])["f.txt"];
+    t.truthy(single.created);
+    t.deepEqual(bulk.created, single.created); // creation record crosses the bulk boundary
+    t.deepEqual(bulk, single); // whole record (flat fields + created) matches
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

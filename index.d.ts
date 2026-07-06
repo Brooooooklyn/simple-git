@@ -1420,9 +1420,11 @@ export declare class Repository {
    *
    * The result also carries `created`: the commit that FIRST added the file,
    * from a SEPARATE oldest-first ancestry walk resolving the EXACT
-   * repo-root-relative path. When `filepath` is a glob/directory, the flat
-   * fields still resolve via pathspec but `created` may be `null` (the exact
-   * path was never a tree entry).
+   * repo-root-relative path (merge commits are included in this walk, a
+   * delete-then-re-add returns the ORIGINAL add, and there is NO
+   * rename-follow). When `filepath` is a glob/directory, the flat fields still
+   * resolve via pathspec but `created` may be `null` (the exact path was never
+   * a tree entry).
    */
   getFileLatestModified(filepath: string): FileModification | null
   /**
@@ -1439,6 +1441,13 @@ export declare class Repository {
    * inputs must be file paths (a directory or glob will not match). Every input
    * path is present as a key in the result; a never-committed path maps to
    * `null`. Merge commits are skipped; only real errors throw.
+   *
+   * Each present record also carries `created`: the commit that FIRST added
+   * that path, from a SEPARATE oldest-first ancestry walk over the same EXACT
+   * path (merge commits are included in this walk, a delete-then-re-add returns
+   * the ORIGINAL add, and there is NO rename-follow). Because inputs are already
+   * exact file paths, a resolved path always has a `created` commit; a
+   * never-committed path stays `null` and is not walked for creation.
    */
   getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | null>
   /**
