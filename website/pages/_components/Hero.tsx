@@ -65,7 +65,7 @@ export default function Hero({ codeHtml }: { codeHtml: string }) {
                 <div className="font-mono text-xl tabular-nums text-(--color-accent) sm:text-2xl md:text-3xl">
                   {s.node}
                 </div>
-                <div className="mt-2 font-mono text-[0.7rem] uppercase leading-snug tracking-wide text-(--color-faint)">
+                <div className="mt-2 font-mono text-[0.7rem] leading-snug tracking-wide text-(--color-faint)">
                   {s.label}
                 </div>
               </div>
