@@ -1,6 +1,6 @@
 ---
 title: 'Getting Started'
-description: 'Fast, native Git for Node.js — read the last-modified commit time of any file, run status, stage and commit in-process, with no child git process. Powered by libgit2 and Rust.'
+description: 'Fast, native Git for Node.js — read the last-modified commit time of any file, run status, stage and commit in-process, with no child git process.'
 ---
 
 # Getting Started
