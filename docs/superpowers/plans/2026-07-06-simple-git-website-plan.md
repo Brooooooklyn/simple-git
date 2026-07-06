@@ -26,9 +26,10 @@ swap content, apply our theme. Do NOT invent void APIs; mirror what the referenc
 
 1. **Do NOT modify the library.** `src/`, `index.js`, `index.d.ts`, `Cargo.*`,
    `build.rs`, and the native build stay untouched. Root-level changes are limited to:
-   (a) adding `"workspaces": ["website"]` to `package.json`, and (b) the resulting
-   `yarn.lock` update. **All website ignore rules live in a new `website/.gitignore`,
-   NOT the root `.gitignore`.** Nothing else at the repo root changes.
+   (a) adding `"workspaces": ["website"]` to `package.json`, (b) the resulting
+   `yarn.lock` update, and (c) **in Task 7 only**, adding the CI workflow file
+   `.github/workflows/void-deploy.yml`. **All website ignore rules live in a new
+   `website/.gitignore`, NOT the root `.gitignore`.** Nothing else at the repo root changes.
 2. **No WASM, no playground.** Do NOT copy image's `pages/playground/`, `worker.ts`,
    `_engine.ts`, `protocol.ts`, the COOP/COEP/CORP headers in `void.json`, the dev
    COEP middleware or WASM path fixes in `vite.config.ts`, or the `@napi-rs/image*`,
