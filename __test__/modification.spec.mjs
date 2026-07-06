@@ -34,14 +34,6 @@ function makeRepo(files) {
   return { root, repo: new Repository(work) };
 }
 
-// The bulk `getFilesLatestModified` path does not yet populate `created` (that
-// enrichment lands in a later task); strip `created` from a single-file record
-// so the bulk-vs-single cross-checks compare only the modification fields.
-const withoutCreated = (mod) => {
-  const { created, ...rest } = mod;
-  return rest;
-};
-
 test.beforeEach((t) => {
   t.context.repo = new Repository(workDir);
 });
@@ -182,8 +174,16 @@ test("getFilesLatestModified resolves many paths in one pass", (t) => {
     Object.keys(result).sort(),
     ["Cargo.toml", "bogus-zzz.txt", "build.rs"],
   );
-  t.deepEqual(result["build.rs"], withoutCreated(repo.getFileLatestModified("build.rs")));
-  t.deepEqual(result["Cargo.toml"], withoutCreated(repo.getFileLatestModified("Cargo.toml")));
+  // Bulk now carries the same `created` creation record as the single-file
+  // path, so each present record is byte-identical to getFileLatestModified.
+  const buildSingle = repo.getFileLatestModified("build.rs");
+  const cargoSingle = repo.getFileLatestModified("Cargo.toml");
+  t.deepEqual(result["build.rs"], buildSingle);
+  t.deepEqual(result["Cargo.toml"], cargoSingle);
+  // Explicitly assert the creation record crosses the bulk boundary.
+  t.truthy(result["build.rs"].created);
+  t.deepEqual(result["build.rs"].created, buildSingle.created);
+  t.deepEqual(result["Cargo.toml"].created, cargoSingle.created);
   t.is(result["bogus-zzz.txt"], null);
 });
 
@@ -198,7 +198,7 @@ test("getFilesLatestModified returns {} for empty input", (t) => {
 test("getFilesLatestModified matches a nested forward-slash path", (t) => {
   const { repo } = t.context;
   const result = repo.getFilesLatestModified(["src/lib.rs"]);
-  t.deepEqual(result["src/lib.rs"], withoutCreated(repo.getFileLatestModified("src/lib.rs")));
+  t.deepEqual(result["src/lib.rs"], repo.getFileLatestModified("src/lib.rs"));
   t.truthy(result["src/lib.rs"]);
 });
 
@@ -206,7 +206,7 @@ test("getFilesLatestModified matches a nested forward-slash path", (t) => {
 test("getFilesLatestModified resolves a root-only file (LICENSE)", (t) => {
   const { repo } = t.context;
   const result = repo.getFilesLatestModified(["LICENSE"]);
-  t.deepEqual(result["LICENSE"], withoutCreated(repo.getFileLatestModified("LICENSE")));
+  t.deepEqual(result["LICENSE"], repo.getFileLatestModified("LICENSE"));
   t.truthy(result["LICENSE"]);
 });
 
@@ -217,6 +217,9 @@ test("getFilesLatestModifiedAsync matches sync bulk result", async (t) => {
   const sync = repo.getFilesLatestModified(paths);
   const bulkAsync = await repo.getFilesLatestModifiedAsync(paths);
   t.deepEqual(bulkAsync, sync);
+  // `created` must survive the async boundary, not just match an empty sync.
+  t.truthy(bulkAsync["build.rs"].created);
+  t.regex(bulkAsync["build.rs"].created.commitId, /^[0-9a-f]{40}$/);
 });
 
 // -------- __proto__-safety regression (own-keyed result object) --------------
@@ -233,6 +236,11 @@ test("getFilesLatestModified keeps a present __proto__ path as an own key (sync)
     t.true(Object.getOwnPropertyNames(result).includes("__proto__"));
     t.truthy(result["__proto__"]); // an own FileModification, not the prototype
     t.regex(result["__proto__"].commitId, /^[0-9a-f]{40}$/);
+    // The record now also carries a `created` CommitInfo; the enrichment must
+    // not corrupt the own-key define semantics (GC9). Single seed commit here,
+    // so creation == modification commit.
+    t.truthy(result["__proto__"].created);
+    t.regex(result["__proto__"].created.commitId, /^[0-9a-f]{40}$/);
     t.true(Object.prototype.hasOwnProperty.call(result, "__proto__"));
     t.is(Object.getPrototypeOf(result), Object.prototype);
     // Normal sibling unaffected.

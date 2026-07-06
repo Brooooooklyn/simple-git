@@ -311,6 +311,90 @@ pub(crate) fn get_files_modification(
   Ok(result)
 }
 
+/// Bulk creation walk: resolve the OLDEST commit that first added each of
+/// `filepaths` in a SINGLE oldest-first ancestry walk. Mirrors the single-file
+/// `get_file_creation` per-commit logic (EXACT `tree.get_path`, merges included,
+/// first/oldest containing commit wins) but resolves many paths at once, reusing
+/// the `unresolved`-set + early-exit structure of `get_files_modification`.
+/// Inputs must be repo-root-relative FILE paths; matching is exact-string, NOT
+/// glob/pathspec. Every input path is a key; a path never present in any tree
+/// maps to `None`. Empty input early-returns before touching the revwalk.
+pub(crate) fn get_files_creation(
+  repo: &git2::Repository,
+  filepaths: &[String],
+) -> std::result::Result<HashMap<String, Option<CommitInfo>>, git2::Error> {
+  let mut result: HashMap<String, Option<CommitInfo>> =
+    filepaths.iter().map(|p| (p.clone(), None)).collect();
+  let mut unresolved: HashSet<String> = filepaths.iter().cloned().collect();
+
+  if unresolved.is_empty() {
+    return Ok(result);
+  }
+
+  let mut rev_walk = repo.revwalk()?;
+  rev_walk.push_head()?;
+  // Oldest-first ancestry (NO `Sort::TIME`): the first commit whose tree
+  // contains a path is the one that first added it, so we resolve on that hit.
+  rev_walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)?;
+
+  for oid in rev_walk.by_ref() {
+    if unresolved.is_empty() {
+      break; // early-exit: every path resolved to its creation commit
+    }
+    // Propagate revwalk iterator errors instead of silently skipping them.
+    let oid = oid?;
+    // A real object-read failure is an error, not a "no match" -- propagate it.
+    let commit = repo.find_commit(oid)?;
+    // Probe EVERY commit (merges included -- no `parent_count` branching, no
+    // diffing): the exact path either exists in this tree or it doesn't.
+    let tree = commit.tree()?;
+    for p in unresolved.clone() {
+      // NotFound == path absent from this commit's tree (no match); any other
+      // lookup error is real and must propagate.
+      match tree.get_path(Path::new(&p)) {
+        Ok(_) => {
+          result.insert(p.clone(), Some(build_commit_info(&commit)?));
+          unresolved.remove(&p);
+        }
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+        Err(e) => return Err(e),
+      }
+    }
+  }
+  Ok(result)
+}
+
+/// Bulk modification lookup enriched with each file's `created` commit. Runs the
+/// newest-first bulk modification walk (`get_files_modification`) and then, ONLY
+/// for the paths that actually resolved to a record (`Some`), the SEPARATE
+/// oldest-first bulk creation walk (`get_files_creation`), merging each result
+/// into its record's `created`. Never-committed paths stay `None` (the whole
+/// record) and are EXCLUDED from the creation walk (GC4); if no path resolved,
+/// the creation walk is skipped entirely. Shared by the sync method and the
+/// async task so both produce identical results.
+pub(crate) fn get_files_modification_with_created(
+  repo: &git2::Repository,
+  filepaths: &[String],
+) -> std::result::Result<HashMap<String, Option<FileModification>>, git2::Error> {
+  let mut mods = get_files_modification(repo, filepaths)?;
+  // Only enrich paths with a modification record; never-committed paths stay
+  // `None` and are excluded from the creation walk.
+  let present: Vec<String> = mods
+    .iter()
+    .filter_map(|(p, m)| m.as_ref().map(|_| p.clone()))
+    .collect();
+  if !present.is_empty() {
+    for (path, creation) in get_files_creation(repo, &present)? {
+      // `present` came from `mods`' `Some` keys and `get_files_creation`
+      // returns exactly those keys, so the record is always present here.
+      if let Some(Some(record)) = mods.get_mut(&path) {
+        record.created = creation;
+      }
+    }
+  }
+  Ok(mods)
+}
+
 /// Newtype over the bulk file-modification map. Its `ToNapiValue` builds the
 /// result object with own-property DEFINE semantics (`[[DefineOwnProperty]]` via
 /// `napi_define_properties`), NOT `[[Set]]`.

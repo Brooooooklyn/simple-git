@@ -17,7 +17,7 @@ use crate::diff::{Diff, DiffOptions};
 use crate::error::IntoNapiError;
 use crate::file_modification::{
   FileModMap, FileModification, get_file_modification, get_file_modification_with_created,
-  get_files_modification, time_to_date,
+  get_files_modification_with_created, time_to_date,
 };
 use crate::index::Index;
 use crate::object::GitObject;
@@ -440,7 +440,9 @@ impl GitBulkModificationTask {
   fn run(&mut self) -> Result<HashMap<String, Option<FileModification>>> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    get_files_modification(&repo, &self.filepaths).convert_without_message()
+    // Same `_with_created` wrapper as the sync method (GC7) so the async result
+    // is byte-identical, including each record's `created` creation commit.
+    get_files_modification_with_created(&repo, &self.filepaths).convert_without_message()
   }
 }
 
@@ -2135,7 +2137,7 @@ impl Repository {
     // define semantics (a path literally named `__proto__` becomes an own key,
     // not a prototype mutation). The TS type stays `Record<..>` via the
     // `ts_return_type` override above.
-    get_files_modification(self.inner()?, &filepaths)
+    get_files_modification_with_created(self.inner()?, &filepaths)
       .map(FileModMap)
       .convert_without_message()
   }
