@@ -20,3 +20,17 @@ test('docs (/docs) renders 200 with the Getting Started heading', async ({ page 
 
   await expect(page.getByRole('heading', { name: 'Getting Started', level: 1 })).toBeVisible()
 })
+
+test('docs api (/docs/api) renders 200 with the heading and the docs sidebar', async ({ page }) => {
+  const res = await page.goto('/docs/api')
+  expect(res?.status()).toBe(200)
+
+  await expect(page.getByRole('heading', { name: 'API Reference', level: 1 })).toBeVisible()
+
+  // The two-column docs shell: a desktop sidebar <nav aria-label="Documentation"> with
+  // links to both docs routes. The mobile <details> nav shares the label, so scope the
+  // link assertion to the visible (desktop) sidebar to keep it deterministic.
+  const sidebar = page.getByRole('navigation', { name: 'Documentation' }).filter({ visible: true })
+  await expect(sidebar.getByRole('link', { name: 'Getting Started' })).toBeVisible()
+  await expect(sidebar.getByRole('link', { name: 'API Reference' })).toBeVisible()
+})

@@ -232,6 +232,16 @@ html:not(.js) .code-tab-panel + .code-tab-panel {
   display: none;
 }
 
+/* ── Mobile docs <details> caret ───────────────────────────────────────────────
+   The docs sidebar's mobile disclosure (pages/docs/layout.tsx) flips its caret when
+   the native <details> is open — pure CSS, works with JS disabled. */
+.nav-caret {
+  transition: transform 0.18s ease;
+}
+details[open] > summary .nav-caret {
+  transform: rotate(180deg);
+}
+
 /* ── Mobile nav (CSS-only disclosure) ──────────────────────────────────────────
    #nav-toggle (a visually-hidden checkbox in the header) toggles the drawer and
    swaps the hamburger for a close icon. Works without JS.

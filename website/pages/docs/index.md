@@ -184,8 +184,9 @@ Disposal does **not** cancel `*Async` operations already in flight — a worker 
 
 ## Full API
 
-This page is the quick tour. The complete surface — every `Repository` method, plus `Config`, `Index`, `Branch`, blame, push callbacks, diff options and the full `GitErrorCode` table — lives in the project README, and the bundled `index.d.ts` documents each method and option inline so your editor surfaces it as you type.
+This page is the quick tour. The complete surface — every `Repository` method, plus `Config`, `Index`, `Branch`, blame, push callbacks, diff options and the full `GitErrorCode` table — is documented in the **[API Reference](/docs/api)**. The project README and the bundled `index.d.ts` remain the full source, documenting each method and option inline so your editor surfaces it as you type.
 
-- [**GitHub README →**](https://github.com/Brooooooklyn/simple-git#readme) — full API reference and usage.
+- [**API Reference →**](/docs/api) — the complete surface, organized by kind.
+- [**GitHub README →**](https://github.com/Brooooooklyn/simple-git#readme) — full source reference and usage.
 - [**Type definitions (`index.d.ts`) →**](https://github.com/Brooooooklyn/simple-git/blob/main/index.d.ts) — every method and option, documented inline.
 - [**npm package →**](https://npmx.dev/package/@napi-rs/simple-git) — install and version info.
