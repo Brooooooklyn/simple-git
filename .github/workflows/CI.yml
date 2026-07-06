@@ -10,12 +10,21 @@ env:
       - main
     tags-ignore:
       - "**"
-    paths-ignore:
-      - "**/*.md"
-      - LICENSE
-      - "**/*.gitignore"
-      - .editorconfig
-      - docs/**
+    # The deploy job now lives in this workflow, so a website-docs-only push
+    # (e.g. website/pages/docs/index.md) must still start the run — a blanket
+    # `paths-ignore: **/*.md` would skip the whole workflow before the deploy
+    # gate could match `website/**`. Use a positive `paths` filter instead:
+    # everything triggers except root docs/markdown, but `website/**` is
+    # re-included last so website markdown wins over the markdown exclusion.
+    # (Order matters: last matching pattern decides inclusion per file.)
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "!LICENSE"
+      - "!**/*.gitignore"
+      - "!.editorconfig"
+      - "!docs/**"
+      - "website/**"
   pull_request: null
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
