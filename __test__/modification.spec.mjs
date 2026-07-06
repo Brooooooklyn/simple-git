@@ -136,6 +136,18 @@ test("getFileLatestModified attaches the creating commit as `created`", (t) => {
   }
 });
 
+// `created` is EXACT-path only: a glob/pathspec input resolves the flat fields
+// via pathspec, but leaves `created` undefined (not null) -- matching the other
+// Option fields' "undefined when absent" convention.
+test("getFileLatestModified leaves created undefined for a glob/pathspec input", (t) => {
+  const { repo } = t.context;
+  const mod = repo.getFileLatestModified("*.rs");
+  t.truthy(mod);                        // flat fields resolve via pathspec
+  t.regex(mod.commitId, /^[0-9a-f]{40}$/);
+  t.is(mod.created, undefined);         // exact tree.get_path("*.rs") never matches
+  t.false(Object.prototype.hasOwnProperty.call(mod, "created"));
+});
+
 // Test #2 — async matches sync.
 test("getFileLatestModifiedAsync matches sync result", async (t) => {
   const { repo } = t.context;

@@ -1423,8 +1423,8 @@ export declare class Repository {
    * repo-root-relative path (merge commits are included in this walk, a
    * delete-then-re-add returns the ORIGINAL add, and there is NO
    * rename-follow). When `filepath` is a glob/directory, the flat fields still
-   * resolve via pathspec but `created` may be `null` (the exact path was never
-   * a tree entry).
+   * resolve via pathspec but `created` is left undefined (it resolves the exact
+   * path only, which was never a tree entry).
    */
   getFileLatestModified(filepath: string): FileModification | null
   /**
@@ -2100,11 +2100,14 @@ export interface FileModification {
   /**
    * The commit that FIRST added this file (its creation), resolved by EXACT
    * repo-root-relative path over an oldest-first ancestry walk -- SEPARATE from
-   * the newest-first modification walk above. `null` when the path has no
-   * ordinary-commit history, or when a glob/directory was passed to
-   * `getFileLatestModified` (the flat fields resolve via pathspec, but
-   * `created` resolves the exact path only). A delete-then-re-add returns the
-   * ORIGINAL add; merge commits are included; no rename-follow.
+   * the newest-first modification walk above. Undefined ONLY when a
+   * glob/directory was passed to `getFileLatestModified`: the flat fields
+   * resolve via pathspec, but `created` resolves the EXACT path only, so it
+   * matches no tree entry. For an exact path it is always present. (A path with
+   * no ordinary-commit history yields no record at all -- the whole
+   * `FileModification` is `null`/absent -- not a present record with this field
+   * missing.) A delete-then-re-add returns the ORIGINAL add; merge commits are
+   * included; no rename-follow.
    */
   created?: CommitInfo
 }
