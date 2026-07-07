@@ -4,6 +4,12 @@
     {
       "automerge": true,
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"]
+    },
+    {
+      "description": "Void framework packages release in lockstep (void, @void/react, @void/md share one version) — bump them in a single PR so a partial update can't half-upgrade the toolchain or conflict with a full bump.",
+      "groupName": "void",
+      "matchPackageNames": ["void"],
+      "matchPackagePrefixes": ["@void/"]
     }
   ],
   "lockFileMaintenance": {
