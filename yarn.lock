@@ -126,7 +126,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@cloudflare/containers@npm:^0.3.0":
+"@cloudflare/containers@npm:^0.3.5":
   version: 0.3.7
   resolution: "@cloudflare/containers@npm:0.3.7"
   checksum: 10c0/2dae38e71c9f89a397de95c97e78230ee658ba43a9527589f6cff74c9dbe524d0474e67b90994cd39f839d53bbc4c98b1fb312233d8a4c70ac338a6bd2b01490
@@ -140,14 +140,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@cloudflare/sandbox@npm:^0.10.0":
-  version: 0.10.3
-  resolution: "@cloudflare/sandbox@npm:0.10.3"
+"@cloudflare/sandbox@npm:^0.12.3":
+  version: 0.12.3
+  resolution: "@cloudflare/sandbox@npm:0.12.3"
   dependencies:
-    "@cloudflare/containers": "npm:^0.3.0"
+    "@cloudflare/containers": "npm:^0.3.5"
     aws4fetch: "npm:^1.0.20"
     capnweb: "npm:^0.8.0"
-    hono: "npm:^4.12.18"
+    hono: "npm:^4.12.26"
   peerDependencies:
     "@openai/agents": ^0.3.3
     "@opencode-ai/sdk": ^1.1.40
@@ -159,7 +159,7 @@ __metadata:
       optional: true
     "@xterm/xterm":
       optional: true
-  checksum: 10c0/950c90d01f0b4e20c676dc0b26e6a2b29979ca1bd7c22781a130b3c68357d9ee1d8b45c2a8f6ec525a688a5da2dbec2db4610447b331b835ffdfb0b6b953c2d8
+  checksum: 10c0/c5100aacbf8f1d8f016a9050384dbea95c0b9ffc35fbf1e24fc5c613064f2165e147f2bade0d4a2e43ad911e2f6e5ff5baf7dce77cd9a5d2d9443ecaa55638bd
   languageName: node
   linkType: hard
 
@@ -176,7 +176,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@cloudflare/vite-plugin@npm:^1.36.3":
+"@cloudflare/vite-plugin@npm:^1.43.0":
   version: 1.43.0
   resolution: "@cloudflare/vite-plugin@npm:1.43.0"
   dependencies:
@@ -229,7 +229,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@cloudflare/workers-types@npm:^4.20260508.1":
+"@cloudflare/workers-types@npm:^4.20260702.1":
   version: 4.20260702.1
   resolution: "@cloudflare/workers-types@npm:4.20260702.1"
   checksum: 10c0/2dbd1d8d99285b49f90457321cc6f3668ac2fb89c9e24b36539e60f67925611078724093176bfbe06c8ab8d98eafd4902e4faa2e96a1378f96b14498c28ccdda
@@ -1815,14 +1815,14 @@ __metadata:
     "@types/node": "npm:^24.10.1"
     "@types/react": "npm:^19.0.0"
     "@types/react-dom": "npm:^19.0.0"
-    "@void/md": "npm:0.10.5"
-    "@void/react": "npm:0.10.5"
+    "@void/md": "npm:0.10.6"
+    "@void/react": "npm:0.10.6"
     react: "npm:^19.2.1"
     react-dom: "npm:^19.2.1"
     tailwindcss: "npm:4.3.2"
     typescript: "npm:^6.0.3"
     vite: "npm:^8.0.0"
-    void: "npm:0.10.5"
+    void: "npm:0.10.6"
   languageName: unknown
   linkType: soft
 
@@ -2524,7 +2524,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@shikijs/engine-javascript@npm:4.3.1, @shikijs/engine-javascript@npm:^4.0.2":
+"@shikijs/engine-javascript@npm:4.3.1, @shikijs/engine-javascript@npm:^4.3.1":
   version: 4.3.1
   resolution: "@shikijs/engine-javascript@npm:4.3.1"
   dependencies:
@@ -2574,7 +2574,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@shikijs/transformers@npm:^4.0.2":
+"@shikijs/transformers@npm:^4.3.1":
   version: 4.3.1
   resolution: "@shikijs/transformers@npm:4.3.1"
   dependencies:
@@ -2904,7 +2904,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@vitejs/plugin-react@npm:^6.0.1":
+"@vitejs/plugin-react@npm:^6.0.3":
   version: 6.0.3
   resolution: "@vitejs/plugin-react@npm:6.0.3"
   dependencies:
@@ -2922,40 +2922,40 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@void/md@npm:0.10.5":
-  version: 0.10.5
-  resolution: "@void/md@npm:0.10.5"
+"@void/md@npm:0.10.6":
+  version: 0.10.6
+  resolution: "@void/md@npm:0.10.6"
   dependencies:
-    "@shikijs/engine-javascript": "npm:^4.0.2"
-    "@shikijs/transformers": "npm:^4.0.2"
+    "@shikijs/engine-javascript": "npm:^4.3.1"
+    "@shikijs/transformers": "npm:^4.3.1"
     gray-matter: "npm:^4.0.3"
-    markdown-exit: "npm:1.0.0-beta.9"
+    markdown-exit: "npm:1.1.0-beta.2"
     markdown-it-anchor: "npm:^9.2.0"
-    markdown-it-attrs: "npm:^4.3.1"
+    markdown-it-attrs: "npm:^5.0.0"
     markdown-it-container: "npm:^4.0.0"
     markdown-it-emoji: "npm:^3.0.0"
     markdown-it-footnote: "npm:^4.0.0"
     pathe: "npm:^2.0.3"
-    shiki: "npm:^4.0.2"
-    tinyglobby: "npm:^0.2.16"
+    shiki: "npm:^4.3.1"
+    tinyglobby: "npm:^0.2.17"
   peerDependencies:
     vite: ^8.0.0
-    void: 0.10.5
-  checksum: 10c0/48f6db7c5d43d3cf5173754934052af21c4cda197c59c1c4bc02c4d1c1631c665c222552ea9a33c51b803321ab94d34ea7e2fe4b648b3f2dab4165cc9a8d1830
+    void: 0.10.6
+  checksum: 10c0/ca1ed74122cfe8ce047d85e36813d20bc36528d8d58e9809c2a24d2212bca9f39af502cdb96036dc13a4fa535f87c291b5c07272c27af2d798b320af0c8cb984
   languageName: node
   linkType: hard
 
-"@void/react@npm:0.10.5":
-  version: 0.10.5
-  resolution: "@void/react@npm:0.10.5"
+"@void/react@npm:0.10.6":
+  version: 0.10.6
+  resolution: "@void/react@npm:0.10.6"
   dependencies:
-    "@vitejs/plugin-react": "npm:^6.0.1"
+    "@vitejs/plugin-react": "npm:^6.0.3"
   peerDependencies:
     react: ^19.0.0
     react-dom: ^19.0.0
     vite: ^8.0.0
-    void: 0.10.5
-  checksum: 10c0/1dfb8b89cb1b4ec4910854123dd9c04dba46bbfcb5c9ac8b80fe033e85b01796f1a1688f9eb1bf5e79656e3eed9aea08051088b48a2675ed2ae7dd1303f0eee1
+    void: 0.10.6
+  checksum: 10c0/71d070657d3d68c4a21be5d17957df7d9497110a71d0a26a79c8e90af1d43603eda65742b1578242ce46788ea712f2f1c6cedfb6f5fb29c17172abf59cbc3c83
   languageName: node
   linkType: hard
 
@@ -3148,7 +3148,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"better-auth@npm:^1.6.9":
+"better-auth@npm:^1.6.23":
   version: 1.6.23
   resolution: "better-auth@npm:1.6.23"
   dependencies:
@@ -3249,7 +3249,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"better-sqlite3@npm:^12.9.0":
+"better-sqlite3@npm:^12.11.1":
   version: 12.11.1
   resolution: "better-sqlite3@npm:12.11.1"
   dependencies:
@@ -3830,7 +3830,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"es-module-lexer@npm:^2.1.0":
+"es-module-lexer@npm:^2.3.0":
   version: 2.3.0
   resolution: "es-module-lexer@npm:2.3.0"
   checksum: 10c0/14b28d854ec2aec285c481daeea268451e01ab2813f09f98eb1ac432521d8c3b38ce552a49f2e4af3ba188b74acbafe9e8d7271ce912bd98f1651b02bd06717e
@@ -4428,10 +4428,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.12.18":
-  version: 4.12.27
-  resolution: "hono@npm:4.12.27"
-  checksum: 10c0/1c62a52ccafde751656d065bbdacffbd421d3cfaedfbffefe80ecdb8ccf96c2209af732a74064cd33ac6d187a91ec32b1dc7ddde2416a53052fe7c0a94352a89
+"hono@npm:^4.12.26, hono@npm:^4.12.27":
+  version: 4.12.28
+  resolution: "hono@npm:4.12.28"
+  checksum: 10c0/ae40349d1e2bbc3cd1f08083644287dc8cbdb9ca6ed8f1bcd5cd896a72763a79dd38a4153ef9bfb4102ae8f2203c36fa9033863f03431f9f52d21f4d720dbce5
   languageName: node
   linkType: hard
 
@@ -4785,7 +4785,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"linkify-it@npm:^5.0.0":
+"linkify-it@npm:^5.0.1":
   version: 5.0.2
   resolution: "linkify-it@npm:5.0.2"
   dependencies:
@@ -4824,18 +4824,18 @@ __metadata:
   languageName: node
   linkType: hard
 
-"markdown-exit@npm:1.0.0-beta.9":
-  version: 1.0.0-beta.9
-  resolution: "markdown-exit@npm:1.0.0-beta.9"
+"markdown-exit@npm:1.1.0-beta.2":
+  version: 1.1.0-beta.2
+  resolution: "markdown-exit@npm:1.1.0-beta.2"
   dependencies:
     "@types/linkify-it": "npm:^5.0.0"
     "@types/mdurl": "npm:^2.0.0"
     entities: "npm:^7.0.0"
-    linkify-it: "npm:^5.0.0"
+    linkify-it: "npm:^5.0.1"
     mdurl: "npm:^2.0.0"
     punycode.js: "npm:^2.3.1"
     uc.micro: "npm:^2.1.0"
-  checksum: 10c0/e4e318bef655dced82892a232ad46aa6645d5cec4c9bfd1fbf29f6142940d61e07a67d530cfca559889a968b2417a9bdcc780a077f74ba5da5452d48527e5060
+  checksum: 10c0/360e507123c799a142308c8be4cfc70f2589bec07bef86542f5a5f2fcafdfadeb3f2a19a81c9e15f18edf3383ab81ab7cc83d4bcbec8d7d44a395731da6660d3
   languageName: node
   linkType: hard
 
@@ -4849,12 +4849,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"markdown-it-attrs@npm:^4.3.1":
-  version: 4.5.0
-  resolution: "markdown-it-attrs@npm:4.5.0"
+"markdown-it-attrs@npm:^5.0.0":
+  version: 5.0.0
+  resolution: "markdown-it-attrs@npm:5.0.0"
   peerDependencies:
     markdown-it: ">= 9.0.0"
-  checksum: 10c0/bac9c58c83802bba9b473fc77dcf78e8381edc5ae56fe51499936ad4b7c41d30893af13de6a876879ab9396fdf21db742ea2aee0215b9ea05b0a820f50013988
+  checksum: 10c0/2216eb16e8e34994eefcc4e40cfbf2efec5ac089db4ba328a20fce1fca9f6090ab52fa3715b5aeee514ae49665dd769682be8218cbb6ee9b97aab183b273861e
   languageName: node
   linkType: hard
 
@@ -5303,7 +5303,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"pg@npm:^8.20.0":
+"pg@npm:8.22.0":
   version: 8.22.0
   resolution: "pg@npm:8.22.0"
   dependencies:
@@ -5810,7 +5810,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"shiki@npm:^4.0.2":
+"shiki@npm:^4.3.1":
   version: 4.3.1
   resolution: "shiki@npm:4.3.1"
   dependencies:
@@ -6070,7 +6070,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tinyglobby@npm:^0.2.12, tinyglobby@npm:^0.2.16, tinyglobby@npm:^0.2.17":
+"tinyglobby@npm:^0.2.12, tinyglobby@npm:^0.2.17":
   version: 0.2.17
   resolution: "tinyglobby@npm:0.2.17"
   dependencies:
@@ -6351,31 +6351,31 @@ __metadata:
   languageName: node
   linkType: hard
 
-"void@npm:0.10.5":
-  version: 0.10.5
-  resolution: "void@npm:0.10.5"
+"void@npm:0.10.6":
+  version: 0.10.6
+  resolution: "void@npm:0.10.6"
   dependencies:
-    "@cloudflare/sandbox": "npm:^0.10.0"
-    "@cloudflare/vite-plugin": "npm:^1.36.3"
-    "@cloudflare/workers-types": "npm:^4.20260508.1"
+    "@cloudflare/sandbox": "npm:^0.12.3"
+    "@cloudflare/vite-plugin": "npm:^1.43.0"
+    "@cloudflare/workers-types": "npm:^4.20260702.1"
     "@hono/oauth-providers": "npm:^0.8.5"
     "@napi-rs/keyring": "npm:1.3.0"
-    better-auth: "npm:^1.6.9"
-    better-sqlite3: "npm:^12.9.0"
+    better-auth: "npm:^1.6.23"
+    better-sqlite3: "npm:^12.11.1"
     blake3-jit: "npm:^1.1.0"
     drizzle-arktype: "npm:^0.1.3"
     drizzle-kit: "npm:^0.31.10"
     drizzle-orm: "npm:^0.45.2"
     drizzle-valibot: "npm:^0.4.2"
     drizzle-zod: "npm:^0.8.3"
-    es-module-lexer: "npm:^2.1.0"
-    hono: "npm:^4.12.18"
+    es-module-lexer: "npm:^2.3.0"
+    hono: "npm:^4.12.27"
     ignore: "npm:^7.0.5"
     jsonc-parser: "npm:3.3.1"
-    pg: "npm:^8.20.0"
-    wrangler: "npm:^4.90.0"
+    pg: "npm:8.22.0"
+    wrangler: "npm:^4.107.0"
   peerDependencies:
-    "@void/md": 0.10.5
+    "@void/md": 0.10.6
     arktype: ">=2.0.0"
     valibot: ">=1.0.0-beta.7"
     vite: ^8.0.0
@@ -6391,7 +6391,7 @@ __metadata:
       optional: true
   bin:
     void: dist/cli/cli.mjs
-  checksum: 10c0/5f8c1f9ac824f908151ae5996fc06bd3cb815607e7293ce9ad49a3445df5390fc84ecc79a1acfa77c0284777eaea1b3836328ebc074493ac1a5121d07c3aa6ab
+  checksum: 10c0/60925eaccba5225e8babd9603b621c44bdf07fb858a2a6f9b1a0b9d499e0e00648d8189d7ef763dc55ed84d042085568a133fe0315d4677e3ac70555a5e64f71
   languageName: node
   linkType: hard
 
@@ -6456,7 +6456,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"wrangler@npm:4.107.0, wrangler@npm:^4.90.0":
+"wrangler@npm:4.107.0, wrangler@npm:^4.107.0":
   version: 4.107.0
   resolution: "wrangler@npm:4.107.0"
   dependencies:

@@ -15,11 +15,11 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/space-grotesk": "^5.2.10",
-    "@void/md": "0.10.5",
-    "@void/react": "0.10.5",
+    "@void/md": "0.10.6",
+    "@void/react": "0.10.6",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
-    "void": "0.10.5"
+    "void": "0.10.6"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",
