@@ -2060,8 +2060,8 @@ impl Repository {
   /// touched only by merges; never throws for the missing case). Equals
   /// `FileModification.committerTime` from `getFileLatestModified` EXCEPT for a
   /// file present only via merges: this method keeps the raw merge-skipping walk
-  /// and returns `null`, whereas `getFileLatestModified` falls back to the
-  /// creating merge commit. Only real errors throw (unborn/empty HEAD, corrupt
+  /// and returns `null`, whereas `getFileLatestModified` falls back to the LATEST
+  /// merge that changed the file. Only real errors throw (unborn/empty HEAD, corrupt
   /// object, out-of-range timestamp). For milliseconds-since-epoch, use
   /// `getFileLatestModifiedDate`.
   pub fn get_file_last_modified_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
@@ -2113,11 +2113,14 @@ impl Repository {
   ///
   /// A path present at HEAD that ONLY merge commits ever touched (introduced or
   /// last changed by an "evil merge", so the merge-skipping walk above finds
-  /// nothing) FALLS BACK to its creating (merge) commit for the WHOLE record --
-  /// its flat fields ARE that commit and `commitId === created.commitId`. This
-  /// fallback fires ONLY for a path still PRESENT (a blob) at HEAD; `null` is
-  /// returned for a path ABSENT at HEAD -- never added, OR deleted (even by a
-  /// merge).
+  /// nothing) FALLS BACK to a record whose flat fields are the LATEST merge that
+  /// genuinely changed the path, while `created` is the OLDEST (creating) merge
+  /// -- so `commitId === created.commitId` ONLY when a single merge both added
+  /// and last-changed the file; a file added by one evil merge and later changed
+  /// by another has `commitId` = the later merge and `created.commitId` = the
+  /// earlier one. This fallback fires ONLY for a path still PRESENT (a blob) at
+  /// HEAD; `null` is returned for a path ABSENT at HEAD -- never added, OR
+  /// deleted (even by a merge).
   ///
   /// The result also carries `created`: the commit that FIRST added the file,
   /// from a SEPARATE oldest-first ancestry walk resolving the EXACT
@@ -2173,11 +2176,15 @@ impl Repository {
   /// skipped when finding the last modification; only real errors throw.
   ///
   /// A path present at HEAD that ONLY merge commits ever touched (an "evil
-  /// merge", which the merge-skipping walk above misses) FALLS BACK to its
-  /// creating (merge) commit for the WHOLE record -- its flat fields ARE that
-  /// commit and `commitId === created.commitId`. This fallback fires ONLY for a
-  /// path still PRESENT (a blob) at HEAD; a key is `null` for a path ABSENT at
-  /// HEAD -- never added, OR deleted (even by a merge).
+  /// merge", which the merge-skipping walk above misses) FALLS BACK to a record
+  /// whose flat fields are the LATEST merge that genuinely changed the path,
+  /// while `created` is the OLDEST (creating) merge -- so `commitId ===
+  /// created.commitId` ONLY when a single merge both added and last-changed the
+  /// file (a file added by one evil merge and later changed by another has
+  /// `commitId` = the later merge and `created.commitId` = the earlier one).
+  /// This fallback fires ONLY for a path still PRESENT (a blob) at HEAD; a key is
+  /// `null` for a path ABSENT at HEAD -- never added, OR deleted (even by a
+  /// merge).
   ///
   /// Each present record also carries `created`: the commit that FIRST added
   /// that path, from a SEPARATE oldest-first ancestry walk over the same EXACT

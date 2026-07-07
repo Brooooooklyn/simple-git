@@ -1407,8 +1407,8 @@ export declare class Repository {
    * touched only by merges; never throws for the missing case). Equals
    * `FileModification.committerTime` from `getFileLatestModified` EXCEPT for a
    * file present only via merges: this method keeps the raw merge-skipping walk
-   * and returns `null`, whereas `getFileLatestModified` falls back to the
-   * creating merge commit. Only real errors throw (unborn/empty HEAD, corrupt
+   * and returns `null`, whereas `getFileLatestModified` falls back to the LATEST
+   * merge that changed the file. Only real errors throw (unborn/empty HEAD, corrupt
    * object, out-of-range timestamp). For milliseconds-since-epoch, use
    * `getFileLatestModifiedDate`.
    */
@@ -1439,11 +1439,14 @@ export declare class Repository {
    *
    * A path present at HEAD that ONLY merge commits ever touched (introduced or
    * last changed by an "evil merge", so the merge-skipping walk above finds
-   * nothing) FALLS BACK to its creating (merge) commit for the WHOLE record --
-   * its flat fields ARE that commit and `commitId === created.commitId`. This
-   * fallback fires ONLY for a path still PRESENT (a blob) at HEAD; `null` is
-   * returned for a path ABSENT at HEAD -- never added, OR deleted (even by a
-   * merge).
+   * nothing) FALLS BACK to a record whose flat fields are the LATEST merge that
+   * genuinely changed the path, while `created` is the OLDEST (creating) merge
+   * -- so `commitId === created.commitId` ONLY when a single merge both added
+   * and last-changed the file; a file added by one evil merge and later changed
+   * by another has `commitId` = the later merge and `created.commitId` = the
+   * earlier one. This fallback fires ONLY for a path still PRESENT (a blob) at
+   * HEAD; `null` is returned for a path ABSENT at HEAD -- never added, OR
+   * deleted (even by a merge).
    *
    * The result also carries `created`: the commit that FIRST added the file,
    * from a SEPARATE oldest-first ancestry walk resolving the EXACT
@@ -1480,11 +1483,15 @@ export declare class Repository {
    * skipped when finding the last modification; only real errors throw.
    *
    * A path present at HEAD that ONLY merge commits ever touched (an "evil
-   * merge", which the merge-skipping walk above misses) FALLS BACK to its
-   * creating (merge) commit for the WHOLE record -- its flat fields ARE that
-   * commit and `commitId === created.commitId`. This fallback fires ONLY for a
-   * path still PRESENT (a blob) at HEAD; a key is `null` for a path ABSENT at
-   * HEAD -- never added, OR deleted (even by a merge).
+   * merge", which the merge-skipping walk above misses) FALLS BACK to a record
+   * whose flat fields are the LATEST merge that genuinely changed the path,
+   * while `created` is the OLDEST (creating) merge -- so `commitId ===
+   * created.commitId` ONLY when a single merge both added and last-changed the
+   * file (a file added by one evil merge and later changed by another has
+   * `commitId` = the later merge and `created.commitId` = the earlier one).
+   * This fallback fires ONLY for a path still PRESENT (a blob) at HEAD; a key is
+   * `null` for a path ABSENT at HEAD -- never added, OR deleted (even by a
+   * merge).
    *
    * Each present record also carries `created`: the commit that FIRST added
    * that path, from a SEPARATE oldest-first ancestry walk over the same EXACT
@@ -2145,10 +2152,10 @@ export interface FileModification {
   committerEmail?: string
   /**
    * Committer time, as a `Date`. Equal to `getFileLastModifiedDate` EXCEPT for a
-   * file present only via merge commits: this record falls back to the creating
-   * merge commit (see `created`), whereas the standalone `getFileLastModifiedDate`
-   * keeps the raw merge-skipping walk and returns `null` for it (and
-   * `getFileLatestModifiedDate` throws).
+   * file present only via merge commits: this record falls back to the LATEST
+   * merge that changed the file (see `created`), whereas the standalone
+   * `getFileLastModifiedDate` keeps the raw merge-skipping walk and returns
+   * `null` for it (and `getFileLatestModifiedDate` throws).
    */
   committerTime: Date
   /**
@@ -2166,10 +2173,12 @@ export interface FileModification {
    * in history ever added yields no record at all -- the whole `FileModification`
    * is `null`/absent -- not a present record with this field missing. A path
    * present at HEAD that ONLY merge commits ever touched, on the other hand,
-   * yields a record built from its creating merge commit, with `commit_id ==
-   * created.commit_id`; this merge-only fallback fires ONLY for a path still
-   * PRESENT at HEAD, so a merge-only path ABSENT at HEAD -- e.g. deleted by a
-   * merge -- yields no record at all.) A delete-then-re-add returns the ORIGINAL add; merge
+   * yields a record whose flat fields are the LATEST merge that changed the path
+   * while `created` is the OLDEST (creating) merge -- so `commit_id ==
+   * created.commit_id` only when a single merge both added and last-changed the
+   * file; this merge-only fallback fires ONLY for a path still PRESENT at HEAD,
+   * so a merge-only path ABSENT at HEAD -- e.g. deleted by a merge -- yields no
+   * record at all.) A delete-then-re-add returns the ORIGINAL add; merge
    * commits are included; no rename-follow.
    */
   created?: CommitInfo

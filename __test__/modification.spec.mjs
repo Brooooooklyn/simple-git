@@ -224,6 +224,89 @@ function makeRepoWithEvilMergeThenDelete() {
   };
 }
 
+// Build a hermetic throwaway repo where `evil.txt` is BOTH added AND later
+// changed ONLY via merge commits, so it is a "double evil merge": present at HEAD
+// with the LATEST content, but no non-merge commit ever touched it. History:
+//   c0 root                -> root.txt
+//   c1 on `side`           -> on-branch.txt (a normal 1-parent add)
+//   c2 on `main`           -> main2.txt     (so the add-merge is non-fast-forward)
+//   M1 evil ADD merge      -> merge `side` --no-commit --no-ff, write NEW evil.txt
+//                             = "v1", add + commit -> evil.txt="v1" is in the merge
+//                             tree only (neither parent has it).
+//   c4 on `side2` (from M1)-> side2.txt      (side2 tip inherits evil.txt="v1")
+//   c5 on `main`           -> main3.txt      (main tip inherits evil.txt="v1")
+//   M2 evil CHANGE merge   -> merge `side2` --no-commit --no-ff (BOTH parents carry
+//                             evil.txt="v1"), overwrite evil.txt="v2", add + commit
+//                             -> evil.txt is CHANGED to "v2" ONLY via this merge.
+// So `get_file_modification` finds nothing (merges skipped) while HEAD content is
+// "v2" from M2. The flat record must be M2 (the LATEST change), and `created` must
+// be M1 (the creation) -- distinct commits. Returns `{ root, repo, git,
+// addMergeCommit, changeMergeCommit }`. Caller removes `root`.
+function makeRepoWithDoubleEvilMerge() {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-modification-double-evil-"));
+  const work = join(root, "work");
+  execSync(`git init -q -b main "${work}"`);
+  const run = (args) => execSync(`git ${args}`, { cwd: work });
+  const capture = (args) =>
+    execSync(`git ${args}`, { cwd: work }).toString().trim();
+  run("config user.name tester");
+  run("config user.email tester@example.com");
+  run("config commit.gpgsign false");
+  run("config core.autocrlf false");
+
+  // c0 — root commit.
+  writeFileSync(join(work, "root.txt"), "root\n");
+  run("add -A");
+  run('commit -q -m "c0 root"');
+
+  // c1 — a normal 1-parent add of on-branch.txt on branch `side`.
+  run("checkout -q -b side");
+  writeFileSync(join(work, "on-branch.txt"), "on branch\n");
+  run("add on-branch.txt");
+  run('commit -q -m "c1 add on-branch (1-parent)"');
+
+  // c2 — main advances so `--no-ff` produces a genuine merge commit.
+  run("checkout -q main");
+  writeFileSync(join(work, "main2.txt"), "main two\n");
+  run("add main2.txt");
+  run('commit -q -m "c2 main advances"');
+
+  // M1 — evil ADD merge: evil.txt="v1" enters inside the merge commit's tree.
+  run("merge --no-commit --no-ff side");
+  writeFileSync(join(work, "evil.txt"), "v1\n");
+  run("add evil.txt");
+  run('commit -q -m "M1 evil add merge"');
+  const addMergeCommit = capture("rev-parse HEAD");
+
+  // c4 — side2 branches from M1 (so its tip carries evil.txt="v1").
+  run("checkout -q -b side2");
+  writeFileSync(join(work, "side2.txt"), "side two\n");
+  run("add side2.txt");
+  run('commit -q -m "c4 side2 advances"');
+
+  // c5 — main advances again so the change-merge is a genuine --no-ff merge.
+  run("checkout -q main");
+  writeFileSync(join(work, "main3.txt"), "main three\n");
+  run("add main3.txt");
+  run('commit -q -m "c5 main advances again"');
+
+  // M2 — evil CHANGE merge: both parents carry evil.txt="v1", but overwrite to
+  // "v2" before the commit, so evil.txt is CHANGED to "v2" ONLY via this merge.
+  run("merge --no-commit --no-ff side2");
+  writeFileSync(join(work, "evil.txt"), "v2\n");
+  run("add evil.txt");
+  run('commit -q -m "M2 evil change merge"');
+  const changeMergeCommit = capture("rev-parse HEAD");
+
+  return {
+    root,
+    repo: new Repository(work),
+    git: capture,
+    addMergeCommit,
+    changeMergeCommit,
+  };
+}
+
 test.beforeEach((t) => {
   t.context.repo = new Repository(workDir);
 });
@@ -839,6 +922,51 @@ test("evil-merge fallback stays null for a file deleted by a later merge", (t) =
 
     // Bulk: same gate on the None-slot fallback.
     t.is(repo.getFilesLatestModified(["evil.txt"])["evil.txt"], null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// -------- double-evil-merge: flat = LATEST change, created = OLDEST (the P2) ---
+// A file touched ONLY by merge commits, where ONE evil merge ADDS it (M1="v1")
+// and a LATER, different evil merge CHANGES it (M2="v2"), still present at HEAD.
+// The merge-skipping modification walk finds nothing, so the fallback builds the
+// whole record. Pre-fix it built EVERYTHING from the CREATION (M1), so `commitId`
+// wrongly pointed at the original add rather than the merge that last changed the
+// file. Post-fix the FLAT fields are M2 (the latest genuine change) while
+// `created` stays M1 (the creation) -- distinct commits.
+
+// THE P2 bug: flat fields must be M2 (latest change), created must be M1
+// (creation), and the two must differ. Pre-fix commitId was M1 (== created).
+test("getFileLatestModified flat fields are the LATEST merge, created is the creating merge", (t) => {
+  const { root, repo, git, addMergeCommit, changeMergeCommit } =
+    makeRepoWithDoubleEvilMerge();
+  try {
+    t.not(addMergeCommit, changeMergeCommit); // sanity: two distinct merges
+    t.is(git("show HEAD:evil.txt"), "v2"); // HEAD content is M2's "v2"
+
+    const mod = repo.getFileLatestModified("evil.txt");
+    t.truthy(mod);
+    t.is(mod.commitId, changeMergeCommit); // flat = the LATEST change (M2), NOT M1
+    t.truthy(mod.created);
+    t.is(mod.created.commitId, addMergeCommit); // created = the creation (M1)
+    t.not(mod.commitId, mod.created.commitId); // genuinely distinct
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Bulk mirrors single-file: the bulk fallback builds the identical split record.
+test("getFilesLatestModified matches single-file for a double-evil-merge file", (t) => {
+  const { root, repo, addMergeCommit, changeMergeCommit } =
+    makeRepoWithDoubleEvilMerge();
+  try {
+    const single = repo.getFileLatestModified("evil.txt");
+    const bulk = repo.getFilesLatestModified(["evil.txt"])["evil.txt"];
+    t.truthy(bulk);
+    t.is(bulk.commitId, changeMergeCommit); // flat = latest change (M2)
+    t.is(bulk.created.commitId, addMergeCommit); // created = creation (M1)
+    t.deepEqual(bulk, single); // whole record (flat fields + created) matches
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
