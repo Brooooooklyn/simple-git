@@ -5,6 +5,29 @@ use chrono::{DateTime, Utc};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+/// A single commit's identity/time metadata, reused for the commit that CREATED
+/// a file (`FileModification::created`). Same 8 fields as `FileModification`'s
+/// commit metadata. All times are `Date`s (UTC; timezone offset ignored).
+#[napi(object)]
+pub struct CommitInfo {
+  /// 40-char lowercase hex OID of the commit that first added the file.
+  pub commit_id: String,
+  /// Commit summary (first line). Undefined if absent or not valid UTF-8.
+  pub summary: Option<String>,
+  /// Author name. Undefined if not valid UTF-8.
+  pub author_name: Option<String>,
+  /// Author email. Undefined if not valid UTF-8.
+  pub author_email: Option<String>,
+  /// Author time, as a `Date`.
+  pub author_time: DateTime<Utc>,
+  /// Committer name. Undefined if not valid UTF-8.
+  pub committer_name: Option<String>,
+  /// Committer email. Undefined if not valid UTF-8.
+  pub committer_email: Option<String>,
+  /// Committer time, as a `Date`.
+  pub committer_time: DateTime<Utc>,
+}
+
 /// Last commit that modified a file, with author/committer identity.
 /// All times are `Date`s (UTC; timezone offset ignored).
 #[napi(object)]
@@ -23,8 +46,34 @@ pub struct FileModification {
   pub committer_name: Option<String>,
   /// Committer email. Undefined if not valid UTF-8.
   pub committer_email: Option<String>,
-  /// Committer time, as a `Date`. Identical to `getFileLastModifiedDate`.
+  /// Committer time, as a `Date`. Equal to `getFileLastModifiedDate` EXCEPT for a
+  /// file present only via merge commits: this record falls back to the LATEST
+  /// merge that changed the file (see `created`), whereas the standalone
+  /// `getFileLastModifiedDate` keeps the raw merge-skipping walk and returns
+  /// `null` for it (and `getFileLatestModifiedDate` throws).
   pub committer_time: DateTime<Utc>,
+  /// The commit that FIRST added this file (its creation), resolved by an
+  /// oldest-first ancestry walk over the EXACT repo-root-relative path -- SEPARATE
+  /// from the newest-first modification walk above. `created` is a FILE's
+  /// creation, so whether it resolves is decided by the queried path's ENTRY KIND
+  /// AT HEAD: Undefined when a glob was passed, or when the path is a DIRECTORY (a
+  /// tree entry) or a submodule (a gitlink/Commit entry) AT HEAD -- even if a FILE
+  /// of that name existed earlier in history -- since no such entry is a file (the
+  /// flat fields may still resolve via pathspec in those cases). A path that is a
+  /// blob at HEAD, AND a file deleted by an ordinary (non-merge) commit (absent
+  /// at HEAD but still yielding a record, a blob earlier in history), BOTH still
+  /// report their ORIGINAL creation. (A path that no commit
+  /// in history ever added yields no record at all -- the whole `FileModification`
+  /// is `null`/absent -- not a present record with this field missing. A path
+  /// present at HEAD that ONLY merge commits ever touched, on the other hand,
+  /// yields a record whose flat fields are the LATEST merge that changed the path
+  /// while `created` is the OLDEST (creating) merge -- so `commit_id ==
+  /// created.commit_id` only when a single merge both added and last-changed the
+  /// file; this merge-only fallback fires ONLY for a path still PRESENT at HEAD,
+  /// so a merge-only path ABSENT at HEAD -- e.g. deleted by a merge -- yields no
+  /// record at all.) A delete-then-re-add returns the ORIGINAL add; merge
+  /// commits are included; no rename-follow.
+  pub created: Option<CommitInfo>,
 }
 
 /// Convert git2 epoch seconds into a UTC `Date`. Errors (as a `git2::Error`, to
@@ -35,15 +84,18 @@ pub(crate) fn time_to_date(seconds: i64) -> std::result::Result<DateTime<Utc>, g
     .ok_or_else(|| git2::Error::from_str(&format!("Invalid commit timestamp: {seconds}")))
 }
 
-pub(crate) fn build_modification(
+/// Extract a commit's identity/time metadata once, shared by both the
+/// modification record (`build_modification`) and the creation record
+/// (`get_file_creation`). `committer_time` mirrors the legacy value
+/// (repo.rs get_file_modified_date): `commit.time()`, NOT `committer.when()`.
+pub(crate) fn build_commit_info(
   commit: &git2::Commit,
-) -> std::result::Result<FileModification, git2::Error> {
+) -> std::result::Result<CommitInfo, git2::Error> {
   let author = commit.author();
   let committer = commit.committer();
-  // Mirrors the legacy value (repo.rs get_file_modified_date): commit.time(), NOT committer.when().
   let committer_time = time_to_date(commit.time().seconds())?;
   let author_time = time_to_date(author.when().seconds())?;
-  Ok(FileModification {
+  Ok(CommitInfo {
     commit_id: commit.id().to_string(),
     summary: commit.summary().ok().flatten().map(|s| s.to_owned()),
     author_name: author.name().ok().map(|s| s.to_owned()),
@@ -52,6 +104,25 @@ pub(crate) fn build_modification(
     committer_name: committer.name().ok().map(|s| s.to_owned()),
     committer_email: committer.email().ok().map(|s| s.to_owned()),
     committer_time,
+  })
+}
+
+pub(crate) fn build_modification(
+  commit: &git2::Commit,
+) -> std::result::Result<FileModification, git2::Error> {
+  // Reuse the shared 8-field extraction; `created` is merged in later by
+  // get_file_modification_with_created (None until then).
+  let info = build_commit_info(commit)?;
+  Ok(FileModification {
+    commit_id: info.commit_id,
+    summary: info.summary,
+    author_name: info.author_name,
+    author_email: info.author_email,
+    author_time: info.author_time,
+    committer_name: info.committer_name,
+    committer_email: info.committer_email,
+    committer_time: info.committer_time,
+    created: None,
   })
 }
 
@@ -110,6 +181,214 @@ pub(crate) fn get_file_modification(
     }
   }
   Ok(None)
+}
+
+/// The oldest commit whose tree contains `filepath` as a BLOB, walking
+/// oldest-first (`Sort::TOPOLOGICAL | Sort::REVERSE`; NO `Sort::TIME`) over the
+/// EXACT repo-root-relative `path` via `tree.get_path` -- NOT pathspec/glob and
+/// NOT parent-diffing, so merge commits are included on equal footing -- and
+/// returning on the first (oldest) blob hit; a delete-then-re-add therefore
+/// returns the ORIGINAL add. `Ok(None)` when no commit in history ever contained
+/// the path as a blob. Does NOT consult HEAD -- callers apply their own HEAD
+/// gate. Mirrors the modification walk's error-propagation: revwalk iterator +
+/// object-read failures propagate, and only a genuine `NotFound` (path absent
+/// from a tree) is a non-error skip.
+fn oldest_blob_commit(
+  repo: &git2::Repository,
+  filepath: &str,
+) -> std::result::Result<Option<CommitInfo>, git2::Error> {
+  let path = PathBuf::from(filepath);
+  let mut rev_walk = repo.revwalk()?;
+  rev_walk.push_head()?;
+  // Oldest-first: the first commit whose tree contains the path is the one that
+  // first added it, so we can early-exit on that hit.
+  rev_walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)?;
+  for oid in rev_walk.by_ref() {
+    // Propagate revwalk iterator errors instead of silently skipping them.
+    let oid = oid?;
+    // A real object-read failure is an error, not a "no match" -- propagate it.
+    let commit = repo.find_commit(oid)?;
+    let tree = commit.tree()?;
+    // NotFound == path absent from this commit's tree (no match); any other
+    // lookup error is real and must propagate.
+    match tree.get_path(&path) {
+      // Only an exact FILE (blob) is a creation. A directory (tree) or submodule
+      // (gitlink/Commit) entry is NOT a file -> keep walking (no creation match).
+      Ok(entry) if entry.kind() == Some(git2::ObjectType::Blob) => {
+        return Ok(Some(build_commit_info(&commit)?));
+      }
+      Ok(_) => {}
+      Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+      Err(e) => return Err(e),
+    }
+  }
+  Ok(None)
+}
+
+/// `(blob OID, git filemode)` of `path` in `tree` when the entry is a blob (a
+/// regular file, an executable, or a symlink -- all Blob-kind objects), else
+/// `None`. The mode is included so a mode-only change (e.g. `100644 -> 100755`)
+/// counts as a modification, matching the libgit2-diff semantics of the
+/// non-merge walk. A real lookup error propagates; `NotFound` (path absent) is
+/// `None`.
+fn blob_entry_at(
+  tree: &git2::Tree,
+  path: &Path,
+) -> std::result::Result<Option<(git2::Oid, i32)>, git2::Error> {
+  match tree.get_path(path) {
+    Ok(entry) if entry.kind() == Some(git2::ObjectType::Blob) => {
+      Ok(Some((entry.id(), entry.filemode())))
+    }
+    Ok(_) => Ok(None),
+    Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+    Err(e) => Err(e),
+  }
+}
+
+/// The NEWEST commit that genuinely changed `filepath`, INCLUDING merge commits
+/// (the primary modification walk skips merges; this does not). Walks
+/// newest-first; a commit "changed" the path if its blob tree-entry identity
+/// there -- the `(blob OID, filemode)` pair -- differs from that pair at the path
+/// in EVERY parent (so a root add, a normal add, an evil-merge content change, OR
+/// a merge that ONLY flips the mode `100644 -> 100755` all count, but a commit
+/// that merely inherits BOTH the blob and the mode from a parent does not). The
+/// mode is part of the comparison so a mode-only change registers, matching the
+/// libgit2-diff semantics of the non-merge walk. Returns the first (newest) such
+/// commit; `Ok(None)` only if the path is a blob in no reachable commit. Used to
+/// build the flat fields of the merge-only fallback record, so they reflect the
+/// LATEST change, not the creation. Mirrors the modification walk's error
+/// propagation.
+fn latest_blob_change_including_merges(
+  repo: &git2::Repository,
+  filepath: &str,
+) -> std::result::Result<Option<CommitInfo>, git2::Error> {
+  let path = PathBuf::from(filepath);
+  let mut rev_walk = repo.revwalk()?;
+  rev_walk.push_head()?;
+  // Same sort as get_file_modification (newest-first); merges are NOT filtered.
+  rev_walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
+  for oid in rev_walk.by_ref() {
+    let oid = oid?;
+    let commit = repo.find_commit(oid)?;
+    let cur = match blob_entry_at(&commit.tree()?, &path)? {
+      Some(entry) => entry, // path is a blob here: (oid, mode)
+      None => continue,     // path absent / not a blob at this commit
+    };
+    // Genuine change iff no parent already has this exact (oid, mode) at the
+    // path -- so a mode-only flip (same blob OID) still counts as a change.
+    let mut inherited = false;
+    for i in 0..commit.parent_count() {
+      if blob_entry_at(&commit.parent(i)?.tree()?, &path)? == Some(cur) {
+        inherited = true;
+        break;
+      }
+    }
+    if !inherited {
+      return Ok(Some(build_commit_info(&commit)?));
+    }
+  }
+  Ok(None)
+}
+
+/// Single-file creation walk: find the OLDEST commit that first added
+/// `filepath` (its creation commit). A HEAD-kind gate runs FIRST: `created` is a
+/// FILE's creation, so a path that resolves to a TREE (directory) or GITLINK
+/// (submodule) AT HEAD yields `None` even if a FILE of that name existed earlier
+/// in history. A path ABSENT at HEAD (a deleted file) is NOT gated -- its
+/// original blob creation still resolves. Once the gate passes, the oldest blob
+/// commit under the exact path (`oldest_blob_commit`) IS the creation, so a
+/// delete-then-re-add returns the ORIGINAL add and merge commits are included.
+pub(crate) fn get_file_creation(
+  repo: &git2::Repository,
+  filepath: &str,
+) -> std::result::Result<Option<CommitInfo>, git2::Error> {
+  let path = PathBuf::from(filepath);
+  // HEAD-kind gate: peel HEAD to its tree and inspect the queried path's entry.
+  // `repo.head()` errors on an unborn/empty HEAD, consistent with `push_head()`.
+  let head_tree = repo.head()?.peel_to_commit()?.tree()?;
+  match head_tree.get_path(&path) {
+    // A directory (tree) or submodule (gitlink) at HEAD is not a file -> no
+    // creation, regardless of what history holds under that name.
+    Ok(entry) if entry.kind() != Some(git2::ObjectType::Blob) => return Ok(None),
+    // A real lookup error propagates; NotFound (path absent at HEAD = a deleted
+    // file) is fine -- its original blob creation is still meaningful, so proceed.
+    Err(e) if e.code() != git2::ErrorCode::NotFound => return Err(e),
+    _ => {}
+  }
+  // Gate passed (blob at HEAD, or absent/NotFound = a deleted file): the oldest
+  // blob commit under this exact path IS the creation. The walk pushes HEAD.
+  oldest_blob_commit(repo, filepath)
+}
+
+/// Build a `FileModification` whose flat fields AND `created` are `c`, used as
+/// the BASE of the merge-only fallback for a path present at HEAD that no
+/// non-merge commit ever modified (introduced/changed only by merge commits).
+/// The caller passes the LATEST merge that changed the path (so the flat fields
+/// reflect the last modification) and then OVERRIDES `created` with the OLDEST
+/// (creating) commit; the two coincide only when a single merge both added and
+/// last-changed the file.
+fn file_modification_from_commit_info(c: CommitInfo) -> FileModification {
+  FileModification {
+    commit_id: c.commit_id.clone(),
+    summary: c.summary.clone(),
+    author_name: c.author_name.clone(),
+    author_email: c.author_email.clone(),
+    author_time: c.author_time,
+    committer_name: c.committer_name.clone(),
+    committer_email: c.committer_email.clone(),
+    committer_time: c.committer_time,
+    created: Some(c),
+  }
+}
+
+/// Single-file modification lookup enriched with the file's `created` commit.
+/// Runs the newest-first modification walk (`get_file_modification`); when that
+/// yields a record (`Some`), the SEPARATE oldest-first creation walk
+/// (`get_file_creation`) is merged into `FileModification::created`. When the
+/// modification walk finds NOTHING (`None`) -- no NON-MERGE commit ever touched
+/// the path -- the fallback fires for a path still present (a blob) at HEAD,
+/// introduced/last-changed only by MERGE commits (which the modification walk
+/// skips): its FLAT fields come from `latest_blob_change_including_merges` (the
+/// LATEST merge that genuinely changed the path), while `created` comes from
+/// `oldest_blob_commit` (the OLDEST, creating merge). These coincide -- so
+/// `commit_id == created.commit_id` -- only when a single merge both added and
+/// last-changed the file; a file added by one merge and later changed by another
+/// has `commit_id` = the later merge and `created.commit_id` = the earlier one.
+/// A path that no commit ever added stays `None`. Shared by the sync method and
+/// the async task so both produce identical results.
+pub(crate) fn get_file_modification_with_created(
+  repo: &git2::Repository,
+  filepath: &str,
+) -> std::result::Result<Option<FileModification>, git2::Error> {
+  match get_file_modification(repo, filepath)? {
+    Some(mut fm) => {
+      fm.created = get_file_creation(repo, filepath)?;
+      Ok(Some(fm))
+    }
+    // No non-merge commit modified the path. Fall back ONLY when the file is
+    // still PRESENT (a blob) at HEAD -- a merge-only path that still exists. ONE
+    // HEAD peel, reused for the blob gate; both fallback walks push HEAD
+    // themselves. The FLAT fields are the LATEST merge that genuinely changed the
+    // path (`latest_blob_change_including_merges`); `created` is OVERRIDDEN with
+    // the OLDEST creating merge (`oldest_blob_commit`). A path ABSENT at HEAD
+    // (e.g. deleted, even by a merge) has no current file -> stays null, and a
+    // never-committed path fails both walks and also stays null.
+    None => {
+      let head_tree = repo.head()?.peel_to_commit()?.tree()?;
+      if blob_entry_at(&head_tree, Path::new(filepath))?.is_some() {
+        match latest_blob_change_including_merges(repo, filepath)? {
+          Some(latest) => {
+            let mut fm = file_modification_from_commit_info(latest); // flat = latest change
+            fm.created = oldest_blob_commit(repo, filepath)?; // created = oldest creation
+            Ok(Some(fm))
+          }
+          None => Ok(None),
+        }
+      } else {
+        Ok(None)
+      }
+    }
+  }
 }
 
 /// Bulk walk: resolve the last commit that modified each of `filepaths` in a
@@ -197,6 +476,154 @@ pub(crate) fn get_files_modification(
     }
   }
   Ok(result)
+}
+
+/// Bulk creation walk: resolve the OLDEST commit that first added each of
+/// `filepaths` in a SINGLE oldest-first ancestry walk. Mirrors the single-file
+/// `get_file_creation` per-commit logic (EXACT `tree.get_path`, merges included,
+/// first/oldest containing commit wins) but resolves many paths at once, reusing
+/// the `unresolved`-set + early-exit structure of `get_files_modification`.
+/// Inputs must be repo-root-relative FILE paths; matching is exact-string, NOT
+/// glob/pathspec. Every input path is a key; a path never present in any tree
+/// maps to `None`. Empty input early-returns before touching the revwalk.
+///
+/// A HEAD-kind gate runs FIRST (bulk form of `get_file_creation`'s): any path
+/// that is a TREE (directory) or GITLINK (submodule) AT HEAD is dropped from
+/// `unresolved` and stays `None` -- it is not a file, so it has no creation. A
+/// path ABSENT at HEAD (a deleted file) or a blob at HEAD stays in `unresolved`.
+pub(crate) fn get_files_creation(
+  repo: &git2::Repository,
+  filepaths: &[String],
+) -> std::result::Result<HashMap<String, Option<CommitInfo>>, git2::Error> {
+  let mut result: HashMap<String, Option<CommitInfo>> =
+    filepaths.iter().map(|p| (p.clone(), None)).collect();
+  let mut unresolved: HashSet<String> = filepaths.iter().cloned().collect();
+
+  if unresolved.is_empty() {
+    return Ok(result);
+  }
+
+  // HEAD-kind gate: peel HEAD once and drop any path that is a TREE (directory)
+  // or GITLINK (submodule) AT HEAD -- such a path is not a file, so it has no
+  // creation and stays `None`. A path ABSENT at HEAD (NotFound == a deleted file)
+  // or a blob at HEAD stays in `unresolved` for the oldest-blob reverse walk. A
+  // plain loop (not `retain`) so a non-`NotFound` lookup error can propagate.
+  let head_tree = repo.head()?.peel_to_commit()?.tree()?;
+  for p in unresolved.clone() {
+    match head_tree.get_path(Path::new(&p)) {
+      Ok(entry) if entry.kind() != Some(git2::ObjectType::Blob) => {
+        unresolved.remove(&p);
+      }
+      Ok(_) => {}
+      Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+      Err(e) => return Err(e),
+    }
+  }
+  if unresolved.is_empty() {
+    return Ok(result);
+  }
+
+  let mut rev_walk = repo.revwalk()?;
+  rev_walk.push_head()?;
+  // Oldest-first ancestry (NO `Sort::TIME`): the first commit whose tree
+  // contains a path is the one that first added it, so we resolve on that hit.
+  rev_walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)?;
+
+  for oid in rev_walk.by_ref() {
+    if unresolved.is_empty() {
+      break; // early-exit: every path resolved to its creation commit
+    }
+    // Propagate revwalk iterator errors instead of silently skipping them.
+    let oid = oid?;
+    // A real object-read failure is an error, not a "no match" -- propagate it.
+    let commit = repo.find_commit(oid)?;
+    // Probe EVERY commit (merges included -- no `parent_count` branching, no
+    // diffing): the exact path either exists in this tree or it doesn't.
+    let tree = commit.tree()?;
+    for p in unresolved.clone() {
+      // NotFound == path absent from this commit's tree (no match); any other
+      // lookup error is real and must propagate.
+      match tree.get_path(Path::new(&p)) {
+        // Only an exact FILE (blob) is a creation. A directory (tree) or submodule
+        // (gitlink/Commit) entry is NOT a file: leave the path unresolved so an
+        // older blob could still match (a pure directory never will, so it stays
+        // `None`/undefined).
+        Ok(entry) if entry.kind() == Some(git2::ObjectType::Blob) => {
+          result.insert(p.clone(), Some(build_commit_info(&commit)?));
+          unresolved.remove(&p);
+        }
+        Ok(_) => {}
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+        Err(e) => return Err(e),
+      }
+    }
+  }
+  Ok(result)
+}
+
+/// Bulk modification lookup enriched with each file's `created` commit. Runs the
+/// newest-first bulk modification walk (`get_files_modification`) and the
+/// SEPARATE oldest-first bulk creation walk (`get_files_creation`) over ALL input
+/// paths, then reconciles per path: a path WITH a modification record gets its
+/// `created` merged in; a path with NO record but a creation hit (present as a
+/// blob at HEAD, touched only by MERGE commits, which the modification walk
+/// skips) falls back to a record whose FLAT fields are the LATEST merge that
+/// genuinely changed the path (`latest_blob_change_including_merges`) and whose
+/// `created` is the OLDEST creating merge (the already-computed creation), so
+/// `commit_id == created.commit_id` only when a single merge both added and
+/// last-changed the file; a path that no commit ever added stays `None`. The
+/// creation walk runs for ALL input paths (not just the ones with a modification
+/// record) precisely so those merge-only paths absent from it can fall back;
+/// a never-committed path simply resolves to `None` in the creation walk and
+/// stays `null`. Shared by the sync method and the async task so both produce
+/// identical results.
+pub(crate) fn get_files_modification_with_created(
+  repo: &git2::Repository,
+  filepaths: &[String],
+) -> std::result::Result<HashMap<String, Option<FileModification>>, git2::Error> {
+  let mut mods = get_files_modification(repo, filepaths)?;
+  // Creation for ALL input paths: a merge-only path has NO modification record
+  // yet must still take the merge-only fallback (which needs its creation for
+  // `created`), so we cannot restrict the creation walk to the already-resolved.
+  let creations = get_files_creation(repo, filepaths)?;
+  // Peel HEAD's tree LAZILY (once, only when the first fallback candidate appears)
+  // so empty / all-present / all-never-committed inputs never peel HEAD -- peeling
+  // unconditionally would throw on an unborn/empty HEAD and regress `[]` -> `{}`.
+  let mut head_tree: Option<git2::Tree> = None;
+  for (path, creation) in creations {
+    if let Some(slot) = mods.get_mut(&path) {
+      match slot {
+        // Enrich an existing record with its creation commit.
+        Some(fm) => fm.created = creation,
+        // No non-merge commit touched this path; fall back ONLY when it is still
+        // PRESENT (a blob) at HEAD -- a merge-only path that still exists. The
+        // FLAT fields are the LATEST merge that genuinely changed the path
+        // (`latest_blob_change_including_merges`); `created` is OVERRIDDEN with
+        // the OLDEST creating merge (`creation`, from `get_files_creation`). A
+        // path ABSENT at HEAD (deleted, even by a merge) fails the blob gate and
+        // stays `None`.
+        None => {
+          if let Some(c) = creation {
+            let ht = match head_tree {
+              Some(ref t) => t,
+              None => {
+                head_tree = Some(repo.head()?.peel_to_commit()?.tree()?);
+                head_tree.as_ref().unwrap()
+              }
+            };
+            if blob_entry_at(ht, Path::new(&path))?.is_some()
+              && let Some(latest) = latest_blob_change_including_merges(repo, &path)?
+            {
+              let mut fm = file_modification_from_commit_info(latest);
+              fm.created = Some(c); // the oldest, from get_files_creation
+              *slot = Some(fm);
+            }
+          }
+        }
+      }
+    }
+  }
+  Ok(mods)
 }
 
 /// Newtype over the bulk file-modification map. Its `ToNapiValue` builds the

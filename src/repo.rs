@@ -16,7 +16,8 @@ use crate::config::Config;
 use crate::diff::{Diff, DiffOptions};
 use crate::error::IntoNapiError;
 use crate::file_modification::{
-  FileModMap, FileModification, get_file_modification, get_files_modification, time_to_date,
+  FileModMap, FileModification, get_file_modification, get_file_modification_with_created,
+  get_files_modification_with_created, time_to_date,
 };
 use crate::index::Index;
 use crate::object::GitObject;
@@ -404,7 +405,9 @@ impl GitModificationTask {
   fn run(&mut self) -> Result<Option<FileModification>> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    get_file_modification(&repo, &self.filepath).convert_without_message()
+    // Same enriched wrapper as the sync method (created merged in), so the async
+    // result is identical -- computed AFTER reopen + restore.
+    get_file_modification_with_created(&repo, &self.filepath).convert_without_message()
   }
 }
 
@@ -437,7 +440,9 @@ impl GitBulkModificationTask {
   fn run(&mut self) -> Result<HashMap<String, Option<FileModification>>> {
     let repo = reopen_worker_repo(&self.path, self.open_flags)?;
     restore_worker_handle_state(&repo, self.namespace.as_deref(), self.workdir.as_deref())?;
-    get_files_modification(&repo, &self.filepaths).convert_without_message()
+    // Same `_with_created` wrapper as the sync method (GC7) so the async result
+    // is byte-identical, including each record's `created` creation commit.
+    get_files_modification_with_created(&repo, &self.filepaths).convert_without_message()
   }
 }
 
@@ -2006,8 +2011,14 @@ impl Repository {
 
   #[napi]
   /// Last-modified commit time of `filepath` in **milliseconds since the Unix
-  /// epoch**. Throws when no commit in history touched the path. For a
-  /// `null`-on-missing `Date`, use `getFileLastModifiedDate`.
+  /// epoch**. Throws when the merge-skipping walk finds no commit that modified
+  /// the path (never added, or touched only by merges). For a `null`-on-missing
+  /// `Date`, use `getFileLastModifiedDate`.
+  ///
+  /// This keeps the raw merge-skipping walk and does NOT apply the merge-only
+  /// fallback of `getFileLatestModified`: a file present only via merge commits
+  /// (an "evil merge") is treated as untouched and THROWS here, even though
+  /// `getFileLatestModified` returns a record for it.
   pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<i64> {
     get_file_modification(self.inner()?, &filepath)
       .convert_without_message()?
@@ -2022,7 +2033,8 @@ impl Repository {
 
   #[napi]
   /// Asynchronous variant of `getFileLatestModifiedDate`, computed off the main
-  /// thread. Rejects when no commit in history touched `filepath`.
+  /// thread. Rejects when the merge-skipping walk finds no commit that modified
+  /// `filepath` (never added, or touched only by merges).
   pub fn get_file_latest_modified_date_async(
     &self,
     filepath: String,
@@ -2043,11 +2055,15 @@ impl Repository {
   }
 
   #[napi]
-  /// Last-modified commit time of `filepath` as a `Date`, or `null` when no
-  /// commit in history touched the path (never throws for the missing case).
-  /// Equals `FileModification.committerTime` from `getFileLatestModified`. Only
-  /// real errors throw (unborn/empty HEAD, corrupt object, out-of-range
-  /// timestamp). For milliseconds-since-epoch, use `getFileLatestModifiedDate`.
+  /// Last-modified commit time of `filepath` as a `Date`, or `null` when the
+  /// merge-skipping walk finds no commit that modified it (never added, or
+  /// touched only by merges; never throws for the missing case). Equals
+  /// `FileModification.committerTime` from `getFileLatestModified` EXCEPT for a
+  /// file present only via merges: this method keeps the raw merge-skipping walk
+  /// and returns `null`, whereas `getFileLatestModified` falls back to the LATEST
+  /// merge that changed the file. Only real errors throw (unborn/empty HEAD, corrupt
+  /// object, out-of-range timestamp). For milliseconds-since-epoch, use
+  /// `getFileLatestModifiedDate`.
   pub fn get_file_last_modified_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
     get_file_modification(self.inner()?, &filepath)
       .convert_without_message()
@@ -2056,7 +2072,8 @@ impl Repository {
 
   #[napi]
   /// Asynchronous variant of `getFileLastModifiedDate`, computed off the main
-  /// thread. Resolves to `null` when no commit in history touched `filepath`.
+  /// thread. Resolves to `null` when the merge-skipping walk finds no commit that
+  /// modified `filepath` (never added, or touched only by merges).
   pub fn get_file_last_modified_date_async(
     &self,
     filepath: String,
@@ -2078,21 +2095,52 @@ impl Repository {
 
   #[napi]
   /// Last commit that modified `filepath` (author/committer identity, summary,
-  /// OID), or `null` when no commit in history touched the path.
+  /// OID), or `null` when no non-merge commit ever recorded a change to the path
+  /// AND it is not present at HEAD -- i.e. a path never added, OR one that only
+  /// merge commits ever touched and that is absent at HEAD (e.g. deleted by a
+  /// merge; see the merge-only note below). A path present (a blob) at HEAD
+  /// always resolves.
   ///
   /// Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
   /// diffing each non-merge commit against its parent under a libgit2 pathspec
   /// (so `filepath` may be a directory or glob that matches a file); merge
-  /// commits are skipped. `committerTime` equals `getFileLastModifiedDate`.
-  /// Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
-  /// timestamp).
+  /// commits are skipped when finding the last modification. `committerTime`
+  /// equals `getFileLastModifiedDate` EXCEPT for the merge-only fallback below,
+  /// where THIS record resolves but the standalone date methods keep the raw
+  /// merge-skipping walk (`getFileLastModifiedDate` returns `null`,
+  /// `getFileLatestModifiedDate` throws). Only real errors throw (unborn/empty
+  /// HEAD, corrupt object, out-of-range timestamp).
+  ///
+  /// A path present at HEAD that ONLY merge commits ever touched (introduced or
+  /// last changed by an "evil merge", so the merge-skipping walk above finds
+  /// nothing) FALLS BACK to a record whose flat fields are the LATEST merge that
+  /// genuinely changed the path, while `created` is the OLDEST (creating) merge
+  /// -- so `commitId === created.commitId` ONLY when a single merge both added
+  /// and last-changed the file; a file added by one evil merge and later changed
+  /// by another has `commitId` = the later merge and `created.commitId` = the
+  /// earlier one. This fallback fires ONLY for a path still PRESENT (a blob) at
+  /// HEAD; `null` is returned for a path ABSENT at HEAD -- never added, OR
+  /// deleted (even by a merge).
+  ///
+  /// The result also carries `created`: the commit that FIRST added the file,
+  /// from a SEPARATE oldest-first ancestry walk resolving the EXACT
+  /// repo-root-relative path (merge commits are included in this walk, a
+  /// delete-then-re-add returns the ORIGINAL add, and there is NO
+  /// rename-follow). `created` is a FILE's creation: it is left undefined when
+  /// `filepath` is a glob, or when the path is a DIRECTORY (a tree entry) or a
+  /// submodule (a gitlink) AT HEAD -- even if a FILE of that name existed earlier
+  /// in history -- while the flat fields may still resolve via pathspec. A path
+  /// that is a file at HEAD, AND a file deleted by an ordinary (non-merge) commit
+  /// (absent at HEAD but still yielding a record, present earlier in history),
+  /// both still report their ORIGINAL creation commit.
   pub fn get_file_latest_modified(&self, filepath: String) -> Result<Option<FileModification>> {
-    get_file_modification(self.inner()?, &filepath).convert_without_message()
+    get_file_modification_with_created(self.inner()?, &filepath).convert_without_message()
   }
 
   #[napi]
   /// Asynchronous variant of `getFileLatestModified`, computed off the main
-  /// thread. Resolves to `null` when no commit in history touched `filepath`.
+  /// thread. Resolves to `null` under the same condition as the sync method (no
+  /// non-merge modification AND absent at HEAD).
   pub fn get_file_latest_modified_async(
     &self,
     filepath: String,
@@ -2117,23 +2165,50 @@ impl Repository {
   /// history walk (early-exits once every path is resolved).
   ///
   /// Unlike the single-file methods, each input is matched by EXACT
-  /// repo-root-relative file-path string, NOT libgit2 pathspec/glob semantics:
-  /// inputs must be file paths (a directory or glob will not match). Every input
-  /// path is present as a key in the result; a never-committed path maps to
-  /// `null`. Merge commits are skipped; only real errors throw.
+  /// repo-root-relative path string, NOT libgit2 pathspec/glob semantics (there
+  /// is no glob expansion). A directory (tree) or submodule (gitlink) path is
+  /// not a file, and if such a path nonetheless resolves to a present record its
+  /// `created` is `undefined` (see below). Every input path is present as a key
+  /// in the result; a path maps to `null` under the same condition as
+  /// `getFileLatestModified` -- no non-merge commit ever recorded a change to it
+  /// AND it is absent at HEAD (never added, OR only merge commits touched it and
+  /// it is absent at HEAD, e.g. deleted by a merge; see below). Merge commits are
+  /// skipped when finding the last modification; only real errors throw.
+  ///
+  /// A path present at HEAD that ONLY merge commits ever touched (an "evil
+  /// merge", which the merge-skipping walk above misses) FALLS BACK to a record
+  /// whose flat fields are the LATEST merge that genuinely changed the path,
+  /// while `created` is the OLDEST (creating) merge -- so `commitId ===
+  /// created.commitId` ONLY when a single merge both added and last-changed the
+  /// file (a file added by one evil merge and later changed by another has
+  /// `commitId` = the later merge and `created.commitId` = the earlier one).
+  /// This fallback fires ONLY for a path still PRESENT (a blob) at HEAD; a key is
+  /// `null` for a path ABSENT at HEAD -- never added, OR deleted (even by a
+  /// merge).
+  ///
+  /// Each present record also carries `created`: the commit that FIRST added
+  /// that path, from a SEPARATE oldest-first ancestry walk over the same EXACT
+  /// path (merge commits are included in this walk, a delete-then-re-add returns
+  /// the ORIGINAL add, and there is NO rename-follow). A present record's
+  /// `created` is `undefined` when the exact path is a directory (tree) or
+  /// submodule (gitlink) at HEAD; a path deleted by an ordinary (non-merge)
+  /// commit (absent at HEAD but still yielding a record) still resolves its
+  /// original creation.
   pub fn get_files_latest_modified(&self, filepaths: Vec<String>) -> Result<FileModMap> {
     // Wrap in `FileModMap` so the result object is built with own-property
     // define semantics (a path literally named `__proto__` becomes an own key,
     // not a prototype mutation). The TS type stays `Record<..>` via the
     // `ts_return_type` override above.
-    get_files_modification(self.inner()?, &filepaths)
+    get_files_modification_with_created(self.inner()?, &filepaths)
       .map(FileModMap)
       .convert_without_message()
   }
 
   #[napi(ts_return_type = "Promise<Record<string, FileModification | null>>")]
   /// Asynchronous variant of `getFilesLatestModified`, computed off the main
-  /// thread. Every input path is a key; never-committed paths map to `null`.
+  /// thread. Every input path is a key; a path maps to `null` under the same
+  /// condition as the sync `getFilesLatestModified` (no non-merge modification
+  /// AND absent at HEAD).
   pub fn get_files_latest_modified_async(
     &self,
     filepaths: Vec<String>,
