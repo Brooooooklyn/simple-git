@@ -1421,7 +1421,11 @@ export declare class Repository {
   getFileLastModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
   /**
    * Last commit that modified `filepath` (author/committer identity, summary,
-   * OID), or `null` only when no commit in history ever added the path.
+   * OID), or `null` when no non-merge commit ever recorded a change to the path
+   * AND it is not present at HEAD -- i.e. a path never added, OR one that only
+   * merge commits ever touched and that is absent at HEAD (e.g. deleted by a
+   * merge; see the merge-only note below). A path present (a blob) at HEAD
+   * always resolves.
    *
    * Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
    * diffing each non-merge commit against its parent under a libgit2 pathspec
@@ -1455,7 +1459,8 @@ export declare class Repository {
   getFileLatestModified(filepath: string): FileModification | null
   /**
    * Asynchronous variant of `getFileLatestModified`, computed off the main
-   * thread. Resolves to `null` when no commit in history touched `filepath`.
+   * thread. Resolves to `null` under the same condition as the sync method (no
+   * non-merge modification AND absent at HEAD).
    */
   getFileLatestModifiedAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<FileModification | null>
   /**
@@ -1467,9 +1472,11 @@ export declare class Repository {
    * is no glob expansion). A directory (tree) or submodule (gitlink) path is
    * not a file, and if such a path nonetheless resolves to a present record its
    * `created` is `undefined` (see below). Every input path is present as a key
-   * in the result; a path that no commit ever added maps to `null`. Merge
-   * commits are skipped when finding the last modification; only real errors
-   * throw.
+   * in the result; a path maps to `null` under the same condition as
+   * `getFileLatestModified` -- no non-merge commit ever recorded a change to it
+   * AND it is absent at HEAD (never added, OR only merge commits touched it and
+   * it is absent at HEAD, e.g. deleted by a merge; see below). Merge commits are
+   * skipped when finding the last modification; only real errors throw.
    *
    * A path present at HEAD that ONLY merge commits ever touched (an "evil
    * merge", which the merge-skipping walk above misses) FALLS BACK to its
@@ -1489,7 +1496,9 @@ export declare class Repository {
   getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | null>
   /**
    * Asynchronous variant of `getFilesLatestModified`, computed off the main
-   * thread. Every input path is a key; never-committed paths map to `null`.
+   * thread. Every input path is a key; a path maps to `null` under the same
+   * condition as the sync `getFilesLatestModified` (no non-merge modification
+   * AND absent at HEAD).
    */
   getFilesLatestModifiedAsync(filepaths: Array<string>, signal?: AbortSignal | undefined | null): Promise<Record<string, FileModification | null>>
   /**
