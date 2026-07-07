@@ -785,6 +785,27 @@ test("evil-merge fallback stays null for a never-committed path", (t) => {
   }
 });
 
+// Documented divergence: the standalone date methods keep the raw merge-skipping
+// walk and do NOT apply the merge-only fallback. So for an evil-merge-only file
+// present at HEAD, getFileLatestModified RESOLVES (committerTime = the merge),
+// while getFileLastModifiedDate returns null and getFileLatestModifiedDate throws.
+// Locks that asymmetry: routing the date methods through the fallback would fail
+// this and force a docs update (see committerTime / getFileLastModifiedDate docs).
+test("date-twin methods keep raw merge-skipping semantics for an evil-merge-only file", (t) => {
+  const { root, repo } = makeRepoWithEvilMerge();
+  try {
+    const mod = repo.getFileLatestModified("evil.txt");
+    t.truthy(mod); // the rich accessor resolves via the merge-only fallback
+    t.true(mod.committerTime instanceof Date);
+
+    // The cheap date twins do NOT apply the fallback: null / throw.
+    t.is(repo.getFileLastModifiedDate("evil.txt"), null);
+    t.throws(() => repo.getFileLatestModifiedDate("evil.txt"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // THE fix: an evil-merge file that was later DELETED by a merge is ABSENT at HEAD.
 // The modification walk finds nothing (both the add and the delete are merges it
 // skips), but `get_file_creation` still resolves the c3 add-merge -- so the

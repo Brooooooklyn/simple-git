@@ -46,7 +46,11 @@ pub struct FileModification {
   pub committer_name: Option<String>,
   /// Committer email. Undefined if not valid UTF-8.
   pub committer_email: Option<String>,
-  /// Committer time, as a `Date`. Identical to `getFileLastModifiedDate`.
+  /// Committer time, as a `Date`. Equal to `getFileLastModifiedDate` EXCEPT for a
+  /// file present only via merge commits: this record falls back to the creating
+  /// merge commit (see `created`), whereas the standalone `getFileLastModifiedDate`
+  /// keeps the raw merge-skipping walk and returns `null` for it (and
+  /// `getFileLatestModifiedDate` throws).
   pub committer_time: DateTime<Utc>,
   /// The commit that FIRST added this file (its creation), resolved by an
   /// oldest-first ancestry walk over the EXACT repo-root-relative path -- SEPARATE

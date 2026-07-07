@@ -2011,8 +2011,14 @@ impl Repository {
 
   #[napi]
   /// Last-modified commit time of `filepath` in **milliseconds since the Unix
-  /// epoch**. Throws when no commit in history touched the path. For a
-  /// `null`-on-missing `Date`, use `getFileLastModifiedDate`.
+  /// epoch**. Throws when the merge-skipping walk finds no commit that modified
+  /// the path (never added, or touched only by merges). For a `null`-on-missing
+  /// `Date`, use `getFileLastModifiedDate`.
+  ///
+  /// This keeps the raw merge-skipping walk and does NOT apply the merge-only
+  /// fallback of `getFileLatestModified`: a file present only via merge commits
+  /// (an "evil merge") is treated as untouched and THROWS here, even though
+  /// `getFileLatestModified` returns a record for it.
   pub fn get_file_latest_modified_date(&self, filepath: String) -> Result<i64> {
     get_file_modification(self.inner()?, &filepath)
       .convert_without_message()?
@@ -2027,7 +2033,8 @@ impl Repository {
 
   #[napi]
   /// Asynchronous variant of `getFileLatestModifiedDate`, computed off the main
-  /// thread. Rejects when no commit in history touched `filepath`.
+  /// thread. Rejects when the merge-skipping walk finds no commit that modified
+  /// `filepath` (never added, or touched only by merges).
   pub fn get_file_latest_modified_date_async(
     &self,
     filepath: String,
@@ -2048,11 +2055,15 @@ impl Repository {
   }
 
   #[napi]
-  /// Last-modified commit time of `filepath` as a `Date`, or `null` when no
-  /// commit in history touched the path (never throws for the missing case).
-  /// Equals `FileModification.committerTime` from `getFileLatestModified`. Only
-  /// real errors throw (unborn/empty HEAD, corrupt object, out-of-range
-  /// timestamp). For milliseconds-since-epoch, use `getFileLatestModifiedDate`.
+  /// Last-modified commit time of `filepath` as a `Date`, or `null` when the
+  /// merge-skipping walk finds no commit that modified it (never added, or
+  /// touched only by merges; never throws for the missing case). Equals
+  /// `FileModification.committerTime` from `getFileLatestModified` EXCEPT for a
+  /// file present only via merges: this method keeps the raw merge-skipping walk
+  /// and returns `null`, whereas `getFileLatestModified` falls back to the
+  /// creating merge commit. Only real errors throw (unborn/empty HEAD, corrupt
+  /// object, out-of-range timestamp). For milliseconds-since-epoch, use
+  /// `getFileLatestModifiedDate`.
   pub fn get_file_last_modified_date(&self, filepath: String) -> Result<Option<DateTime<Utc>>> {
     get_file_modification(self.inner()?, &filepath)
       .convert_without_message()
@@ -2061,7 +2072,8 @@ impl Repository {
 
   #[napi]
   /// Asynchronous variant of `getFileLastModifiedDate`, computed off the main
-  /// thread. Resolves to `null` when no commit in history touched `filepath`.
+  /// thread. Resolves to `null` when the merge-skipping walk finds no commit that
+  /// modified `filepath` (never added, or touched only by merges).
   pub fn get_file_last_modified_date_async(
     &self,
     filepath: String,
@@ -2089,7 +2101,10 @@ impl Repository {
   /// diffing each non-merge commit against its parent under a libgit2 pathspec
   /// (so `filepath` may be a directory or glob that matches a file); merge
   /// commits are skipped when finding the last modification. `committerTime`
-  /// equals `getFileLastModifiedDate`. Only real errors throw (unborn/empty
+  /// equals `getFileLastModifiedDate` EXCEPT for the merge-only fallback below,
+  /// where THIS record resolves but the standalone date methods keep the raw
+  /// merge-skipping walk (`getFileLastModifiedDate` returns `null`,
+  /// `getFileLatestModifiedDate` throws). Only real errors throw (unborn/empty
   /// HEAD, corrupt object, out-of-range timestamp).
   ///
   /// A path present at HEAD that ONLY merge commits ever touched (introduced or
