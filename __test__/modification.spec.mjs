@@ -427,6 +427,22 @@ test("getFilesLatestModified returns {} for empty input", (t) => {
   t.deepEqual(repo.getFilesLatestModified([]), {});
 });
 
+// Regression: empty input on an UNBORN HEAD (a repo with no commits) must return
+// {} WITHOUT throwing. The bulk merge-only fallback peels HEAD lazily -- only on a
+// real fallback candidate -- so a no-op call never touches HEAD; an unconditional
+// peel would throw "unborn HEAD" here. Locks that the lazy peel stays lazy.
+test("getFilesLatestModified returns {} for empty input on an unborn HEAD", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-modification-empty-"));
+  const work = join(root, "work");
+  execSync(`git init -q -b main "${work}"`);
+  try {
+    const repo = new Repository(work);
+    t.deepEqual(repo.getFilesLatestModified([]), {}); // no commits, no HEAD peel
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // Nested forward-slash path: exact-string match against git's forward-slash delta path.
 // Use a literal "src/lib.rs" (NOT path.join, which yields backslashes on Windows).
 test("getFilesLatestModified matches a nested forward-slash path", (t) => {
