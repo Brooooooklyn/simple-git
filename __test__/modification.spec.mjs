@@ -307,6 +307,92 @@ function makeRepoWithDoubleEvilMerge() {
   };
 }
 
+// Build a hermetic throwaway repo where `evil.txt` is added by one merge and then
+// has ONLY its FILE MODE changed (100644 -> 100755, SAME blob OID) by a LATER
+// merge -- a "mode-only evil merge". History mirrors makeRepoWithDoubleEvilMerge
+// but M2 flips the executable bit instead of the content:
+//   c0 root                -> root.txt
+//   c1 on `side`           -> on-branch.txt (a normal 1-parent add)
+//   c2 on `main`           -> main2.txt     (so the add-merge is non-fast-forward)
+//   M1 evil ADD merge      -> merge `side` --no-commit --no-ff, write NEW evil.txt
+//                             (mode 100644), add + commit -> evil.txt is in the
+//                             merge tree only (neither parent has it).
+//   c4 on `side2` (from M1)-> side2.txt      (side2 tip inherits evil.txt @100644)
+//   c5 on `main`           -> main3.txt      (main tip inherits evil.txt @100644)
+//   M2 evil CHMOD merge    -> merge `side2` --no-commit --no-ff (BOTH parents carry
+//                             evil.txt @100644), then `git update-index --chmod=+x
+//                             evil.txt` (index mode -> 100755, blob UNCHANGED), then
+//                             commit -> evil.txt's MODE is changed ONLY via M2.
+// The blob OID is identical in M1 and M2 (mode-only). So the OID-only walk treats
+// M2 as "inherited" and wrongly falls back to M1; the (oid, mode)-aware walk sees
+// the mode flip and returns M2. HEAD carries evil.txt @100755. Returns `{ root,
+// repo, git, addMergeCommit, chmodMergeCommit }`. Caller removes `root`.
+function makeRepoWithEvilMergeChmod() {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-modification-chmod-evil-"));
+  const work = join(root, "work");
+  execSync(`git init -q -b main "${work}"`);
+  const run = (args) => execSync(`git ${args}`, { cwd: work });
+  const capture = (args) =>
+    execSync(`git ${args}`, { cwd: work }).toString().trim();
+  run("config user.name tester");
+  run("config user.email tester@example.com");
+  run("config commit.gpgsign false");
+  run("config core.autocrlf false");
+
+  // c0 — root commit.
+  writeFileSync(join(work, "root.txt"), "root\n");
+  run("add -A");
+  run('commit -q -m "c0 root"');
+
+  // c1 — a normal 1-parent add of on-branch.txt on branch `side`.
+  run("checkout -q -b side");
+  writeFileSync(join(work, "on-branch.txt"), "on branch\n");
+  run("add on-branch.txt");
+  run('commit -q -m "c1 add on-branch (1-parent)"');
+
+  // c2 — main advances so `--no-ff` produces a genuine merge commit.
+  run("checkout -q main");
+  writeFileSync(join(work, "main2.txt"), "main two\n");
+  run("add main2.txt");
+  run('commit -q -m "c2 main advances"');
+
+  // M1 — evil ADD merge: evil.txt enters (mode 100644) inside the merge tree.
+  run("merge --no-commit --no-ff side");
+  writeFileSync(join(work, "evil.txt"), "evil\n");
+  run("add evil.txt");
+  run('commit -q -m "M1 evil add merge"');
+  const addMergeCommit = capture("rev-parse HEAD");
+
+  // c4 — side2 branches from M1 (so its tip carries evil.txt @100644).
+  run("checkout -q -b side2");
+  writeFileSync(join(work, "side2.txt"), "side two\n");
+  run("add side2.txt");
+  run('commit -q -m "c4 side2 advances"');
+
+  // c5 — main advances again so the chmod-merge is a genuine --no-ff merge.
+  run("checkout -q main");
+  writeFileSync(join(work, "main3.txt"), "main three\n");
+  run("add main3.txt");
+  run('commit -q -m "c5 main advances again"');
+
+  // M2 — evil CHMOD merge: both parents carry evil.txt @100644; flip ONLY the
+  // index mode to 100755 (blob unchanged) before committing, so evil.txt's MODE
+  // is changed ONLY via this merge. `--chmod=+x` sets the index mode regardless
+  // of the working-tree bit (mode-preserving FS).
+  run("merge --no-commit --no-ff side2");
+  run("update-index --chmod=+x evil.txt");
+  run('commit -q -m "M2 evil chmod merge"');
+  const chmodMergeCommit = capture("rev-parse HEAD");
+
+  return {
+    root,
+    repo: new Repository(work),
+    git: capture,
+    addMergeCommit,
+    chmodMergeCommit,
+  };
+}
+
 test.beforeEach((t) => {
   t.context.repo = new Repository(workDir);
 });
@@ -965,6 +1051,59 @@ test("getFilesLatestModified matches single-file for a double-evil-merge file", 
     const bulk = repo.getFilesLatestModified(["evil.txt"])["evil.txt"];
     t.truthy(bulk);
     t.is(bulk.commitId, changeMergeCommit); // flat = latest change (M2)
+    t.is(bulk.created.commitId, addMergeCommit); // created = creation (M1)
+    t.deepEqual(bulk, single); // whole record (flat fields + created) matches
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// -------- mode-only evil merge: (oid, mode) identity, not OID alone (the P2) --
+// A file added by one merge (M1, mode 100644) and later changed ONLY in its FILE
+// MODE (M2, 100755, SAME blob OID) by a different merge. The merge-inclusive
+// latest-change walk feeds the flat fields of the merge-only fallback; comparing
+// blob OID ALONE, M2 looks "inherited" (same blob as both parents) and the walk
+// wrongly falls back to M1. Comparing the full (blob OID, filemode) tree-entry
+// identity -- matching the libgit2-diff semantics of the non-merge walk -- makes
+// the mode-only flip register, so the flat fields are M2 while `created` stays M1.
+
+// THE P2 bug: flat fields must be M2 (the mode-change merge), created must be M1
+// (the creation), and the two must differ. Pre-fix commitId was M1 (== created),
+// because the OID-only walk skipped the mode-only M2.
+test("getFileLatestModified flat fields are the mode-change merge, created is the creating merge", (t) => {
+  const { root, repo, git, addMergeCommit, chmodMergeCommit } =
+    makeRepoWithEvilMergeChmod();
+  try {
+    t.not(addMergeCommit, chmodMergeCommit); // sanity: two distinct merges
+
+    // Geometry sanity: same blob OID in M1 and M2 (mode-only), mode 100644 -> 100755.
+    // `ls-tree` prints "<mode> <type> <oid>\t<name>", so skip the type token.
+    const [m1Mode, , m1Oid] = git(`ls-tree ${addMergeCommit} evil.txt`).split(/\s+/);
+    const [headMode, , headOid] = git("ls-tree HEAD evil.txt").split(/\s+/);
+    t.is(m1Mode, "100644"); // created at 100644
+    t.is(headMode, "100755"); // present at HEAD at 100755 (M2's chmod)
+    t.is(m1Oid, headOid); // SAME blob OID -> the change is mode-only
+
+    const mod = repo.getFileLatestModified("evil.txt");
+    t.truthy(mod);
+    t.is(mod.commitId, chmodMergeCommit); // flat = the mode-change merge (M2), NOT M1
+    t.truthy(mod.created);
+    t.is(mod.created.commitId, addMergeCommit); // created = the creation (M1)
+    t.not(mod.commitId, mod.created.commitId); // genuinely distinct
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Bulk mirrors single-file: the bulk fallback builds the identical split record.
+test("getFilesLatestModified matches single-file for a mode-only evil-merge file", (t) => {
+  const { root, repo, addMergeCommit, chmodMergeCommit } =
+    makeRepoWithEvilMergeChmod();
+  try {
+    const single = repo.getFileLatestModified("evil.txt");
+    const bulk = repo.getFilesLatestModified(["evil.txt"])["evil.txt"];
+    t.truthy(bulk);
+    t.is(bulk.commitId, chmodMergeCommit); // flat = mode-change merge (M2)
     t.is(bulk.created.commitId, addMergeCommit); // created = creation (M1)
     t.deepEqual(bulk, single); // whole record (flat fields + created) matches
   } finally {

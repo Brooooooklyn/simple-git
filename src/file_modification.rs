@@ -225,30 +225,39 @@ fn oldest_blob_commit(
   Ok(None)
 }
 
-/// Blob OID at `path` in `tree`, or `None` if the entry is absent or is a tree
-/// (directory) / gitlink (submodule) rather than a blob. A real lookup error
-/// propagates; `NotFound` is `None` (path absent), not an error.
-fn blob_oid_at(
+/// `(blob OID, git filemode)` of `path` in `tree` when the entry is a blob (a
+/// regular file, an executable, or a symlink -- all Blob-kind objects), else
+/// `None`. The mode is included so a mode-only change (e.g. `100644 -> 100755`)
+/// counts as a modification, matching the libgit2-diff semantics of the
+/// non-merge walk. A real lookup error propagates; `NotFound` (path absent) is
+/// `None`.
+fn blob_entry_at(
   tree: &git2::Tree,
   path: &Path,
-) -> std::result::Result<Option<git2::Oid>, git2::Error> {
+) -> std::result::Result<Option<(git2::Oid, i32)>, git2::Error> {
   match tree.get_path(path) {
-    Ok(entry) if entry.kind() == Some(git2::ObjectType::Blob) => Ok(Some(entry.id())),
+    Ok(entry) if entry.kind() == Some(git2::ObjectType::Blob) => {
+      Ok(Some((entry.id(), entry.filemode())))
+    }
     Ok(_) => Ok(None),
     Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
     Err(e) => Err(e),
   }
 }
 
-/// The NEWEST commit that genuinely changed `filepath`'s blob content, INCLUDING
-/// merge commits (the primary modification walk skips merges; this does not).
-/// Walks newest-first; a commit "changed" the path if its blob OID there differs
-/// from the blob OID at that path in EVERY parent (so a root add, a normal add,
-/// or an evil-merge change all count, but a commit that merely inherits the blob
-/// from a parent does not). Returns the first (newest) such commit; `Ok(None)`
-/// only if the path is a blob in no reachable commit. Used to build the flat
-/// fields of the merge-only fallback record, so they reflect the LATEST change,
-/// not the creation. Mirrors the modification walk's error propagation.
+/// The NEWEST commit that genuinely changed `filepath`, INCLUDING merge commits
+/// (the primary modification walk skips merges; this does not). Walks
+/// newest-first; a commit "changed" the path if its blob tree-entry identity
+/// there -- the `(blob OID, filemode)` pair -- differs from that pair at the path
+/// in EVERY parent (so a root add, a normal add, an evil-merge content change, OR
+/// a merge that ONLY flips the mode `100644 -> 100755` all count, but a commit
+/// that merely inherits BOTH the blob and the mode from a parent does not). The
+/// mode is part of the comparison so a mode-only change registers, matching the
+/// libgit2-diff semantics of the non-merge walk. Returns the first (newest) such
+/// commit; `Ok(None)` only if the path is a blob in no reachable commit. Used to
+/// build the flat fields of the merge-only fallback record, so they reflect the
+/// LATEST change, not the creation. Mirrors the modification walk's error
+/// propagation.
 fn latest_blob_change_including_merges(
   repo: &git2::Repository,
   filepath: &str,
@@ -261,14 +270,15 @@ fn latest_blob_change_including_merges(
   for oid in rev_walk.by_ref() {
     let oid = oid?;
     let commit = repo.find_commit(oid)?;
-    let cur = match blob_oid_at(&commit.tree()?, &path)? {
-      Some(o) => o,     // path is a blob here
-      None => continue, // path absent / not a blob at this commit
+    let cur = match blob_entry_at(&commit.tree()?, &path)? {
+      Some(entry) => entry, // path is a blob here: (oid, mode)
+      None => continue,     // path absent / not a blob at this commit
     };
-    // Genuine change iff no parent already has this exact blob at the path.
+    // Genuine change iff no parent already has this exact (oid, mode) at the
+    // path -- so a mode-only flip (same blob OID) still counts as a change.
     let mut inherited = false;
     for i in 0..commit.parent_count() {
-      if blob_oid_at(&commit.parent(i)?.tree()?, &path)? == Some(cur) {
+      if blob_entry_at(&commit.parent(i)?.tree()?, &path)? == Some(cur) {
         inherited = true;
         break;
       }
@@ -365,7 +375,7 @@ pub(crate) fn get_file_modification_with_created(
     // never-committed path fails both walks and also stays null.
     None => {
       let head_tree = repo.head()?.peel_to_commit()?.tree()?;
-      if blob_oid_at(&head_tree, Path::new(filepath))?.is_some() {
+      if blob_entry_at(&head_tree, Path::new(filepath))?.is_some() {
         match latest_blob_change_including_merges(repo, filepath)? {
           Some(latest) => {
             let mut fm = file_modification_from_commit_info(latest); // flat = latest change
@@ -601,7 +611,7 @@ pub(crate) fn get_files_modification_with_created(
                 head_tree.as_ref().unwrap()
               }
             };
-            if blob_oid_at(ht, Path::new(&path))?.is_some()
+            if blob_entry_at(ht, Path::new(&path))?.is_some()
               && let Some(latest) = latest_blob_change_including_merges(repo, &path)?
             {
               let mut fm = file_modification_from_commit_info(latest);
