@@ -62,7 +62,9 @@ pub struct FileModification {
   /// is `null`/absent -- not a present record with this field missing. A path
   /// present at HEAD that ONLY merge commits ever touched, on the other hand,
   /// yields a record built from its creating merge commit, with `commit_id ==
-  /// created.commit_id`.) A delete-then-re-add returns the ORIGINAL add; merge
+  /// created.commit_id`; this merge-only fallback fires ONLY for a path still
+  /// PRESENT at HEAD, so a merge-only path ABSENT at HEAD -- e.g. deleted by a
+  /// merge -- yields no record at all.) A delete-then-re-add returns the ORIGINAL add; merge
   /// commits are included; no rename-follow.
   pub created: Option<CommitInfo>,
 }
@@ -252,6 +254,21 @@ fn file_modification_from_commit_info(c: CommitInfo) -> FileModification {
   }
 }
 
+/// True iff `filepath` resolves to a FILE (blob) in HEAD's tree. Used to gate the
+/// merge-only fallback: only a path still PRESENT at HEAD may fall back to its
+/// creating commit; an absent path (e.g. deleted, even by a merge) must not.
+fn path_is_blob_at_head(
+  repo: &git2::Repository,
+  filepath: &str,
+) -> std::result::Result<bool, git2::Error> {
+  let head_tree = repo.head()?.peel_to_commit()?.tree()?;
+  match head_tree.get_path(Path::new(filepath)) {
+    Ok(entry) => Ok(entry.kind() == Some(git2::ObjectType::Blob)),
+    Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
+    Err(e) => Err(e),
+  }
+}
+
 /// Single-file modification lookup enriched with the file's `created` commit.
 /// Runs the newest-first modification walk (`get_file_modification`); when that
 /// yields a record (`Some`), the SEPARATE oldest-first creation walk
@@ -272,10 +289,17 @@ pub(crate) fn get_file_modification_with_created(
       fm.created = get_file_creation(repo, filepath)?;
       Ok(Some(fm))
     }
-    // No non-merge commit modified the path. If the file still exists (only merge
-    // commits touched it), report the creating commit as the whole record instead
-    // of null. A path that never existed stays None.
-    None => Ok(get_file_creation(repo, filepath)?.map(file_modification_from_commit_info)),
+    // No non-merge commit modified the path. Fall back to the creating commit as
+    // the whole record ONLY when the file is still PRESENT (a blob) at HEAD -- a
+    // merge-only path that still exists. Compute the creation FIRST so a
+    // never-committed path returns None without peeling HEAD; a path ABSENT at
+    // HEAD (deleted, even by a merge) fails the blob gate and stays None.
+    None => match get_file_creation(repo, filepath)? {
+      Some(c) if path_is_blob_at_head(repo, filepath)? => {
+        Ok(Some(file_modification_from_commit_info(c)))
+      }
+      _ => Ok(None),
+    },
   }
 }
 
@@ -471,16 +495,36 @@ pub(crate) fn get_files_modification_with_created(
   // yet must still fall back to its creating (merge) commit, so we cannot restrict
   // the creation walk to only the paths that already resolved.
   let creations = get_files_creation(repo, filepaths)?;
+  // Peel HEAD's tree LAZILY (once, only when the first fallback candidate appears)
+  // so empty / all-present / all-never-committed inputs never peel HEAD -- peeling
+  // unconditionally would throw on an unborn/empty HEAD and regress `[]` -> `{}`.
+  let mut head_tree: Option<git2::Tree> = None;
   for (path, creation) in creations {
     if let Some(slot) = mods.get_mut(&path) {
       match slot {
         // Enrich an existing record with its creation commit.
         Some(fm) => fm.created = creation,
-        // No non-merge commit touched this path; if it exists (merge-only), the
-        // creating commit becomes the whole record, else it stays `None`.
+        // No non-merge commit touched this path; fall back to the creating commit
+        // as the whole record ONLY when it is still PRESENT (a blob) at HEAD -- a
+        // merge-only path that still exists. A path ABSENT at HEAD (deleted, even
+        // by a merge) fails the blob gate and stays `None`.
         None => {
           if let Some(c) = creation {
-            *slot = Some(file_modification_from_commit_info(c));
+            let ht = match head_tree {
+              Some(ref t) => t,
+              None => {
+                head_tree = Some(repo.head()?.peel_to_commit()?.tree()?);
+                head_tree.as_ref().unwrap()
+              }
+            };
+            let is_blob = match ht.get_path(Path::new(&path)) {
+              Ok(entry) => entry.kind() == Some(git2::ObjectType::Blob),
+              Err(e) if e.code() == git2::ErrorCode::NotFound => false,
+              Err(e) => return Err(e),
+            };
+            if is_blob {
+              *slot = Some(file_modification_from_commit_info(c));
+            }
           }
         }
       }

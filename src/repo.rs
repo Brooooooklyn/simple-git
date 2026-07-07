@@ -2095,8 +2095,10 @@ impl Repository {
   /// A path present at HEAD that ONLY merge commits ever touched (introduced or
   /// last changed by an "evil merge", so the merge-skipping walk above finds
   /// nothing) FALLS BACK to its creating (merge) commit for the WHOLE record --
-  /// its flat fields ARE that commit and `commitId === created.commitId`. `null`
-  /// is returned only when no commit in history ever added the path.
+  /// its flat fields ARE that commit and `commitId === created.commitId`. This
+  /// fallback fires ONLY for a path still PRESENT (a blob) at HEAD; `null` is
+  /// returned for a path ABSENT at HEAD -- never added, OR deleted (even by a
+  /// merge).
   ///
   /// The result also carries `created`: the commit that FIRST added the file,
   /// from a SEPARATE oldest-first ancestry walk resolving the EXACT
@@ -2150,8 +2152,9 @@ impl Repository {
   /// A path present at HEAD that ONLY merge commits ever touched (an "evil
   /// merge", which the merge-skipping walk above misses) FALLS BACK to its
   /// creating (merge) commit for the WHOLE record -- its flat fields ARE that
-  /// commit and `commitId === created.commitId`. A key is `null` only when no
-  /// commit in history ever added that path.
+  /// commit and `commitId === created.commitId`. This fallback fires ONLY for a
+  /// path still PRESENT (a blob) at HEAD; a key is `null` for a path ABSENT at
+  /// HEAD -- never added, OR deleted (even by a merge).
   ///
   /// Each present record also carries `created`: the commit that FIRST added
   /// that path, from a SEPARATE oldest-first ancestry walk over the same EXACT

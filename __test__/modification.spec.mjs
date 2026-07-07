@@ -142,6 +142,88 @@ function makeRepoWithEvilMerge() {
   };
 }
 
+// Build a hermetic throwaway repo where `evil.txt` is BOTH added and deleted only
+// via merge commits, so it is ABSENT at HEAD. History extends the evil-merge add:
+//   c0 root                -> root.txt
+//   c1 on `side`           -> on-branch.txt (a normal 1-parent add)
+//   c2 on `main`           -> main2.txt     (so the add-merge is non-fast-forward)
+//   c3 evil ADD merge      -> merge `side` --no-commit --no-ff, write NEW evil.txt,
+//                             add + commit -> evil.txt is in the merge tree only.
+//   c4 on `side2` (from c3)-> side2.txt      (side2 tip inherits evil.txt)
+//   c5 on `main`           -> main3.txt      (main tip inherits evil.txt)
+//   c6 evil DELETE merge   -> merge `side2` --no-commit --no-ff (BOTH parents carry
+//                             evil.txt), then `git rm evil.txt`, then commit -> the
+//                             merge removes evil.txt. It is thus deleted ONLY via a
+//                             merge (the modification walk skips merges), and ABSENT
+//                             at HEAD.
+// So `get_file_modification` finds nothing (None) while `get_file_creation` still
+// resolves the c3 add-merge -- the exact case the present-at-HEAD gate must catch.
+// Returns `{ root, repo, git, addMergeCommit, deleteMergeCommit }`. Caller removes
+// `root`. Same init/config pattern as the other helpers.
+function makeRepoWithEvilMergeThenDelete() {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-modification-evildel-"));
+  const work = join(root, "work");
+  execSync(`git init -q -b main "${work}"`);
+  const run = (args) => execSync(`git ${args}`, { cwd: work });
+  const capture = (args) =>
+    execSync(`git ${args}`, { cwd: work }).toString().trim();
+  run("config user.name tester");
+  run("config user.email tester@example.com");
+  run("config commit.gpgsign false");
+  run("config core.autocrlf false");
+
+  // c0 — root commit.
+  writeFileSync(join(work, "root.txt"), "root\n");
+  run("add -A");
+  run('commit -q -m "c0 root"');
+
+  // c1 — a normal 1-parent add of on-branch.txt on branch `side`.
+  run("checkout -q -b side");
+  writeFileSync(join(work, "on-branch.txt"), "on branch\n");
+  run("add on-branch.txt");
+  run('commit -q -m "c1 add on-branch (1-parent)"');
+
+  // c2 — main advances so `--no-ff` produces a genuine merge commit.
+  run("checkout -q main");
+  writeFileSync(join(work, "main2.txt"), "main two\n");
+  run("add main2.txt");
+  run('commit -q -m "c2 main advances"');
+
+  // c3 — evil ADD merge: introduce evil.txt inside the merge commit's tree.
+  run("merge --no-commit --no-ff side");
+  writeFileSync(join(work, "evil.txt"), "evil\n");
+  run("add evil.txt");
+  run('commit -q -m "c3 evil add merge"');
+  const addMergeCommit = capture("rev-parse HEAD");
+
+  // c4 — side2 branches from the add-merge (so its tip carries evil.txt).
+  run("checkout -q -b side2");
+  writeFileSync(join(work, "side2.txt"), "side two\n");
+  run("add side2.txt");
+  run('commit -q -m "c4 side2 advances"');
+
+  // c5 — main advances again so the delete-merge is a genuine --no-ff merge.
+  run("checkout -q main");
+  writeFileSync(join(work, "main3.txt"), "main three\n");
+  run("add main3.txt");
+  run('commit -q -m "c5 main advances again"');
+
+  // c6 — evil DELETE merge: both parents carry evil.txt, but `git rm` before the
+  // commit drops it, so evil.txt is removed ONLY via this merge commit.
+  run("merge --no-commit --no-ff side2");
+  run("rm -q evil.txt");
+  run('commit -q -m "c6 evil delete merge"');
+  const deleteMergeCommit = capture("rev-parse HEAD");
+
+  return {
+    root,
+    repo: new Repository(work),
+    git: capture,
+    addMergeCommit,
+    deleteMergeCommit,
+  };
+}
+
 test.beforeEach((t) => {
   t.context.repo = new Repository(workDir);
 });
@@ -698,6 +780,28 @@ test("evil-merge fallback stays null for a never-committed path", (t) => {
   try {
     t.is(repo.getFileLatestModified("nope-zzz.txt"), null);
     t.is(repo.getFilesLatestModified(["nope-zzz.txt"])["nope-zzz.txt"], null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// THE fix: an evil-merge file that was later DELETED by a merge is ABSENT at HEAD.
+// The modification walk finds nothing (both the add and the delete are merges it
+// skips), but `get_file_creation` still resolves the c3 add-merge -- so the
+// UNGATED fallback wrongly reported that stale add-merge as the whole record.
+// Gating the fallback on the path being a blob AT HEAD makes an absent (deleted)
+// path stay `null` in both the single-file and bulk forms.
+test("evil-merge fallback stays null for a file deleted by a later merge", (t) => {
+  const { root, repo, addMergeCommit, deleteMergeCommit } =
+    makeRepoWithEvilMergeThenDelete();
+  try {
+    t.not(addMergeCommit, deleteMergeCommit); // sanity: two distinct merges
+
+    // Single-file: absent at HEAD -> null, NOT the stale add-merge record.
+    t.is(repo.getFileLatestModified("evil.txt"), null);
+
+    // Bulk: same gate on the None-slot fallback.
+    t.is(repo.getFilesLatestModified(["evil.txt"])["evil.txt"], null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
