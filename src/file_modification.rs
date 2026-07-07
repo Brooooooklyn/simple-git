@@ -57,11 +57,13 @@ pub struct FileModification {
   /// of that name existed earlier in history -- since no such entry is a file (the
   /// flat fields may still resolve via pathspec in those cases). A path that is a
   /// blob at HEAD, AND a DELETED file (absent at HEAD but a blob earlier in
-  /// history), BOTH still report their ORIGINAL creation. (A path with no
-  /// ordinary-commit history yields no record at all -- the whole
-  /// `FileModification` is `null`/absent -- not a present record with this field
-  /// missing.) A delete-then-re-add returns the ORIGINAL add; merge commits are
-  /// included; no rename-follow.
+  /// history), BOTH still report their ORIGINAL creation. (A path that no commit
+  /// in history ever added yields no record at all -- the whole `FileModification`
+  /// is `null`/absent -- not a present record with this field missing. A path
+  /// present at HEAD that ONLY merge commits ever touched, on the other hand,
+  /// yields a record built from its creating merge commit, with `commit_id ==
+  /// created.commit_id`.) A delete-then-re-add returns the ORIGINAL add; merge
+  /// commits are included; no rename-follow.
   pub created: Option<CommitInfo>,
 }
 
@@ -232,12 +234,34 @@ pub(crate) fn get_file_creation(
   Ok(None)
 }
 
+/// Build a `FileModification` whose flat fields ARE the creating commit, used as
+/// a fallback for a path present at HEAD that no non-merge commit ever modified
+/// (introduced only by merge commits). Both the record and its `created` then
+/// point at that creating commit.
+fn file_modification_from_commit_info(c: CommitInfo) -> FileModification {
+  FileModification {
+    commit_id: c.commit_id.clone(),
+    summary: c.summary.clone(),
+    author_name: c.author_name.clone(),
+    author_email: c.author_email.clone(),
+    author_time: c.author_time,
+    committer_name: c.committer_name.clone(),
+    committer_email: c.committer_email.clone(),
+    committer_time: c.committer_time,
+    created: Some(c),
+  }
+}
+
 /// Single-file modification lookup enriched with the file's `created` commit.
-/// Runs the newest-first modification walk (`get_file_modification`) and, ONLY
-/// when that yields a record (`Some`), the SEPARATE oldest-first creation walk
-/// (`get_file_creation`), merging its result into `FileModification::created`.
-/// A never-committed path returns `None` (the whole record) and is never walked
-/// for creation. Shared by the sync method and the async task so both produce
+/// Runs the newest-first modification walk (`get_file_modification`); when that
+/// yields a record (`Some`), the SEPARATE oldest-first creation walk
+/// (`get_file_creation`) is merged into `FileModification::created`. When the
+/// modification walk finds NOTHING (`None`) -- no NON-MERGE commit ever touched
+/// the path -- the creation walk is the fallback: if it resolves (the file
+/// exists at HEAD, introduced/last-touched only by MERGE commits, which the
+/// modification walk skips), the whole record IS that creating (merge) commit,
+/// so `commit_id == created.commit_id`. A path that no commit ever added stays
+/// `None`. Shared by the sync method and the async task so both produce
 /// identical results.
 pub(crate) fn get_file_modification_with_created(
   repo: &git2::Repository,
@@ -248,7 +272,10 @@ pub(crate) fn get_file_modification_with_created(
       fm.created = get_file_creation(repo, filepath)?;
       Ok(Some(fm))
     }
-    None => Ok(None),
+    // No non-merge commit modified the path. If the file still exists (only merge
+    // commits touched it), report the creating commit as the whole record instead
+    // of null. A path that never existed stays None.
+    None => Ok(get_file_creation(repo, filepath)?.map(file_modification_from_commit_info)),
   }
 }
 
@@ -423,30 +450,39 @@ pub(crate) fn get_files_creation(
 }
 
 /// Bulk modification lookup enriched with each file's `created` commit. Runs the
-/// newest-first bulk modification walk (`get_files_modification`) and then, ONLY
-/// for the paths that actually resolved to a record (`Some`), the SEPARATE
-/// oldest-first bulk creation walk (`get_files_creation`), merging each result
-/// into its record's `created`. Never-committed paths stay `None` (the whole
-/// record) and are EXCLUDED from the creation walk (GC4); if no path resolved,
-/// the creation walk is skipped entirely. Shared by the sync method and the
-/// async task so both produce identical results.
+/// newest-first bulk modification walk (`get_files_modification`) and the
+/// SEPARATE oldest-first bulk creation walk (`get_files_creation`) over ALL input
+/// paths, then reconciles per path: a path WITH a modification record gets its
+/// `created` merged in; a path with NO record but a creation hit (present at
+/// HEAD, touched only by MERGE commits, which the modification walk skips) falls
+/// back to the creating commit as the WHOLE record (so `commit_id ==
+/// created.commit_id`); a path that no commit ever added stays `None`. The
+/// creation walk runs for ALL input paths (not just the ones with a modification
+/// record) precisely so those absent-but-existing merge-only paths can fall back;
+/// a never-committed path simply resolves to `None` in the creation walk and
+/// stays `null`. Shared by the sync method and the async task so both produce
+/// identical results.
 pub(crate) fn get_files_modification_with_created(
   repo: &git2::Repository,
   filepaths: &[String],
 ) -> std::result::Result<HashMap<String, Option<FileModification>>, git2::Error> {
   let mut mods = get_files_modification(repo, filepaths)?;
-  // Only enrich paths with a modification record; never-committed paths stay
-  // `None` and are excluded from the creation walk.
-  let present: Vec<String> = mods
-    .iter()
-    .filter_map(|(p, m)| m.as_ref().map(|_| p.clone()))
-    .collect();
-  if !present.is_empty() {
-    for (path, creation) in get_files_creation(repo, &present)? {
-      // `present` came from `mods`' `Some` keys and `get_files_creation`
-      // returns exactly those keys, so the record is always present here.
-      if let Some(Some(record)) = mods.get_mut(&path) {
-        record.created = creation;
+  // Creation for ALL input paths: a merge-only path has NO modification record
+  // yet must still fall back to its creating (merge) commit, so we cannot restrict
+  // the creation walk to only the paths that already resolved.
+  let creations = get_files_creation(repo, filepaths)?;
+  for (path, creation) in creations {
+    if let Some(slot) = mods.get_mut(&path) {
+      match slot {
+        // Enrich an existing record with its creation commit.
+        Some(fm) => fm.created = creation,
+        // No non-merge commit touched this path; if it exists (merge-only), the
+        // creating commit becomes the whole record, else it stays `None`.
+        None => {
+          if let Some(c) = creation {
+            *slot = Some(file_modification_from_commit_info(c));
+          }
+        }
       }
     }
   }

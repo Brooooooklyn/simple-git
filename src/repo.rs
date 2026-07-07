@@ -2083,14 +2083,20 @@ impl Repository {
 
   #[napi]
   /// Last commit that modified `filepath` (author/committer identity, summary,
-  /// OID), or `null` when no commit in history touched the path.
+  /// OID), or `null` only when no commit in history ever added the path.
   ///
   /// Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
   /// diffing each non-merge commit against its parent under a libgit2 pathspec
   /// (so `filepath` may be a directory or glob that matches a file); merge
-  /// commits are skipped. `committerTime` equals `getFileLastModifiedDate`.
-  /// Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
-  /// timestamp).
+  /// commits are skipped when finding the last modification. `committerTime`
+  /// equals `getFileLastModifiedDate`. Only real errors throw (unborn/empty
+  /// HEAD, corrupt object, out-of-range timestamp).
+  ///
+  /// A path present at HEAD that ONLY merge commits ever touched (introduced or
+  /// last changed by an "evil merge", so the merge-skipping walk above finds
+  /// nothing) FALLS BACK to its creating (merge) commit for the WHOLE record --
+  /// its flat fields ARE that commit and `commitId === created.commitId`. `null`
+  /// is returned only when no commit in history ever added the path.
   ///
   /// The result also carries `created`: the commit that FIRST added the file,
   /// from a SEPARATE oldest-first ancestry walk resolving the EXACT
@@ -2137,8 +2143,15 @@ impl Repository {
   /// is no glob expansion). A directory (tree) or submodule (gitlink) path is
   /// not a file, and if such a path nonetheless resolves to a present record its
   /// `created` is `undefined` (see below). Every input path is present as a key
-  /// in the result; a never-committed path maps to `null`. Merge commits are
-  /// skipped; only real errors throw.
+  /// in the result; a path that no commit ever added maps to `null`. Merge
+  /// commits are skipped when finding the last modification; only real errors
+  /// throw.
+  ///
+  /// A path present at HEAD that ONLY merge commits ever touched (an "evil
+  /// merge", which the merge-skipping walk above misses) FALLS BACK to its
+  /// creating (merge) commit for the WHOLE record -- its flat fields ARE that
+  /// commit and `commitId === created.commitId`. A key is `null` only when no
+  /// commit in history ever added that path.
   ///
   /// Each present record also carries `created`: the commit that FIRST added
   /// that path, from a SEPARATE oldest-first ancestry walk over the same EXACT
@@ -2146,8 +2159,7 @@ impl Repository {
   /// the ORIGINAL add, and there is NO rename-follow). A present record's
   /// `created` is `undefined` when the exact path is a directory (tree) or
   /// submodule (gitlink) at HEAD; a deleted path (absent at HEAD) still resolves
-  /// its original creation. A never-committed path stays `null` (the whole
-  /// record) and is not walked for creation.
+  /// its original creation.
   pub fn get_files_latest_modified(&self, filepaths: Vec<String>) -> Result<FileModMap> {
     // Wrap in `FileModMap` so the result object is built with own-property
     // define semantics (a path literally named `__proto__` becomes an own key,

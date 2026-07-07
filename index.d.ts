@@ -1409,14 +1409,20 @@ export declare class Repository {
   getFileLastModifiedDateAsync(filepath: string, signal?: AbortSignal | undefined | null): Promise<Date | null>
   /**
    * Last commit that modified `filepath` (author/committer identity, summary,
-   * OID), or `null` when no commit in history touched the path.
+   * OID), or `null` only when no commit in history ever added the path.
    *
    * Walks history from HEAD newest-first (`Sort::TIME | Sort::TOPOLOGICAL`),
    * diffing each non-merge commit against its parent under a libgit2 pathspec
    * (so `filepath` may be a directory or glob that matches a file); merge
-   * commits are skipped. `committerTime` equals `getFileLastModifiedDate`.
-   * Only real errors throw (unborn/empty HEAD, corrupt object, out-of-range
-   * timestamp).
+   * commits are skipped when finding the last modification. `committerTime`
+   * equals `getFileLastModifiedDate`. Only real errors throw (unborn/empty
+   * HEAD, corrupt object, out-of-range timestamp).
+   *
+   * A path present at HEAD that ONLY merge commits ever touched (introduced or
+   * last changed by an "evil merge", so the merge-skipping walk above finds
+   * nothing) FALLS BACK to its creating (merge) commit for the WHOLE record --
+   * its flat fields ARE that commit and `commitId === created.commitId`. `null`
+   * is returned only when no commit in history ever added the path.
    *
    * The result also carries `created`: the commit that FIRST added the file,
    * from a SEPARATE oldest-first ancestry walk resolving the EXACT
@@ -1444,8 +1450,15 @@ export declare class Repository {
    * is no glob expansion). A directory (tree) or submodule (gitlink) path is
    * not a file, and if such a path nonetheless resolves to a present record its
    * `created` is `undefined` (see below). Every input path is present as a key
-   * in the result; a never-committed path maps to `null`. Merge commits are
-   * skipped; only real errors throw.
+   * in the result; a path that no commit ever added maps to `null`. Merge
+   * commits are skipped when finding the last modification; only real errors
+   * throw.
+   *
+   * A path present at HEAD that ONLY merge commits ever touched (an "evil
+   * merge", which the merge-skipping walk above misses) FALLS BACK to its
+   * creating (merge) commit for the WHOLE record -- its flat fields ARE that
+   * commit and `commitId === created.commitId`. A key is `null` only when no
+   * commit in history ever added that path.
    *
    * Each present record also carries `created`: the commit that FIRST added
    * that path, from a SEPARATE oldest-first ancestry walk over the same EXACT
@@ -1453,8 +1466,7 @@ export declare class Repository {
    * the ORIGINAL add, and there is NO rename-follow). A present record's
    * `created` is `undefined` when the exact path is a directory (tree) or
    * submodule (gitlink) at HEAD; a deleted path (absent at HEAD) still resolves
-   * its original creation. A never-committed path stays `null` (the whole
-   * record) and is not walked for creation.
+   * its original creation.
    */
   getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | null>
   /**
@@ -2114,11 +2126,13 @@ export interface FileModification {
    * of that name existed earlier in history -- since no such entry is a file (the
    * flat fields may still resolve via pathspec in those cases). A path that is a
    * blob at HEAD, AND a DELETED file (absent at HEAD but a blob earlier in
-   * history), BOTH still report their ORIGINAL creation. (A path with no
-   * ordinary-commit history yields no record at all -- the whole
-   * `FileModification` is `null`/absent -- not a present record with this field
-   * missing.) A delete-then-re-add returns the ORIGINAL add; merge commits are
-   * included; no rename-follow.
+   * history), BOTH still report their ORIGINAL creation. (A path that no commit
+   * in history ever added yields no record at all -- the whole `FileModification`
+   * is `null`/absent -- not a present record with this field missing. A path
+   * present at HEAD that ONLY merge commits ever touched, on the other hand,
+   * yields a record built from its creating merge commit, with `commit_id ==
+   * created.commit_id`.) A delete-then-re-add returns the ORIGINAL add; merge
+   * commits are included; no rename-follow.
    */
   created?: CommitInfo
 }

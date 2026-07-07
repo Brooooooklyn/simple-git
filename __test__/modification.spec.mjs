@@ -81,6 +81,67 @@ function makeRepoWithHistory(steps) {
   return { root, repo: new Repository(work), git: capture, commits };
 }
 
+// Build a hermetic throwaway repo containing an EVIL MERGE: a file that exists
+// only in a merge commit's tree, present in NEITHER parent. History:
+//   c0 root            -> root.txt
+//   c1 on branch `side`-> on-branch.txt  (a normal 1-parent add)
+//   c2 on `main`       -> main2.txt      (so the merge is a real non-fast-forward)
+//   c3 evil merge      -> `git merge --no-commit --no-ff side`, then write a NEW
+//                         `evil.txt`, `git add evil.txt`, and commit -- so the
+//                         merge commit's tree carries `evil.txt` (in neither
+//                         parent) plus `on-branch.txt` (from the merged branch).
+// `evil.txt` is thus touched by NO non-merge commit (the modification walk skips
+// merges), while `on-branch.txt` arrived via the 1-parent branch add. Returns
+// `{ root, repo, git, mergeCommit, onBranchCommit }` with the merge commit OID
+// and the branch-add commit OID (both via `git rev-parse HEAD`). Caller removes
+// `root`. Same init/config pattern as the other helpers.
+function makeRepoWithEvilMerge() {
+  const root = mkdtempSync(join(tmpdir(), "simple-git-modification-evil-"));
+  const work = join(root, "work");
+  execSync(`git init -q -b main "${work}"`);
+  const run = (args) => execSync(`git ${args}`, { cwd: work });
+  const capture = (args) =>
+    execSync(`git ${args}`, { cwd: work }).toString().trim();
+  run("config user.name tester");
+  run("config user.email tester@example.com");
+  run("config commit.gpgsign false");
+  run("config core.autocrlf false");
+
+  // c0 — root commit.
+  writeFileSync(join(work, "root.txt"), "root\n");
+  run("add -A");
+  run('commit -q -m "c0 root"');
+
+  // c1 — a normal 1-parent add of on-branch.txt on branch `side`.
+  run("checkout -q -b side");
+  writeFileSync(join(work, "on-branch.txt"), "on branch\n");
+  run("add on-branch.txt");
+  run('commit -q -m "c1 add on-branch (1-parent)"');
+  const onBranchCommit = capture("rev-parse HEAD");
+
+  // c2 — main advances so `--no-ff` produces a genuine merge commit.
+  run("checkout -q main");
+  writeFileSync(join(work, "main2.txt"), "main two\n");
+  run("add main2.txt");
+  run('commit -q -m "c2 main advances"');
+
+  // c3 — evil merge: merge `side` WITHOUT committing, then introduce a brand-new
+  // `evil.txt` (absent from both parents) and fold it into the merge commit.
+  run("merge --no-commit --no-ff side");
+  writeFileSync(join(work, "evil.txt"), "evil\n");
+  run("add evil.txt");
+  run('commit -q -m "c3 evil merge"');
+  const mergeCommit = capture("rev-parse HEAD");
+
+  return {
+    root,
+    repo: new Repository(work),
+    git: capture,
+    mergeCommit,
+    onBranchCommit,
+  };
+}
+
 test.beforeEach((t) => {
   t.context.repo = new Repository(workDir);
 });
@@ -571,6 +632,72 @@ test("created resolves to the commit where a path became a file (directory -> fi
     t.truthy(mod);
     t.truthy(mod.created);
     t.is(mod.created.commitId, c2); // the commit where x became a FILE
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// -------- evil-merge fallback (the PR-feedback fix) --------------------------
+// A file present at HEAD that ONLY merge commits ever touched (an "evil merge":
+// introduced in a merge commit's tree, in neither parent) is skipped by the
+// newest-first modification walk (merges are skipped), so the whole record used
+// to be `null`. The fix falls back to the file's CREATING commit (the merge)
+// for the entire record, so `commitId === created.commitId === the merge OID`.
+// The modification walk itself is unchanged, so a normal branch-merged file
+// still resolves to its 1-parent add, and a never-committed path stays `null`.
+
+// THE bug: evil-merge-only file must resolve (was null pre-fix). Both the flat
+// record and `created` are the merge commit.
+test("getFileLatestModified falls back to the merge commit for an evil-merge-only file", (t) => {
+  const { root, repo, mergeCommit } = makeRepoWithEvilMerge();
+  try {
+    const mod = repo.getFileLatestModified("evil.txt");
+    t.truthy(mod); // pre-fix this was null -- the reported gap
+    t.is(mod.commitId, mergeCommit); // the whole record IS the creating merge
+    t.truthy(mod.created);
+    t.is(mod.created.commitId, mergeCommit); // created is that same merge commit
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Bulk mirrors single-file: the bulk fallback builds the identical record.
+test("getFilesLatestModified matches the single-file result for an evil-merge-only file", (t) => {
+  const { root, repo } = makeRepoWithEvilMerge();
+  try {
+    const single = repo.getFileLatestModified("evil.txt");
+    const bulk = repo.getFilesLatestModified(["evil.txt"])["evil.txt"];
+    t.truthy(bulk);
+    t.deepEqual(bulk, single); // whole record (flat fields + created) matches
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regression guard: a normal branch-merged file (arrived via a 1-parent add on
+// the merged branch) still resolves to that ADD commit, NOT the merge, with
+// `created` the same add commit. The fix must not perturb the modification walk.
+test("a normal branch-merged file resolves to its 1-parent add, not the merge", (t) => {
+  const { root, repo, onBranchCommit, mergeCommit } = makeRepoWithEvilMerge();
+  try {
+    const mod = repo.getFileLatestModified("on-branch.txt");
+    t.truthy(mod);
+    t.is(mod.commitId, onBranchCommit); // the branch's 1-parent add
+    t.not(mod.commitId, mergeCommit); // NOT the merge commit
+    t.truthy(mod.created);
+    t.is(mod.created.commitId, onBranchCommit); // created is that same add
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Guard the fallback does not over-trigger: a path that no commit ever added
+// stays `null` in both the single-file and bulk forms.
+test("evil-merge fallback stays null for a never-committed path", (t) => {
+  const { root, repo } = makeRepoWithEvilMerge();
+  try {
+    t.is(repo.getFileLatestModified("nope-zzz.txt"), null);
+    t.is(repo.getFilesLatestModified(["nope-zzz.txt"])["nope-zzz.txt"], null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
