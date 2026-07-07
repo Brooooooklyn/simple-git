@@ -1453,8 +1453,9 @@ export declare class Repository {
    * `filepath` is a glob, or when the path is a DIRECTORY (a tree entry) or a
    * submodule (a gitlink) AT HEAD -- even if a FILE of that name existed earlier
    * in history -- while the flat fields may still resolve via pathspec. A path
-   * that is a file at HEAD, AND a DELETED file (absent at HEAD but present
-   * earlier in history), both still report their ORIGINAL creation commit.
+   * that is a file at HEAD, AND a file deleted by an ordinary (non-merge) commit
+   * (absent at HEAD but still yielding a record, present earlier in history),
+   * both still report their ORIGINAL creation commit.
    */
   getFileLatestModified(filepath: string): FileModification | null
   /**
@@ -1490,8 +1491,9 @@ export declare class Repository {
    * path (merge commits are included in this walk, a delete-then-re-add returns
    * the ORIGINAL add, and there is NO rename-follow). A present record's
    * `created` is `undefined` when the exact path is a directory (tree) or
-   * submodule (gitlink) at HEAD; a deleted path (absent at HEAD) still resolves
-   * its original creation.
+   * submodule (gitlink) at HEAD; a path deleted by an ordinary (non-merge)
+   * commit (absent at HEAD but still yielding a record) still resolves its
+   * original creation.
    */
   getFilesLatestModified(filepaths: Array<string>): Record<string, FileModification | null>
   /**
@@ -2158,8 +2160,9 @@ export interface FileModification {
    * tree entry) or a submodule (a gitlink/Commit entry) AT HEAD -- even if a FILE
    * of that name existed earlier in history -- since no such entry is a file (the
    * flat fields may still resolve via pathspec in those cases). A path that is a
-   * blob at HEAD, AND a DELETED file (absent at HEAD but a blob earlier in
-   * history), BOTH still report their ORIGINAL creation. (A path that no commit
+   * blob at HEAD, AND a file deleted by an ordinary (non-merge) commit (absent
+   * at HEAD but still yielding a record, a blob earlier in history), BOTH still
+   * report their ORIGINAL creation. (A path that no commit
    * in history ever added yields no record at all -- the whole `FileModification`
    * is `null`/absent -- not a present record with this field missing. A path
    * present at HEAD that ONLY merge commits ever touched, on the other hand,

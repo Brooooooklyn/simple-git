@@ -2127,8 +2127,9 @@ impl Repository {
   /// `filepath` is a glob, or when the path is a DIRECTORY (a tree entry) or a
   /// submodule (a gitlink) AT HEAD -- even if a FILE of that name existed earlier
   /// in history -- while the flat fields may still resolve via pathspec. A path
-  /// that is a file at HEAD, AND a DELETED file (absent at HEAD but present
-  /// earlier in history), both still report their ORIGINAL creation commit.
+  /// that is a file at HEAD, AND a file deleted by an ordinary (non-merge) commit
+  /// (absent at HEAD but still yielding a record, present earlier in history),
+  /// both still report their ORIGINAL creation commit.
   pub fn get_file_latest_modified(&self, filepath: String) -> Result<Option<FileModification>> {
     get_file_modification_with_created(self.inner()?, &filepath).convert_without_message()
   }
@@ -2183,8 +2184,9 @@ impl Repository {
   /// path (merge commits are included in this walk, a delete-then-re-add returns
   /// the ORIGINAL add, and there is NO rename-follow). A present record's
   /// `created` is `undefined` when the exact path is a directory (tree) or
-  /// submodule (gitlink) at HEAD; a deleted path (absent at HEAD) still resolves
-  /// its original creation.
+  /// submodule (gitlink) at HEAD; a path deleted by an ordinary (non-merge)
+  /// commit (absent at HEAD but still yielding a record) still resolves its
+  /// original creation.
   pub fn get_files_latest_modified(&self, filepaths: Vec<String>) -> Result<FileModMap> {
     // Wrap in `FileModMap` so the result object is built with own-property
     // define semantics (a path literally named `__proto__` becomes an own key,

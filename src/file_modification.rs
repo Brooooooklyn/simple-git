@@ -60,8 +60,9 @@ pub struct FileModification {
   /// tree entry) or a submodule (a gitlink/Commit entry) AT HEAD -- even if a FILE
   /// of that name existed earlier in history -- since no such entry is a file (the
   /// flat fields may still resolve via pathspec in those cases). A path that is a
-  /// blob at HEAD, AND a DELETED file (absent at HEAD but a blob earlier in
-  /// history), BOTH still report their ORIGINAL creation. (A path that no commit
+  /// blob at HEAD, AND a file deleted by an ordinary (non-merge) commit (absent
+  /// at HEAD but still yielding a record, a blob earlier in history), BOTH still
+  /// report their ORIGINAL creation. (A path that no commit
   /// in history ever added yields no record at all -- the whole `FileModification`
   /// is `null`/absent -- not a present record with this field missing. A path
   /// present at HEAD that ONLY merge commits ever touched, on the other hand,
