@@ -1076,7 +1076,7 @@ impl Repository {
             .inner()
             .code_into(env)?
             .find_remote(&name)
-            .convert(format!("Failed to get remote [{}]", &name))
+            .convert(format!("Failed to get remote [{}]", name))
             .code_into(env)
         })
         .ok()?,
@@ -1109,7 +1109,7 @@ impl Repository {
           .inner()
           .code_into(env)?
           .remote(&name, &url)
-          .convert(format!("Failed to add remote [{}]", &name))
+          .convert(format!("Failed to add remote [{}]", name))
           .code_into(env)
       })?,
       repo_path,
@@ -1204,7 +1204,7 @@ impl Repository {
       self
         .inner()?
         .remote_rename(&name, &new_name)
-        .convert(format!("Failed to rename remote [{}]", &name))?
+        .convert(format!("Failed to rename remote [{}]", name))?
         .into_iter()
         .filter_map(|s| s.ok().flatten().map(|s| s.to_owned()))
         .collect::<Vec<_>>(),
