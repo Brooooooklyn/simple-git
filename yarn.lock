@@ -1911,14 +1911,14 @@ __metadata:
     "@types/node": "npm:^24.10.1"
     "@types/react": "npm:^19.0.0"
     "@types/react-dom": "npm:^19.0.0"
-    "@void/md": "npm:0.10.11"
-    "@void/react": "npm:0.10.11"
+    "@void/md": "npm:0.10.12"
+    "@void/react": "npm:0.10.12"
     react: "npm:^19.2.1"
     react-dom: "npm:^19.2.1"
     tailwindcss: "npm:4.3.3"
     typescript: "npm:^7.0.0"
     vite: "npm:^8.0.0"
-    void: "npm:0.10.11"
+    void: "npm:0.10.12"
   languageName: unknown
   linkType: soft
 
@@ -3162,9 +3162,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@void/md@npm:0.10.11":
-  version: 0.10.11
-  resolution: "@void/md@npm:0.10.11"
+"@void/md@npm:0.10.12":
+  version: 0.10.12
+  resolution: "@void/md@npm:0.10.12"
   dependencies:
     "@shikijs/engine-javascript": "npm:^4.3.1"
     "@shikijs/transformers": "npm:^4.3.1"
@@ -3180,22 +3180,22 @@ __metadata:
     tinyglobby: "npm:^0.2.17"
   peerDependencies:
     vite: ^8.0.0
-    void: 0.10.11
-  checksum: 10c0/609a93158de79238d28bcd621838e39f47212882398705917b0f26d7d2a4910a2b0e614e84e6c1e8a08f0d5479f3d191d5c72445eb3014be249a2f4ac4086bd5
+    void: 0.10.12
+  checksum: 10c0/0167fac379d6d75c7bb709dce655eba18831927a9f1616e5c13b6aeeb2cf324246906bfa6c2ee697d259ca2108b0e372f5c942d5f768fc5d2d229833e885d4b6
   languageName: node
   linkType: hard
 
-"@void/react@npm:0.10.11":
-  version: 0.10.11
-  resolution: "@void/react@npm:0.10.11"
+"@void/react@npm:0.10.12":
+  version: 0.10.12
+  resolution: "@void/react@npm:0.10.12"
   dependencies:
     "@vitejs/plugin-react": "npm:^6.0.3"
   peerDependencies:
     react: ^19.0.0
     react-dom: ^19.0.0
     vite: ^8.0.0
-    void: 0.10.11
-  checksum: 10c0/fcd8106cb5cd90ac6de16cfc68c5bf158495939be5c6bd1789c9a723f2febb76cbe8bdf71418cf0f8184e6b1c5b8d29555edc817216c285da885db9e41c5121d
+    void: 0.10.12
+  checksum: 10c0/7cfccf479b0b22755f6e35588da8e325d2fc08073600b4902a2edf8828317a83a5593c8b2d7039ea4a59ba8c0f37fe7d5d94fa07135ae00ed4414775a75c0817
   languageName: node
   linkType: hard
 
@@ -6886,9 +6886,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"void@npm:0.10.11":
-  version: 0.10.11
-  resolution: "void@npm:0.10.11"
+"void@npm:0.10.12":
+  version: 0.10.12
+  resolution: "void@npm:0.10.12"
   dependencies:
     "@cloudflare/sandbox": "npm:^0.12.3"
     "@cloudflare/vite-plugin": "npm:^1.43.0"
@@ -6911,7 +6911,7 @@ __metadata:
     proper-lockfile: "npm:^4.1.2"
     wrangler: "npm:^4.107.0"
   peerDependencies:
-    "@void/md": 0.10.11
+    "@void/md": 0.10.12
     arktype: ">=2.0.0"
     valibot: ">=1.0.0-beta.7"
     vite: ^8.0.0
@@ -6927,7 +6927,7 @@ __metadata:
       optional: true
   bin:
     void: dist/cli/cli.mjs
-  checksum: 10c0/9166f2dcec900606a9f9c77a5f20be4f95da4a0a8afa2ded34787807afb920103a5ceddf5172abc2fdcebe2f6da96e846b03d72243b2e54c780ec229c058d87b
+  checksum: 10c0/1238202839229c719465c14477cc928a41125a2562e64c687073497a453908be6a12623527bd45ef3b40c2b0850a1cb75e2555d16431f1db6fbdda5dfe3fa6a1
   languageName: node
   linkType: hard
 
