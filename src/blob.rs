@@ -10,6 +10,7 @@ use crate::object::GitObject;
 
 pub(crate) enum BlobParent {
   GitObject(SharedReference<GitObject, git2::Blob<'static>>),
+  Repository(SharedReference<crate::repo::Repository, git2::Blob<'static>>),
 }
 
 impl Deref for BlobParent {
@@ -18,6 +19,7 @@ impl Deref for BlobParent {
   fn deref(&self) -> &git2::Blob<'static> {
     match self {
       BlobParent::GitObject(parent) => parent.deref(),
+      BlobParent::Repository(parent) => parent.deref(),
     }
   }
 }
