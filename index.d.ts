@@ -345,13 +345,16 @@ export declare class Diff {
   /** Check if deltas are sorted case sensitively or insensitively. */
   isSortedIcase(): boolean
   /**
-   * Render the diff as unified-diff text (the `git diff` patch format).
+   * Render the diff as unified-diff bytes (the `git diff` patch format).
    *
    * `git_diff_line::content` does not include the origin sigil, so for
    * context/add/delete lines the `+`/`-`/space sigil is emitted before the
    * content bytes, matching libgit2's `diff_print.c`.
+   *
+   * Returned as raw bytes rather than a string so non-UTF-8 file content is
+   * preserved exactly.
    */
-  toPatch(): string
+  toPatch(): Buffer
 }
 
 export declare class DiffDelta {
@@ -1993,10 +1996,11 @@ export interface BufferDiffLine {
  */
 export interface BufferDiffResult {
   /**
-   * The complete unified-diff text of the patch (empty string when the two
-   * sides are identical).
+   * The complete unified-diff bytes of the patch (empty buffer when the two
+   * sides are identical). Returned as raw bytes rather than a string so
+   * non-UTF-8 content is preserved exactly.
    */
-  patch: string
+  patch: Buffer
   hunks: Array<BufferDiffHunk>
   stats: BufferDiffStats
 }
@@ -2184,10 +2188,11 @@ export declare const enum Delta {
  * Diff two raw in-memory buffers without a repository, like
  * `git diff --no-index`.
  *
- * Pass `null` for a buffer to treat that side as absent/empty (the delta is
- * then reported as an added or deleted file); passing `null` for both yields
- * an empty patch with zero hunks. `oldPath`/`newPath` only label the output
- * headers.
+ * Pass `null` for a buffer to treat that side as absent (the delta is then
+ * reported as an added or deleted file with a `/dev/null` header); passing
+ * `null` for both yields an empty patch with zero hunks. An absent side is
+ * distinct from an empty buffer: `diffBuffers(null, p, Buffer.alloc(0), p)`
+ * reports a file creation. `oldPath`/`newPath` only label the output headers.
  */
 export declare function diffBuffers(oldBuffer: Uint8Array | null, oldPath: string | null, newBuffer: Uint8Array | null, newPath: string | null, options?: DiffOptions | null): BufferDiffResult
 

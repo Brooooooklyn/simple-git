@@ -82,10 +82,7 @@ impl TreeBuilder {
   /// Remove an entry from the builder by its filename.
   pub fn remove(&mut self, filename: String) -> crate::Result<()> {
     ensure_alive(&self.alive)?;
-    self
-      .inner_mut()
-      .remove(filename)
-      .convert_without_message()
+    self.inner_mut().remove(filename).convert_without_message()
   }
 
   #[napi]

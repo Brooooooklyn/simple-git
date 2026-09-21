@@ -66,12 +66,15 @@ impl Diff {
   }
 
   #[napi]
-  /// Render the diff as unified-diff text (the `git diff` patch format).
+  /// Render the diff as unified-diff bytes (the `git diff` patch format).
   ///
   /// `git_diff_line::content` does not include the origin sigil, so for
   /// context/add/delete lines the `+`/`-`/space sigil is emitted before the
   /// content bytes, matching libgit2's `diff_print.c`.
-  pub fn to_patch(&self) -> Result<String> {
+  ///
+  /// Returned as raw bytes rather than a string so non-UTF-8 file content is
+  /// preserved exactly.
+  pub fn to_patch(&self) -> Result<Buffer> {
     ensure_alive(&self.alive)?;
     let mut bytes = Vec::new();
     self
@@ -86,6 +89,6 @@ impl Diff {
         true
       })
       .convert_without_message()?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(bytes.into())
   }
 }

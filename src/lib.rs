@@ -28,3 +28,10 @@ pub mod tag;
 pub mod tree;
 pub mod tree_builder;
 pub(crate) mod util;
+
+/// Initialize libgit2 (openssl/ssh subsystems + `git_libgit2_init`) when the
+/// native module loads. Idempotent — internally a `Once`.
+#[napi_derive::module_init]
+fn init_libgit2() {
+  libgit2_sys::init();
+}
