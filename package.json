@@ -39,7 +39,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@napi-rs/cli": "^3.1.5",
+    "@napi-rs/cli": "^3.10.4",
     "@types/node": "^24.3.0",
     "ava": "^8.0.0",
     "pretty-ms": "^9.2.0"
