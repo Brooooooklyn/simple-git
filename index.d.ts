@@ -344,6 +344,14 @@ export declare class Diff {
   deltas(): Deltas
   /** Check if deltas are sorted case sensitively or insensitively. */
   isSortedIcase(): boolean
+  /**
+   * Render the diff as unified-diff text (the `git diff` patch format).
+   *
+   * `git_diff_line::content` does not include the origin sigil, so for
+   * context/add/delete lines the `+`/`-`/space sigil is emitted before the
+   * content bytes, matching libgit2's `diff_print.c`.
+   */
+  toPatch(): string
 }
 
 export declare class DiffDelta {
@@ -1338,6 +1346,28 @@ export declare class Repository {
    */
   diffTreeToWorkdirWithIndex(oldTree?: Tree | undefined | null, options?: DiffOptions | undefined | null): Diff
   /**
+   * Create a diff between two trees inside this repository.
+   *
+   * The `old_tree` will be used for the "old_file" side of the delta and the
+   * `new_tree` will be used for the "new_file" side. If `None` is passed for
+   * either tree, an empty tree is used for that side.
+   *
+   * Combined with `treebuilder()` + `blob()`, two arbitrary strings can be
+   * diffed without a workdir (like `git diff --no-index`): write each string
+   * to a blob, put each blob in a single-entry tree via `TreeBuilder`, and
+   * diff the two trees.
+   */
+  diffTreeToTree(oldTree?: Tree | undefined | null, newTree?: Tree | undefined | null, options?: DiffOptions | undefined | null): Diff
+  /**
+   * Create a `TreeBuilder` to construct an in-memory tree.
+   *
+   * The builder edits a single level of a tree (each `insert` filename is one
+   * path component). Pass `source` to start from a copy of an existing tree's
+   * entries, or omit it to start empty. `write()` materializes the builder's
+   * entries into a real tree object in this repository's object database.
+   */
+  treebuilder(source?: Tree | undefined | null): TreeBuilder
+  /**
    * Create new commit in the repository
    *
    * If the `update_ref` is not `None`, name of the reference that will be
@@ -1381,6 +1411,11 @@ export declare class Repository {
    * database as a blob, returning its OID hex string.
    */
   blobPath(path: string): string
+  /**
+   * Look up a blob in the repository's object database by its OID hex
+   * string. Throws if the OID is malformed or no such blob exists.
+   */
+  findBlob(oid: string): Blob
   /** Create a revwalk that can be used to traverse the commit graph. */
   revWalk(): RevWalk
   /**
@@ -1773,6 +1808,41 @@ export declare class Tree {
   getPath(name: string): TreeEntry | null
 }
 
+export declare class TreeBuilder {
+  /**
+   * Add or update an entry in the builder.
+   *
+   * `filename` must be a single path component (this is a single-level
+   * builder, not a recursive path). `filemode` is a raw git file mode;
+   * valid values are 0o040000 (16384, tree), 0o100644 (33188, blob),
+   * 0o100755 (33261, executable blob), 0o120000 (40960, symlink) and
+   * 0o160000 (57344, submodule commit).
+   *
+   * No attempt is made to ensure that the provided OID points to an object
+   * of a reasonable type (or any object at all).
+   */
+  insert(filename: string, oid: string, filemode: number): void
+  /** Remove an entry from the builder by its filename. */
+  remove(filename: string): void
+  /**
+   * Get an entry from the builder from its filename.
+   *
+   * Returns `null` when no entry with that filename exists.
+   */
+  get(filename: string): TreeBuilderEntry | null
+  /**
+   * Write the contents of the builder as a tree object into the
+   * repository's object database and return its OID hex string.
+   */
+  write(): string
+  /** Clear all the entries in the builder. */
+  clear(): void
+  /** Get the number of entries listed in the builder. */
+  len(): number
+  /** Return `true` if there is no entry in the builder. */
+  isEmpty(): boolean
+}
+
 export declare class TreeEntry {
   /** Get the id of the object pointed by the entry */
   id(): string
@@ -1882,6 +1952,63 @@ export declare const enum BranchType {
   Local = 0,
   /** A branch for a remote. */
   Remote = 1
+}
+
+/**
+ * A single `@@`-delimited hunk of a buffer diff, with its header text and
+ * eagerly materialized lines.
+ */
+export interface BufferDiffHunk {
+  /** The hunk header text (e.g. `@@ -1,2 +1,3 @@`), as bytes decoded lossily. */
+  header: string
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  lines: Array<BufferDiffLine>
+}
+
+/**
+ * A single line inside a `BufferDiffHunk`. `oldLineno`/`newLineno` are `null`
+ * when the line does not exist on that side (added lines have no `oldLineno`,
+ * deleted lines have no `newLineno`). `content` is the raw line bytes
+ * (including any trailing newline, but NOT the leading `+`/`-`/space sigil —
+ * that sigil is `origin`).
+ */
+export interface BufferDiffLine {
+  /**
+   * One-character sigil classifying the line: `' '` context, `'+'` addition,
+   * `'-'` deletion, `'='`/`'>'`/`'<'` end-of-file markers, `'F'` file header,
+   * `'H'` hunk header, `'B'` binary marker.
+   */
+  origin: string
+  oldLineno: number | null
+  newLineno: number | null
+  content: Buffer
+}
+
+/**
+ * The fully materialized result of `diffBuffers`. Everything is copied out
+ * eagerly because `git2::Patch` borrows the input buffers and cannot escape.
+ */
+export interface BufferDiffResult {
+  /**
+   * The complete unified-diff text of the patch (empty string when the two
+   * sides are identical).
+   */
+  patch: string
+  hunks: Array<BufferDiffHunk>
+  stats: BufferDiffStats
+}
+
+/**
+ * Line counts for a buffer diff. `filesChanged` is `1` when the patch is
+ * non-empty and `0` otherwise (`Patch` is a single-delta structure).
+ */
+export interface BufferDiffStats {
+  additions: number
+  deletions: number
+  filesChanged: number
 }
 
 /**
@@ -2052,6 +2179,17 @@ export declare const enum Delta {
   /** Entry in the index is conflicted */
   Conflicted = 10
 }
+
+/**
+ * Diff two raw in-memory buffers without a repository, like
+ * `git diff --no-index`.
+ *
+ * Pass `null` for a buffer to treat that side as absent/empty (the delta is
+ * then reported as an added or deleted file); passing `null` for both yields
+ * an empty patch with zero hunks. `oldPath`/`newPath` only label the output
+ * headers.
+ */
+export declare function diffBuffers(oldBuffer: Uint8Array | null, oldPath: string | null, newBuffer: Uint8Array | null, newPath: string | null, options?: DiffOptions | null): BufferDiffResult
 
 export declare const enum DiffFlags {
   /**
@@ -2481,4 +2619,15 @@ export interface TagForeachItem {
    * is not guaranteed to be valid UTF-8.
    */
   nameBytes: Buffer
+}
+
+/** A single entry in a `TreeBuilder`, as returned by `TreeBuilder.get()`. */
+export interface TreeBuilderEntry {
+  /** The OID of the object the entry points to, as a 40-char hex string. */
+  oid: string
+  /**
+   * The raw git file mode of the entry (e.g. 0o100644 = 33188 for a normal
+   * blob, 0o040000 = 16384 for a tree).
+   */
+  filemode: number
 }

@@ -64,4 +64,28 @@ impl Diff {
     ensure_alive(&self.alive)?;
     Ok(self.inner.is_sorted_icase())
   }
+
+  #[napi]
+  /// Render the diff as unified-diff text (the `git diff` patch format).
+  ///
+  /// `git_diff_line::content` does not include the origin sigil, so for
+  /// context/add/delete lines the `+`/`-`/space sigil is emitted before the
+  /// content bytes, matching libgit2's `diff_print.c`.
+  pub fn to_patch(&self) -> Result<String> {
+    ensure_alive(&self.alive)?;
+    let mut bytes = Vec::new();
+    self
+      .inner
+      .print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        let origin = line.origin();
+        if matches!(origin, ' ' | '+' | '-') {
+          let mut buf = [0u8; 4];
+          bytes.extend_from_slice(origin.encode_utf8(&mut buf).as_bytes());
+        }
+        bytes.extend_from_slice(line.content());
+        true
+      })
+      .convert_without_message()?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+  }
 }

@@ -9,6 +9,7 @@ use napi_derive::napi;
 use once_cell::sync::Lazy;
 
 use crate::blame::{BlameHunk, BlameOptions, blame_single_line, collect_blame};
+use crate::blob::{Blob, BlobParent};
 use crate::branch::{Branch, BranchType};
 use crate::checkout::{CheckoutOptions, build_checkout_builder};
 use crate::commit::{Commit, CommitInner};
@@ -28,6 +29,7 @@ use crate::signature::Signature;
 use crate::status::{FileStatus, StatusOptions, build_status_opts, status_from_bits};
 use crate::tag::Tag;
 use crate::tree::{Tree, TreeParent};
+use crate::tree_builder::{TreeBuilder, TreeBuilderParent};
 use crate::util::path_to_javascript_string;
 use crate::{CodeInto, GitErrorCode, Result, coded_error, disposed_error, ensure_alive};
 
@@ -1860,6 +1862,78 @@ impl Repository {
   }
 
   #[napi]
+  /// Create a diff between two trees inside this repository.
+  ///
+  /// The `old_tree` will be used for the "old_file" side of the delta and the
+  /// `new_tree` will be used for the "new_file" side. If `None` is passed for
+  /// either tree, an empty tree is used for that side.
+  ///
+  /// Combined with `treebuilder()` + `blob()`, two arbitrary strings can be
+  /// diffed without a workdir (like `git diff --no-index`): write each string
+  /// to a blob, put each blob in a single-entry tree via `TreeBuilder`, and
+  /// diff the two trees.
+  pub fn diff_tree_to_tree(
+    &self,
+    env: Env,
+    self_reference: Reference<Repository>,
+    old_tree: Option<&Tree>,
+    new_tree: Option<&Tree>,
+    options: Option<DiffOptions>,
+  ) -> napi::Result<Diff> {
+    if let Some(t) = old_tree {
+      ensure_alive(&t.alive).code_into(env)?;
+    }
+    if let Some(t) = new_tree {
+      ensure_alive(&t.alive).code_into(env)?;
+    }
+    let mut diff_options = build_diff_options(options);
+    Ok(Diff {
+      inner: self_reference.share_with(env, |repo| {
+        repo
+          .inner()
+          .code_into(env)?
+          .diff_tree_to_tree(
+            old_tree.map(|t| t.inner()),
+            new_tree.map(|t| t.inner()),
+            Some(&mut diff_options),
+          )
+          .convert_without_message()
+          .code_into(env)
+      })?,
+      alive: self.alive.clone(),
+    })
+  }
+
+  #[napi]
+  /// Create a `TreeBuilder` to construct an in-memory tree.
+  ///
+  /// The builder edits a single level of a tree (each `insert` filename is one
+  /// path component). Pass `source` to start from a copy of an existing tree's
+  /// entries, or omit it to start empty. `write()` materializes the builder's
+  /// entries into a real tree object in this repository's object database.
+  pub fn treebuilder(
+    &self,
+    env: Env,
+    self_reference: Reference<Repository>,
+    source: Option<&Tree>,
+  ) -> napi::Result<TreeBuilder> {
+    if let Some(t) = source {
+      ensure_alive(&t.alive).code_into(env)?;
+    }
+    Ok(TreeBuilder {
+      inner: TreeBuilderParent::Repository(self_reference.share_with(env, |repo| {
+        repo
+          .inner()
+          .code_into(env)?
+          .treebuilder(source.map(|t| t.inner()))
+          .convert_without_message()
+          .code_into(env)
+      })?),
+      alive: self.alive.clone(),
+    })
+  }
+
+  #[napi]
   /// Create new commit in the repository
   ///
   /// If the `update_ref` is not `None`, name of the reference that will be
@@ -1991,6 +2065,32 @@ impl Repository {
       .blob_path(Path::new(&path))
       .map(|oid| oid.to_string())
       .convert_without_message()
+  }
+
+  #[napi]
+  /// Look up a blob in the repository's object database by its OID hex
+  /// string. Throws if the OID is malformed or no such blob exists.
+  pub fn find_blob(
+    &self,
+    oid: String,
+    self_ref: Reference<Repository>,
+    env: Env,
+  ) -> napi::Result<Blob> {
+    Ok(Blob {
+      inner: BlobParent::Repository(self_ref.share_with(env, |repo| {
+        repo
+          .inner()
+          .code_into(env)?
+          .find_blob(
+            git2::Oid::from_str(oid.as_str())
+              .convert(format!("Invalid OID [{oid}]"))
+              .code_into(env)?,
+          )
+          .convert(format!("Find blob from OID [{oid}] failed"))
+          .code_into(env)
+      })?),
+      alive: self.alive.clone(),
+    })
   }
 
   #[napi]
@@ -2376,7 +2476,7 @@ pub struct TagForeachItem {
 }
 
 /// Translate the JS-facing `DiffOptions` into a configured `git2::DiffOptions`.
-fn build_diff_options(options: Option<DiffOptions>) -> git2::DiffOptions {
+pub(crate) fn build_diff_options(options: Option<DiffOptions>) -> git2::DiffOptions {
   let mut diff_options = git2::DiffOptions::default();
   if let Some(options) = options
     && options.show_unmodified.unwrap_or(false)
