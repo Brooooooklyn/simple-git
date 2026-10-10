@@ -132,16 +132,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@cloudflare/build-output-utils@npm:0.8.6":
-  version: 0.8.6
-  resolution: "@cloudflare/build-output-utils@npm:0.8.6"
-  dependencies:
-    "@cloudflare/config": "npm:0.24.0"
-  checksum: 10c0/3c7421415940a4f9766c3f52f8e8cfd79f2995b5fd4ada6c97674366538f23e75018c823d6a812f1c0d13db241e4f26d20ccc4697204645fb29b2ec7be8f39f6
-  languageName: node
-  linkType: hard
-
-"@cloudflare/build-output-utils@npm:^0.9.0":
+"@cloudflare/build-output-utils@npm:0.9.0, @cloudflare/build-output-utils@npm:^0.9.0":
   version: 0.9.0
   resolution: "@cloudflare/build-output-utils@npm:0.9.0"
   dependencies:
@@ -150,30 +141,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@cloudflare/codemods@npm:0.4.1":
-  version: 0.4.1
-  resolution: "@cloudflare/codemods@npm:0.4.1"
-  bin:
-    cloudflare-codemods: dist/bin.mjs
-  checksum: 10c0/c27b7f408cf4d53496df8a6ef6333231890ce384ecbfb8d6c780992df2fc100e329589fce9a18f11e4e7e6ac85772cddc06406a7992277b1d661ecb864f93468
-  languageName: node
-  linkType: hard
-
-"@cloudflare/codemods@npm:^0.4.2":
+"@cloudflare/codemods@npm:0.4.2, @cloudflare/codemods@npm:^0.4.2":
   version: 0.4.2
   resolution: "@cloudflare/codemods@npm:0.4.2"
   bin:
     cloudflare-codemods: dist/bin.mjs
   checksum: 10c0/3d24d2bf3e932b4bd3d3815735aceef2f4eab32d09a5a04ecc8c42ca9cf1f0cce69a80d608686eba41c8ec80cd6e8ab0025e2b0ca9df532c4ee611ea9eeb20c2
-  languageName: node
-  linkType: hard
-
-"@cloudflare/config@npm:0.24.0":
-  version: 0.24.0
-  resolution: "@cloudflare/config@npm:0.24.0"
-  dependencies:
-    zod: "npm:4.4.3"
-  checksum: 10c0/4439a2c3916278be75419047e5c17df469632609532f0aee264a3af10b299bcda683e410ca6026f4355aeab8f15df7088ea15bc9d83241b3c422e66c75742d7f
   languageName: node
   linkType: hard
 
@@ -193,13 +166,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@cloudflare/runtime-types@npm:0.1.8":
-  version: 0.1.8
-  resolution: "@cloudflare/runtime-types@npm:0.1.8"
+"@cloudflare/runtime-types@npm:0.1.9":
+  version: 0.1.9
+  resolution: "@cloudflare/runtime-types@npm:0.1.9"
   dependencies:
-    miniflare: "npm:5.20261006.0-alpha"
+    miniflare: "npm:5.20261006.1-alpha"
     workerd: "npm:1.20261006.1"
-  checksum: 10c0/538a96c53a12c23c1883944eac28d17d097ec0dd7cbc36cb521866641efefc4b5d8953b06c4135884b0d0dd131a650a2926918b5f6da3c5ffebe66256bf8fcff
+  checksum: 10c0/89dfa96ac4d694395851c81bf91b7936020e821c4bc09dfc01f5e35c75724b00cf124821ead26bb86548dca8e6c9f8a660698b54be7740672e235d83b9babb46
   languageName: node
   linkType: hard
 
@@ -1204,18 +1177,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-darwin-arm64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-darwin-arm64@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-darwin-arm64": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-darwin-arm64":
-      optional: true
-  conditions: os=darwin & cpu=arm64
-  languageName: node
-  linkType: hard
-
 "@img/sharp-darwin-arm64@npm:0.35.5":
   version: 0.35.5
   resolution: "@img/sharp-darwin-arm64@npm:0.35.5"
@@ -1225,18 +1186,6 @@ __metadata:
     "@img/sharp-libvips-darwin-arm64":
       optional: true
   conditions: os=darwin & cpu=arm64
-  languageName: node
-  linkType: hard
-
-"@img/sharp-darwin-x64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-darwin-x64@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-darwin-x64": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-darwin-x64":
-      optional: true
-  conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
@@ -1252,28 +1201,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-freebsd-wasm32@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-freebsd-wasm32@npm:0.35.4"
-  dependencies:
-    "@img/sharp-wasm32": "npm:0.35.4"
-  conditions: os=freebsd
-  languageName: node
-  linkType: hard
-
 "@img/sharp-freebsd-wasm32@npm:0.35.5":
   version: 0.35.5
   resolution: "@img/sharp-freebsd-wasm32@npm:0.35.5"
   dependencies:
     "@img/sharp-wasm32": "npm:0.35.5"
   conditions: os=freebsd
-  languageName: node
-  linkType: hard
-
-"@img/sharp-libvips-darwin-arm64@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-darwin-arm64@npm:1.3.3"
-  conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
@@ -1284,24 +1217,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-libvips-darwin-x64@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-darwin-x64@npm:1.3.3"
-  conditions: os=darwin & cpu=x64
-  languageName: node
-  linkType: hard
-
 "@img/sharp-libvips-darwin-x64@npm:1.3.4":
   version: 1.3.4
   resolution: "@img/sharp-libvips-darwin-x64@npm:1.3.4"
   conditions: os=darwin & cpu=x64
-  languageName: node
-  linkType: hard
-
-"@img/sharp-libvips-linux-arm64@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-linux-arm64@npm:1.3.3"
-  conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
@@ -1312,24 +1231,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-libvips-linux-arm@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-linux-arm@npm:1.3.3"
-  conditions: os=linux & cpu=arm & libc=glibc
-  languageName: node
-  linkType: hard
-
 "@img/sharp-libvips-linux-arm@npm:1.3.4":
   version: 1.3.4
   resolution: "@img/sharp-libvips-linux-arm@npm:1.3.4"
   conditions: os=linux & cpu=arm & libc=glibc
-  languageName: node
-  linkType: hard
-
-"@img/sharp-libvips-linux-ppc64@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-linux-ppc64@npm:1.3.3"
-  conditions: os=linux & cpu=ppc64 & libc=glibc
   languageName: node
   linkType: hard
 
@@ -1340,24 +1245,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-libvips-linux-riscv64@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-linux-riscv64@npm:1.3.3"
-  conditions: os=linux & cpu=riscv64 & libc=glibc
-  languageName: node
-  linkType: hard
-
 "@img/sharp-libvips-linux-riscv64@npm:1.3.4":
   version: 1.3.4
   resolution: "@img/sharp-libvips-linux-riscv64@npm:1.3.4"
   conditions: os=linux & cpu=riscv64 & libc=glibc
-  languageName: node
-  linkType: hard
-
-"@img/sharp-libvips-linux-s390x@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-linux-s390x@npm:1.3.3"
-  conditions: os=linux & cpu=s390x & libc=glibc
   languageName: node
   linkType: hard
 
@@ -1368,24 +1259,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-libvips-linux-x64@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-linux-x64@npm:1.3.3"
-  conditions: os=linux & cpu=x64 & libc=glibc
-  languageName: node
-  linkType: hard
-
 "@img/sharp-libvips-linux-x64@npm:1.3.4":
   version: 1.3.4
   resolution: "@img/sharp-libvips-linux-x64@npm:1.3.4"
   conditions: os=linux & cpu=x64 & libc=glibc
-  languageName: node
-  linkType: hard
-
-"@img/sharp-libvips-linuxmusl-arm64@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-linuxmusl-arm64@npm:1.3.3"
-  conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
@@ -1396,29 +1273,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-libvips-linuxmusl-x64@npm:1.3.3":
-  version: 1.3.3
-  resolution: "@img/sharp-libvips-linuxmusl-x64@npm:1.3.3"
-  conditions: os=linux & cpu=x64 & libc=musl
-  languageName: node
-  linkType: hard
-
 "@img/sharp-libvips-linuxmusl-x64@npm:1.3.4":
   version: 1.3.4
   resolution: "@img/sharp-libvips-linuxmusl-x64@npm:1.3.4"
   conditions: os=linux & cpu=x64 & libc=musl
-  languageName: node
-  linkType: hard
-
-"@img/sharp-linux-arm64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-linux-arm64@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-linux-arm64": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-linux-arm64":
-      optional: true
-  conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
@@ -1434,18 +1292,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-linux-arm@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-linux-arm@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-linux-arm": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-linux-arm":
-      optional: true
-  conditions: os=linux & cpu=arm & libc=glibc
-  languageName: node
-  linkType: hard
-
 "@img/sharp-linux-arm@npm:0.35.5":
   version: 0.35.5
   resolution: "@img/sharp-linux-arm@npm:0.35.5"
@@ -1455,18 +1301,6 @@ __metadata:
     "@img/sharp-libvips-linux-arm":
       optional: true
   conditions: os=linux & cpu=arm & libc=glibc
-  languageName: node
-  linkType: hard
-
-"@img/sharp-linux-ppc64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-linux-ppc64@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-linux-ppc64": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-linux-ppc64":
-      optional: true
-  conditions: os=linux & cpu=ppc64 & libc=glibc
   languageName: node
   linkType: hard
 
@@ -1482,18 +1316,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-linux-riscv64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-linux-riscv64@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-linux-riscv64": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-linux-riscv64":
-      optional: true
-  conditions: os=linux & cpu=riscv64 & libc=glibc
-  languageName: node
-  linkType: hard
-
 "@img/sharp-linux-riscv64@npm:0.35.5":
   version: 0.35.5
   resolution: "@img/sharp-linux-riscv64@npm:0.35.5"
@@ -1503,18 +1325,6 @@ __metadata:
     "@img/sharp-libvips-linux-riscv64":
       optional: true
   conditions: os=linux & cpu=riscv64 & libc=glibc
-  languageName: node
-  linkType: hard
-
-"@img/sharp-linux-s390x@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-linux-s390x@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-linux-s390x": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-linux-s390x":
-      optional: true
-  conditions: os=linux & cpu=s390x & libc=glibc
   languageName: node
   linkType: hard
 
@@ -1530,18 +1340,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-linux-x64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-linux-x64@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-linux-x64": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-linux-x64":
-      optional: true
-  conditions: os=linux & cpu=x64 & libc=glibc
-  languageName: node
-  linkType: hard
-
 "@img/sharp-linux-x64@npm:0.35.5":
   version: 0.35.5
   resolution: "@img/sharp-linux-x64@npm:0.35.5"
@@ -1551,18 +1349,6 @@ __metadata:
     "@img/sharp-libvips-linux-x64":
       optional: true
   conditions: os=linux & cpu=x64 & libc=glibc
-  languageName: node
-  linkType: hard
-
-"@img/sharp-linuxmusl-arm64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-linuxmusl-arm64@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-linuxmusl-arm64": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-linuxmusl-arm64":
-      optional: true
-  conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
@@ -1578,18 +1364,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-linuxmusl-x64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-linuxmusl-x64@npm:0.35.4"
-  dependencies:
-    "@img/sharp-libvips-linuxmusl-x64": "npm:1.3.3"
-  dependenciesMeta:
-    "@img/sharp-libvips-linuxmusl-x64":
-      optional: true
-  conditions: os=linux & cpu=x64 & libc=musl
-  languageName: node
-  linkType: hard
-
 "@img/sharp-linuxmusl-x64@npm:0.35.5":
   version: 0.35.5
   resolution: "@img/sharp-linuxmusl-x64@npm:0.35.5"
@@ -1602,30 +1376,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-wasm32@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-wasm32@npm:0.35.4"
-  dependencies:
-    "@emnapi/runtime": "npm:^1.11.3"
-  checksum: 10c0/7f5e394f168eb2f038b8ae4949fb5434085d1db931ede2ae1389479d7a1dbe11e2fc9d58e8e9830bff744ba996256c9e411be1d466dfcbf6e1f4d153b84f25ff
-  languageName: node
-  linkType: hard
-
 "@img/sharp-wasm32@npm:0.35.5":
   version: 0.35.5
   resolution: "@img/sharp-wasm32@npm:0.35.5"
   dependencies:
     "@emnapi/runtime": "npm:^1.11.3"
   checksum: 10c0/da3f39d733135fde6d8b5009d282e12049f8f6df33ac3e4dc5d98868123842b5c888002ea1647e1824af9b4f9274a28826f35ebf2967b58a7416efd2aeb6299f
-  languageName: node
-  linkType: hard
-
-"@img/sharp-webcontainers-wasm32@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-webcontainers-wasm32@npm:0.35.4"
-  dependencies:
-    "@img/sharp-wasm32": "npm:0.35.4"
-  conditions: cpu=wasm32
   languageName: node
   linkType: hard
 
@@ -1638,13 +1394,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-win32-arm64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-win32-arm64@npm:0.35.4"
-  conditions: os=win32 & cpu=arm64
-  languageName: node
-  linkType: hard
-
 "@img/sharp-win32-arm64@npm:0.35.5":
   version: 0.35.5
   resolution: "@img/sharp-win32-arm64@npm:0.35.5"
@@ -1652,24 +1401,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@img/sharp-win32-ia32@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-win32-ia32@npm:0.35.4"
-  conditions: os=win32 & cpu=ia32
-  languageName: node
-  linkType: hard
-
 "@img/sharp-win32-ia32@npm:0.35.5":
   version: 0.35.5
   resolution: "@img/sharp-win32-ia32@npm:0.35.5"
   conditions: os=win32 & cpu=ia32
-  languageName: node
-  linkType: hard
-
-"@img/sharp-win32-x64@npm:0.35.4":
-  version: 0.35.4
-  resolution: "@img/sharp-win32-x64@npm:0.35.4"
-  conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
@@ -2402,14 +2137,14 @@ __metadata:
     "@types/node": "npm:^24.10.1"
     "@types/react": "npm:^19.0.0"
     "@types/react-dom": "npm:^19.0.0"
-    "@void/md": "npm:0.26.1"
-    "@void/react": "npm:0.26.1"
+    "@void/md": "npm:0.27.0"
+    "@void/react": "npm:0.27.0"
     react: "npm:^19.2.1"
     react-dom: "npm:^19.2.1"
     tailwindcss: "npm:4.3.3"
     typescript: "npm:^7.0.0"
     vite: "npm:^8.0.0"
-    void: "npm:0.26.1"
+    void: "npm:0.27.0"
   languageName: unknown
   linkType: soft
 
@@ -3663,45 +3398,45 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@void/deploy-cloudflare@npm:0.26.1":
-  version: 0.26.1
-  resolution: "@void/deploy-cloudflare@npm:0.26.1"
+"@void/deploy-cloudflare@npm:0.27.0":
+  version: 0.27.0
+  resolution: "@void/deploy-cloudflare@npm:0.27.0"
   dependencies:
-    "@void/deploy-core": "npm:0.26.1"
+    "@void/deploy-core": "npm:0.27.0"
     jsonc-parser: "npm:^3.3.1"
-  checksum: 10c0/9f6968cde94584f7067a6aa18ecb1454ddf6745ab5eb55b9c1f3f549899d499748a0ee1c765e280a187b5a1232b662804177daa6ae2623106dd234970992192e
+  checksum: 10c0/534c483f947d77e28da26bfbfd55d9385187f7cf4167ba2ff3478cbf918b3b927e11aa91296735c8e07c9b4f3a43c35a28ccb118c61d55b18f2a72b93a79d51b
   languageName: node
   linkType: hard
 
-"@void/deploy-core@npm:0.26.1":
-  version: 0.26.1
-  resolution: "@void/deploy-core@npm:0.26.1"
-  checksum: 10c0/c41ff6c53020265aabbd452e1efd00eec38968f66f96863a7ee4dd0348f70bd0efa99881032629e9596288d77cdf29cd6351ae8929cac05065a262c6772a76c4
+"@void/deploy-core@npm:0.27.0":
+  version: 0.27.0
+  resolution: "@void/deploy-core@npm:0.27.0"
+  checksum: 10c0/a25e9eb4ebc5779e50684f8b76d3eb0f43c24a23ded9c685d3b94f32f0b63c245dd45d4b5867f839149e095ede08f71dd09d32747a285229ee47cd2b5771a3be
   languageName: node
   linkType: hard
 
-"@void/edge@npm:0.26.1":
-  version: 0.26.1
-  resolution: "@void/edge@npm:0.26.1"
+"@void/edge@npm:0.27.0":
+  version: 0.27.0
+  resolution: "@void/edge@npm:0.27.0"
   dependencies:
-    "@void/deploy-core": "npm:0.26.1"
-  checksum: 10c0/171171afaa4d1cf8c4df3ac6bc36badeb2ed5766834b5a908ede3a5604b5523e88015389a97a00b923c94c11ada2945056b5e7208af27c52c7393adb011d38a1
+    "@void/deploy-core": "npm:0.27.0"
+  checksum: 10c0/05b23c440c2591d53a75e47b6afd13561368dee33434514200abc1181a56cbeb9c6e257ad91fb2d394048d60860d15d4b82e591f26d95238804a331b62627ca6
   languageName: node
   linkType: hard
 
-"@void/isr@npm:0.26.1":
-  version: 0.26.1
-  resolution: "@void/isr@npm:0.26.1"
+"@void/isr@npm:0.27.0":
+  version: 0.27.0
+  resolution: "@void/isr@npm:0.27.0"
   dependencies:
     "@cloudflare/workers-types": "npm:^5.20261009.1"
-    "@void/edge": "npm:0.26.1"
-  checksum: 10c0/e5f5872c2a69d190b214f12a19c3f6bf2d1a8977b5417a5e23ded32c7953c52ac08034777c1ed280cdc62379f39291564c5023aedad4a6650798e6828333e8fa
+    "@void/edge": "npm:0.27.0"
+  checksum: 10c0/da650f802237f4ead16861dad717684dfbd6e1651a47fc15fa38e84a3ec77df7d92137daf96d11d3c5f21393450fdc9e2cf3efece4a97ec45a3c296e71f78581
   languageName: node
   linkType: hard
 
-"@void/md@npm:0.26.1":
-  version: 0.26.1
-  resolution: "@void/md@npm:0.26.1"
+"@void/md@npm:0.27.0":
+  version: 0.27.0
+  resolution: "@void/md@npm:0.27.0"
   dependencies:
     "@shikijs/engine-javascript": "npm:^4.5.0"
     "@shikijs/transformers": "npm:^4.5.0"
@@ -3717,31 +3452,31 @@ __metadata:
     tinyglobby: "npm:^0.2.17"
   peerDependencies:
     vite: ^8.0.0
-    void: 0.26.1
-  checksum: 10c0/7dcce546f18e8d7ec0e8b70dc47173c50b833c0feace7f6259477a84c0b0816f4e3bfd517c11c2b02c6275d1fa9bc440546ee17734e39991291b38ee77160dd6
+    void: 0.27.0
+  checksum: 10c0/f1d3916c58429c9d431ea3210ac0ef83713974fb8f8d923dbd961b9224da60cdd03e9f866a107293ae514a5f782639b0541c9cf5b1a0004d7dd220a0709ade48
   languageName: node
   linkType: hard
 
-"@void/platform@npm:0.26.1":
-  version: 0.26.1
-  resolution: "@void/platform@npm:0.26.1"
+"@void/platform@npm:0.27.0":
+  version: 0.27.0
+  resolution: "@void/platform@npm:0.27.0"
   dependencies:
     pathslash: "npm:^0.1.0"
-  checksum: 10c0/6ba48e55f12d941664e10967833516e39c33f01feafd7c551a36b49b22888741b7f31bf8398c621f5e7eb9578719fc020761616df05c28ac54df751bfb5a2e79
+  checksum: 10c0/acfa0e2b66d9187acfcc31950e5711c163ce4c550b350437315c5b1f256e42d02345e5263c99b68aa59d169e2b99e2fea58a56bc2623dbb2ad510bae87cc14aa
   languageName: node
   linkType: hard
 
-"@void/react@npm:0.26.1":
-  version: 0.26.1
-  resolution: "@void/react@npm:0.26.1"
+"@void/react@npm:0.27.0":
+  version: 0.27.0
+  resolution: "@void/react@npm:0.27.0"
   dependencies:
     "@vitejs/plugin-react": "npm:^6.1.2"
   peerDependencies:
     react: ^19.0.0
     react-dom: ^19.0.0
     vite: ^8.0.0
-    void: 0.26.1
-  checksum: 10c0/af58e84c361bc15af48af9757a8e3f0cd41ac26f83b4318427c924c8922530494d32751f97a9f0baf421f8ac335ecff19c351a38f535dde374e2064846c83d34
+    void: 0.27.0
+  checksum: 10c0/a7eadc3f8e22bb18ff0327de43c3ea61a440648b77281109a8487ff16008100d751c394e145a07496dd2f50bd8604051162aaf8242719ed300c44c8662997617
   languageName: node
   linkType: hard
 
@@ -4120,21 +3855,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"cf@npm:^1.0.0-beta.13":
-  version: 1.0.0-beta.13
-  resolution: "cf@npm:1.0.0-beta.13"
+"cf@npm:^1.0.0-beta.14":
+  version: 1.0.0-beta.14
+  resolution: "cf@npm:1.0.0-beta.14"
   dependencies:
-    "@cloudflare/build-output-utils": "npm:0.8.6"
-    "@cloudflare/codemods": "npm:0.4.1"
-    "@cloudflare/config": "npm:0.24.0"
-    "@cloudflare/runtime-types": "npm:0.1.8"
+    "@cloudflare/build-output-utils": "npm:0.9.0"
+    "@cloudflare/codemods": "npm:0.4.2"
+    "@cloudflare/config": "npm:0.24.1"
+    "@cloudflare/runtime-types": "npm:0.1.9"
     blake3-wasm: "npm:2.1.5"
-    miniflare: "npm:5.20261006.0-alpha"
+    miniflare: "npm:5.20261006.1-alpha"
     minisearch: "npm:7.2.0"
   bin:
     cf: ./bin/cf
     cloudflare: ./bin/cf
-  checksum: 10c0/75e342e1ad3b58e9c38da31fe4444c9d0007a98e24ccf4fe497e184bcc0b8a3f97015c07b38f7f96f9acb4acc46725ec89ce07a24d789496bf197e15981f0bcb
+  checksum: 10c0/1eb046d734d1e1ba3c59feee426202b359cf3a7e6160276c29c348e94ede425b900c26ae3e5f87cca1c0310405333c10893cde2ed433038bc24896b55f6fd761
   languageName: node
   linkType: hard
 
@@ -5954,20 +5689,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"miniflare@npm:5.20261006.0-alpha":
-  version: 5.20261006.0-alpha
-  resolution: "miniflare@npm:5.20261006.0-alpha"
-  dependencies:
-    "@cspotcode/source-map-support": "npm:0.8.1"
-    sharp: "npm:0.35.4"
-    undici: "npm:7.29.1"
-    workerd: "npm:1.20261006.1"
-    ws: "npm:8.21.0"
-    youch: "npm:4.1.0-beta.10"
-  checksum: 10c0/bafbd2ef6f09cf9a3bebf954fb1061f08f54dae6b14358b921a6d645af9da554ef36b96ff925bef480b18a739eb8c7c776b3c8f3fc6f191520dd1f6cdd12f879
-  languageName: node
-  linkType: hard
-
 "miniflare@npm:5.20261006.1-alpha":
   version: 5.20261006.1-alpha
   resolution: "miniflare@npm:5.20261006.1-alpha"
@@ -6657,96 +6378,6 @@ __metadata:
   version: 3.1.2
   resolution: "set-cookie-parser@npm:3.1.2"
   checksum: 10c0/ea3d4fba5affd57f2a4c2e5172d701c4c17645879f9fddf1331622ae556210d840cdcb6666f0d71288ad545e31db5927bf49696051928e0186e079588cd5ddb0
-  languageName: node
-  linkType: hard
-
-"sharp@npm:0.35.4":
-  version: 0.35.4
-  resolution: "sharp@npm:0.35.4"
-  dependencies:
-    "@img/colour": "npm:^1.1.0"
-    "@img/sharp-darwin-arm64": "npm:0.35.4"
-    "@img/sharp-darwin-x64": "npm:0.35.4"
-    "@img/sharp-freebsd-wasm32": "npm:0.35.4"
-    "@img/sharp-libvips-darwin-arm64": "npm:1.3.3"
-    "@img/sharp-libvips-darwin-x64": "npm:1.3.3"
-    "@img/sharp-libvips-linux-arm": "npm:1.3.3"
-    "@img/sharp-libvips-linux-arm64": "npm:1.3.3"
-    "@img/sharp-libvips-linux-ppc64": "npm:1.3.3"
-    "@img/sharp-libvips-linux-riscv64": "npm:1.3.3"
-    "@img/sharp-libvips-linux-s390x": "npm:1.3.3"
-    "@img/sharp-libvips-linux-x64": "npm:1.3.3"
-    "@img/sharp-libvips-linuxmusl-arm64": "npm:1.3.3"
-    "@img/sharp-libvips-linuxmusl-x64": "npm:1.3.3"
-    "@img/sharp-linux-arm": "npm:0.35.4"
-    "@img/sharp-linux-arm64": "npm:0.35.4"
-    "@img/sharp-linux-ppc64": "npm:0.35.4"
-    "@img/sharp-linux-riscv64": "npm:0.35.4"
-    "@img/sharp-linux-s390x": "npm:0.35.4"
-    "@img/sharp-linux-x64": "npm:0.35.4"
-    "@img/sharp-linuxmusl-arm64": "npm:0.35.4"
-    "@img/sharp-linuxmusl-x64": "npm:0.35.4"
-    "@img/sharp-webcontainers-wasm32": "npm:0.35.4"
-    "@img/sharp-win32-arm64": "npm:0.35.4"
-    "@img/sharp-win32-ia32": "npm:0.35.4"
-    "@img/sharp-win32-x64": "npm:0.35.4"
-    detect-libc: "npm:^2.1.2"
-    semver: "npm:^7.8.5"
-  dependenciesMeta:
-    "@img/sharp-darwin-arm64":
-      optional: true
-    "@img/sharp-darwin-x64":
-      optional: true
-    "@img/sharp-freebsd-wasm32":
-      optional: true
-    "@img/sharp-libvips-darwin-arm64":
-      optional: true
-    "@img/sharp-libvips-darwin-x64":
-      optional: true
-    "@img/sharp-libvips-linux-arm":
-      optional: true
-    "@img/sharp-libvips-linux-arm64":
-      optional: true
-    "@img/sharp-libvips-linux-ppc64":
-      optional: true
-    "@img/sharp-libvips-linux-riscv64":
-      optional: true
-    "@img/sharp-libvips-linux-s390x":
-      optional: true
-    "@img/sharp-libvips-linux-x64":
-      optional: true
-    "@img/sharp-libvips-linuxmusl-arm64":
-      optional: true
-    "@img/sharp-libvips-linuxmusl-x64":
-      optional: true
-    "@img/sharp-linux-arm":
-      optional: true
-    "@img/sharp-linux-arm64":
-      optional: true
-    "@img/sharp-linux-ppc64":
-      optional: true
-    "@img/sharp-linux-riscv64":
-      optional: true
-    "@img/sharp-linux-s390x":
-      optional: true
-    "@img/sharp-linux-x64":
-      optional: true
-    "@img/sharp-linuxmusl-arm64":
-      optional: true
-    "@img/sharp-linuxmusl-x64":
-      optional: true
-    "@img/sharp-webcontainers-wasm32":
-      optional: true
-    "@img/sharp-win32-arm64":
-      optional: true
-    "@img/sharp-win32-ia32":
-      optional: true
-    "@img/sharp-win32-x64":
-      optional: true
-  peerDependenciesMeta:
-    "@types/node":
-      optional: true
-  checksum: 10c0/dbcc0909200cbff98e82805c86085b94afbd45f373897a04b21e52e9bbc1671dc64970350dd3cb6b2d0970f3444be7100d728005dc6620e39b599269ed7e15eb
   languageName: node
   linkType: hard
 
@@ -7462,9 +7093,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"void@npm:0.26.1":
-  version: 0.26.1
-  resolution: "void@npm:0.26.1"
+"void@npm:0.27.0":
+  version: 0.27.0
+  resolution: "void@npm:0.27.0"
   dependencies:
     "@cloudflare/build-output-utils": "npm:^0.9.0"
     "@cloudflare/codemods": "npm:^0.4.2"
@@ -7474,15 +7105,15 @@ __metadata:
     "@cloudflare/workers-auth": "npm:^0.13.1"
     "@cloudflare/workers-types": "npm:^5.20261009.1"
     "@napi-rs/keyring": "npm:^2.1.0"
-    "@void/deploy-cloudflare": "npm:0.26.1"
-    "@void/deploy-core": "npm:0.26.1"
-    "@void/edge": "npm:0.26.1"
-    "@void/isr": "npm:0.26.1"
-    "@void/platform": "npm:0.26.1"
+    "@void/deploy-cloudflare": "npm:0.27.0"
+    "@void/deploy-core": "npm:0.27.0"
+    "@void/edge": "npm:0.27.0"
+    "@void/isr": "npm:0.27.0"
+    "@void/platform": "npm:0.27.0"
     better-auth: "npm:^1.7.7"
     better-sqlite3: "npm:^13.0.3"
     blake3-jit: "npm:^1.1.0"
-    cf: "npm:^1.0.0-beta.13"
+    cf: "npm:^1.0.0-beta.14"
     drizzle-arktype: "npm:^0.1.3"
     drizzle-kit: "npm:^0.31.11"
     drizzle-orm: "npm:^0.45.3"
@@ -7501,7 +7132,7 @@ __metadata:
     postal-mime: "npm:^4.0.5"
     proper-lockfile: "npm:^4.1.2"
   peerDependencies:
-    "@void/md": 0.26.1
+    "@void/md": 0.27.0
     arktype: ">=2.0.0"
     valibot: ">=1.0.0-beta.7"
     vite: ^8.0.0
@@ -7517,7 +7148,7 @@ __metadata:
       optional: true
   bin:
     void: dist/cli/cli.mjs
-  checksum: 10c0/4d2b93b76cf6a32fd126f157f6631bd5bfc09fa5a8694ad742bb664628c720b723325807e516c5dfa209b426fddbfb9193aeac32ad4f3083ec57abdc6d291555
+  checksum: 10c0/65a1cef05a8c04093aa1b32b824989747502e445a2a19f899520486c6737db3384edb783f00c2934fdb5b7bb172087a136e84b01a36de3c8f84b72c572718310
   languageName: node
   linkType: hard
 
@@ -7708,13 +7339,6 @@ __metadata:
     cookie: "npm:^1.0.2"
     youch-core: "npm:^0.3.3"
   checksum: 10c0/588d65aa5837a46c8473cf57a9129115383f57aad5899915d37005950decfefc66bec85b8a1262dbefd623a122c279095074655889317311a554f9c2e290a5b3
-  languageName: node
-  linkType: hard
-
-"zod@npm:4.4.3":
-  version: 4.4.3
-  resolution: "zod@npm:4.4.3"
-  checksum: 10c0/7ea31b558e88f9faf44f31dd185e2e1cbf51fed3081787fb96cc2534749b50c0acfc6da7f0922a7353ed092dd358c7d50c28ea96c94d04af64191bd33152eca3
   languageName: node
   linkType: hard
 
