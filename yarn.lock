@@ -2155,7 +2155,7 @@ __metadata:
     "@napi-rs/cli": "npm:^3.10.4"
     "@types/node": "npm:^24.3.0"
     ava: "npm:^8.0.0"
-    pretty-ms: "npm:^9.2.0"
+    pretty-ms: "npm:^10.0.0"
   languageName: unknown
   linkType: soft
 
@@ -6153,7 +6153,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"pretty-ms@npm:^9.2.0, pretty-ms@npm:^9.3.0":
+"pretty-ms@npm:^10.0.0":
+  version: 10.0.0
+  resolution: "pretty-ms@npm:10.0.0"
+  checksum: 10c0/ce40c4612989782b3656a18c56f67bd71d90269d245b5f6f11be38f34fa1a57833374344b31714df679704ee761ab6df725f1ee455945334f973c510e4804ce2
+  languageName: node
+  linkType: hard
+
+"pretty-ms@npm:^9.3.0":
   version: 9.3.0
   resolution: "pretty-ms@npm:9.3.0"
   dependencies:
