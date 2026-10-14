@@ -17,6 +17,7 @@
     "@fontsource-variable/space-grotesk": "^5.2.10",
     "@void/md": "0.28.0",
     "@void/react": "0.28.0",
+    "markdown-it": "^15.0.2",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "void": "0.28.0"
