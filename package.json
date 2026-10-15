@@ -42,7 +42,7 @@
     "@napi-rs/cli": "^3.10.4",
     "@types/node": "^24.3.0",
     "ava": "^8.0.0",
-    "pretty-ms": "^9.2.0"
+    "pretty-ms": "^10.0.0"
   },
   "engines": {
     "node": ">= 10"
