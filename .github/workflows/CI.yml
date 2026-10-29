@@ -39,7 +39,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           cache: 'yarn'
 
       - name: Install
@@ -117,7 +117,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           cache: yarn
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v2
@@ -172,12 +172,8 @@ jobs:
     name: Build FreeBSD
     steps:
       - uses: actions/checkout@v7
-      - name: Build
-        id: build
+      - name: Start FreeBSD VM
         uses: cross-platform-actions/action@v1.7.0
-        env:
-          DEBUG: napi:*
-          RUSTUP_IO_THREADS: 1
         with:
           operating_system: freebsd
           version: '14.3'
@@ -185,28 +181,34 @@ jobs:
           cpu_count: 3
           environment_variables: 'DEBUG RUSTUP_IO_THREADS'
           shell: bash
-          run: |
-            sudo pkg install -y -f curl node libnghttp2 npm cmake perl5
-            sudo npm install -g yarn --ignore-scripts
-            curl https://sh.rustup.rs -sSf --output rustup.sh
-            sh rustup.sh -y --profile minimal --default-toolchain stable
-            source "$HOME/.cargo/env"
-            echo "~~~~ rustc --version ~~~~"
-            rustc --version
-            echo "~~~~ node -v ~~~~"
-            node -v
-            echo "~~~~ yarn --version ~~~~"
-            yarn --version
-            pwd
-            ls -lah
-            whoami
-            env
-            freebsd-version
-            yarn install
-            yarn build
-            rm -rf node_modules
-            rm -rf target
-            rm -rf .yarn/cache
+      - name: Build
+        id: build
+        shell: cpa.sh {0}
+        env:
+          DEBUG: napi:*
+          RUSTUP_IO_THREADS: 1
+        run: |
+          sudo pkg install -y -f curl node libnghttp2 npm cmake-core perl5
+          sudo npm install -g yarn --ignore-scripts
+          curl https://sh.rustup.rs -sSf --output rustup.sh
+          sh rustup.sh -y --profile minimal --default-toolchain stable
+          source "$HOME/.cargo/env"
+          echo "~~~~ rustc --version ~~~~"
+          rustc --version
+          echo "~~~~ node -v ~~~~"
+          node -v
+          echo "~~~~ yarn --version ~~~~"
+          yarn --version
+          pwd
+          ls -lah
+          whoami
+          env
+          freebsd-version
+          yarn install
+          yarn build
+          rm -rf node_modules
+          rm -rf target
+          rm -rf .yarn/cache
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -305,7 +307,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           cache: yarn
       - name: Install dependencies
         run: yarn install
@@ -371,7 +373,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           cache: yarn
       - run: corepack enable
       - name: Install dependencies
@@ -419,7 +421,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
       # Activate the repo-pinned yarn@4.17.0 (packageManager field) before any
       # yarn call, so install uses Berry, not the runner's global classic yarn.
       - run: corepack enable
