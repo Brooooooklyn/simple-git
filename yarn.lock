@@ -1969,15 +1969,15 @@ __metadata:
     "@types/node": "npm:^26.0.0"
     "@types/react": "npm:^19.0.0"
     "@types/react-dom": "npm:^19.0.0"
-    "@void/md": "npm:1.8.0"
-    "@void/react": "npm:1.8.0"
+    "@void/md": "npm:1.9.0"
+    "@void/react": "npm:1.9.0"
     markdown-it: "npm:^15.0.2"
     react: "npm:^19.2.1"
     react-dom: "npm:^19.2.1"
     tailwindcss: "npm:4.3.5"
     typescript: "npm:^7.0.0"
     vite: "npm:^8.0.0"
-    void: "npm:1.8.0"
+    void: "npm:1.9.0"
   languageName: unknown
   linkType: soft
 
@@ -3222,45 +3222,45 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@void/deploy-cloudflare@npm:1.8.0":
-  version: 1.8.0
-  resolution: "@void/deploy-cloudflare@npm:1.8.0"
+"@void/deploy-cloudflare@npm:1.9.0":
+  version: 1.9.0
+  resolution: "@void/deploy-cloudflare@npm:1.9.0"
   dependencies:
-    "@void/deploy-core": "npm:1.8.0"
+    "@void/deploy-core": "npm:1.9.0"
     jsonc-parser: "npm:^3.3.1"
-  checksum: 10c0/433684e1b2dae40b0d1e0e4f3b57a9940cdc7f67a8a84f8ae76ddddb34a1d84f8b7c4834c3b99b1af318d8bd0d801974bb3daf08825f29125baae384c71d4515
+  checksum: 10c0/a761b36c427136e021042831ccfc29a3f026066c05e8197753fd1d240b480be7f8d610a21c268b38ca2085c8bb13f1c2fab96ef57c898db336fce3ddb715cef4
   languageName: node
   linkType: hard
 
-"@void/deploy-core@npm:1.8.0":
-  version: 1.8.0
-  resolution: "@void/deploy-core@npm:1.8.0"
-  checksum: 10c0/e0f08ae375283b65647f5e4d082c30ff637220e868c45d2382ebb8ba4245a0d7b2ea0be3258e473ed611d60e1fd8554882e8c5616f93813919d57055ca04e415
+"@void/deploy-core@npm:1.9.0":
+  version: 1.9.0
+  resolution: "@void/deploy-core@npm:1.9.0"
+  checksum: 10c0/7e497084e0d7f80deb9b4da881c34250926eb4248c6f3b86bb2baa491fb4716bc8c6ad03e28c5301598d5db314c2fa9c05152a4b45d5c5cfbc42805b294ad9ca
   languageName: node
   linkType: hard
 
-"@void/edge@npm:1.8.0":
-  version: 1.8.0
-  resolution: "@void/edge@npm:1.8.0"
+"@void/edge@npm:1.9.0":
+  version: 1.9.0
+  resolution: "@void/edge@npm:1.9.0"
   dependencies:
-    "@void/deploy-core": "npm:1.8.0"
-  checksum: 10c0/708d1dd1f089faf59f059ce248de624c3a24a6c1dd1ba222d5e65394d88f763b5c42332a9d7eed61c8389f34f61eacee2598401b7e983782b67ee9dbe0ca9016
+    "@void/deploy-core": "npm:1.9.0"
+  checksum: 10c0/21a1752f17cbe6fde2848706621a4b06c3238f34da05fd18d8ed98195169af653dca5338b80d02ceb31627aa23330e6c6338e700b91212a416a2d563c55a7376
   languageName: node
   linkType: hard
 
-"@void/isr@npm:1.8.0":
-  version: 1.8.0
-  resolution: "@void/isr@npm:1.8.0"
+"@void/isr@npm:1.9.0":
+  version: 1.9.0
+  resolution: "@void/isr@npm:1.9.0"
   dependencies:
     "@cloudflare/workers-types": "npm:^5.20261110.1"
-    "@void/edge": "npm:1.8.0"
-  checksum: 10c0/2fe855be89126f8e7c408a92db87ac2968802967776c227b1857f3bf9036d5eb6bcda8650964d04025d67a366e644e889c35d8ccd4a2dfccc7a9f1b8c8cfca7b
+    "@void/edge": "npm:1.9.0"
+  checksum: 10c0/b290b113d478666a5053e8645e56692c7270983d1414dde56de67ba0530ff6060b4eb66097d11e6e4f55f50fc84973ae4af8c666d357031b60599c193a785837
   languageName: node
   linkType: hard
 
-"@void/md@npm:1.8.0":
-  version: 1.8.0
-  resolution: "@void/md@npm:1.8.0"
+"@void/md@npm:1.9.0":
+  version: 1.9.0
+  resolution: "@void/md@npm:1.9.0"
   dependencies:
     "@shikijs/engine-javascript": "npm:^4.6.0"
     "@shikijs/transformers": "npm:^4.6.0"
@@ -3277,31 +3277,31 @@ __metadata:
     tinyglobby: "npm:^0.2.17"
   peerDependencies:
     vite: ^8.0.0
-    void: 1.8.0
-  checksum: 10c0/de23a08fdfe223ff4dfe27ab8dd22603ed761bcfc797d27fa69455e87640829f2c0d949f3e71aae11475bb17789fef7c7bf9f79c5a9f7b2bf7a64323ac96073d
+    void: 1.9.0
+  checksum: 10c0/27d8ed1ba1ea640532c3e827b385d5a1b4f8ac122934b0f1fbf4149da0ca7993ca357b769575c3d6b1aac6ca8d6db8846704e81cdbf0ba8f7e0f501364a01576
   languageName: node
   linkType: hard
 
-"@void/platform@npm:1.8.0":
-  version: 1.8.0
-  resolution: "@void/platform@npm:1.8.0"
+"@void/platform@npm:1.9.0":
+  version: 1.9.0
+  resolution: "@void/platform@npm:1.9.0"
   dependencies:
     pathslash: "npm:^0.1.0"
-  checksum: 10c0/ce1cb29cc060f47f1846cccc086230daf23fe5c0ad94eb07624dfda19f510bb8ce62c97b85c179c8f534cd33ab7fc7504fd9407e6d4e26810aa4c2a53a4123f4
+  checksum: 10c0/ee61f2bb38e926afb977734bd52ddf2347d92b4a6a4debd7dec245aadf8e20b0b22f124a0d4ce4625641668e0e0d211d24d99cf1c1012f67b7f56cf967673940
   languageName: node
   linkType: hard
 
-"@void/react@npm:1.8.0":
-  version: 1.8.0
-  resolution: "@void/react@npm:1.8.0"
+"@void/react@npm:1.9.0":
+  version: 1.9.0
+  resolution: "@void/react@npm:1.9.0"
   dependencies:
     "@vitejs/plugin-react": "npm:^6.3.0"
   peerDependencies:
     react: ^19.0.0
     react-dom: ^19.0.0
     vite: ^8.0.0
-    void: 1.8.0
-  checksum: 10c0/53854ccb234f3753a57972f6158887359a4c23fd9245320c28ceae5d318cc07e2cf356ad180b2639bce50a553d9005a320b012ddadfc45f854c53ae002edfa93
+    void: 1.9.0
+  checksum: 10c0/a9fe279d1b8b85083cd5699b791232609c7084f991b8cdf9655c65c32e5dad736a68240fb5c1068d8da991ee6bc163b25020eadb53aa9b260c4ff436d3e68371
   languageName: node
   linkType: hard
 
@@ -6835,9 +6835,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"void@npm:1.8.0":
-  version: 1.8.0
-  resolution: "void@npm:1.8.0"
+"void@npm:1.9.0":
+  version: 1.9.0
+  resolution: "void@npm:1.9.0"
   dependencies:
     "@cloudflare/build-output-utils": "npm:^0.9.13"
     "@cloudflare/codemods": "npm:^0.7.7"
@@ -6848,11 +6848,11 @@ __metadata:
     "@cloudflare/workers-types": "npm:^5.20261110.1"
     "@cloudflare/workers-utils": "npm:^0.53.1"
     "@napi-rs/keyring": "npm:^2.1.2"
-    "@void/deploy-cloudflare": "npm:1.8.0"
-    "@void/deploy-core": "npm:1.8.0"
-    "@void/edge": "npm:1.8.0"
-    "@void/isr": "npm:1.8.0"
-    "@void/platform": "npm:1.8.0"
+    "@void/deploy-cloudflare": "npm:1.9.0"
+    "@void/deploy-core": "npm:1.9.0"
+    "@void/edge": "npm:1.9.0"
+    "@void/isr": "npm:1.9.0"
+    "@void/platform": "npm:1.9.0"
     better-auth: "npm:^1.7.20"
     better-sqlite3: "npm:^13.0.3"
     blake3-jit: "npm:^1.1.0"
@@ -6880,7 +6880,7 @@ __metadata:
     terminal-link: "npm:^5.0.0"
     yaml: "npm:^2.9.1"
   peerDependencies:
-    "@void/md": 1.8.0
+    "@void/md": 1.9.0
     arktype: ">=2.0.0"
     valibot: ">=1.0.0-beta.7"
     vite: ^8.0.0
@@ -6896,7 +6896,7 @@ __metadata:
       optional: true
   bin:
     void: dist/cli/cli.mjs
-  checksum: 10c0/261df70822dad37c62248ada40a5a21b8b9279a8992d5b04563741bf8f50f26f2ee75ea72cfe33fe340c534a171adbddf75991b113407c1e57708e1e7791baf3
+  checksum: 10c0/70e7fdd046d6f932bfe01a7c301820f4b9ef1103e269434c4ff1fc375aeb723e33dbe96af2adadd754de804ffabe9565194007c30e6fe7ec60c845472ac89f19
   languageName: node
   linkType: hard
 
