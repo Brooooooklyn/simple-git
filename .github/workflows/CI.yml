@@ -173,7 +173,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Start FreeBSD VM
-        uses: cross-platform-actions/action@v1.7.0
+        uses: cross-platform-actions/action@v1.8.0
         with:
           operating_system: freebsd
           version: '14.3'
